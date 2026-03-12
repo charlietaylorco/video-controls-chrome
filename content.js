@@ -378,6 +378,7 @@
   let dragState = null;
   let overlayPositionX = null;
   let overlayPositionY = null;
+  const targetOverlayPositions = new WeakMap();
   const PANEL_MARGIN = 10;
   const VIEWPORT_MARGIN = 8;
   const MIN_MEDIA_WIDTH = 80;
@@ -457,6 +458,18 @@
     activeAnchor = null;
     activeMetadataTarget = null;
     activeMode = "player";
+  };
+
+  const loadOverlayPositionForTarget = (target) => {
+    if (!(target instanceof Element)) {
+      overlayPositionX = null;
+      overlayPositionY = null;
+      return;
+    }
+
+    const savedPosition = targetOverlayPositions.get(target);
+    overlayPositionX = Number.isFinite(savedPosition?.x) ? savedPosition.x : null;
+    overlayPositionY = Number.isFinite(savedPosition?.y) ? savedPosition.y : null;
   };
 
   const getPanelBounds = () => {
@@ -575,6 +588,7 @@
     }
 
     clearHideTimer();
+    loadOverlayPositionForTarget(target);
     activeVideo = video;
     activeTarget = target;
     activeAnchor = anchor || target || video;
@@ -618,6 +632,12 @@
 
     overlayPositionX = maxLeft > 0 ? relativeLeft / maxLeft : 0;
     overlayPositionY = maxTop > 0 ? relativeTop / maxTop : 0;
+    if (activeTarget instanceof Element) {
+      targetOverlayPositions.set(activeTarget, {
+        x: overlayPositionX,
+        y: overlayPositionY
+      });
+    }
     positionPanelWithinAnchor(anchorRect);
   };
 
@@ -1974,11 +1994,6 @@
       const nextVideo = nextContext?.video || null;
       const nextTarget = nextContext?.target || null;
       const nextSource = nextContext?.metadataTarget || nextTarget || nextVideo || null;
-
-      if (activeTarget && nextTarget && activeTarget !== nextTarget) {
-        overlayPositionX = null;
-        overlayPositionY = null;
-      }
 
       if (feedbackTarget && feedbackTarget !== nextSource) {
         clearFeedback();
