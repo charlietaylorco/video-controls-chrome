@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Minimal Video Speed Settings</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0f0f10;
+        --panel: rgba(255, 255, 255, 0.06);
+        --panel-border: rgba(255, 255, 255, 0.12);
+        --text: #f4f0e8;
+        --muted: rgba(244, 240, 232, 0.68);
+        --accent: #f0dbc2;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        padding: 32px;
+        background:
+          radial-gradient(circle at top left, rgba(240, 219, 194, 0.12), transparent 36%),
+          linear-gradient(180deg, #141414, var(--bg));
+        color: var(--text);
+        font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
+      }
+
+      main {
+        max-width: 620px;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: clamp(2rem, 4vw, 3rem);
+        font-weight: 400;
+        letter-spacing: -0.04em;
+      }
+
+      p {
+        margin: 0 0 24px;
+        max-width: 48ch;
+        color: var(--muted);
+        font-size: 1rem;
+        line-height: 1.55;
+      }
+
+      .card {
+        padding: 26px;
+        border: 1px solid var(--panel-border);
+        border-radius: 26px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.04));
+        backdrop-filter: blur(18px);
+        -webkit-backdrop-filter: blur(18px);
+        box-shadow: 0 18px 40px rgba(0, 0, 0, 0.26);
+      }
+
+      label {
+        display: block;
+        margin-bottom: 12px;
+        font-size: 0.82rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      input {
+        width: 100%;
+        min-width: 0;
+        padding: 0 4px;
+        border: 0;
+        background: transparent;
+        color: var(--text);
+        font: inherit;
+        font-size: 1.5rem;
+        text-align: center;
+        letter-spacing: -0.03em;
+        outline: none;
+      }
+
+      input::-webkit-outer-spin-button,
+      input::-webkit-inner-spin-button {
+        margin: 0;
+        -webkit-appearance: none;
+      }
+
+      .control-shell:focus-within {
+        border-color: rgba(240, 219, 194, 0.46);
+        box-shadow: 0 0 0 3px rgba(240, 219, 194, 0.12);
+      }
+
+      .control-row {
+        display: flex;
+        align-items: center;
+      }
+
+      .group + .group {
+        margin-top: 24px;
+        padding-top: 24px;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .control-shell {
+        display: grid;
+        grid-template-columns: 88px minmax(0, 1fr) 52px 88px;
+        align-items: center;
+        min-height: 74px;
+        padding: 6px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 22px;
+        background: rgba(6, 6, 8, 0.62);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+      }
+
+      .stepper {
+        width: 100%;
+        height: 60px;
+        border: 0;
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--text);
+        font: inherit;
+        font-size: 1.05rem;
+        letter-spacing: -0.03em;
+        cursor: pointer;
+        transition:
+          background-color 120ms ease,
+          transform 120ms ease;
+      }
+
+      .stepper:hover {
+        background: rgba(255, 255, 255, 0.1);
+        transform: translateY(-1px);
+      }
+
+      .stepper:focus {
+        outline: none;
+        background: rgba(255, 255, 255, 0.1);
+      }
+
+      .value-wrap {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 0;
+        padding: 0 18px;
+      }
+
+      .suffix {
+        font-size: 1.1rem;
+        color: rgba(244, 240, 232, 0.54);
+        text-align: center;
+      }
+
+      .hint,
+      .status {
+        margin-top: 14px;
+        font-size: 0.95rem;
+      }
+
+      .hint {
+        color: var(--muted);
+        max-width: 50ch;
+        line-height: 1.5;
+      }
+
+      .hint a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+
+      .hint a:hover {
+        text-decoration: underline;
+      }
+
+      .status {
+        min-height: 1.2em;
+        color: var(--accent);
+      }
+
+      .token-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .toggle-list {
+        display: grid;
+        gap: 12px;
+      }
+
+      .toggle-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        min-height: 58px;
+        padding: 0 18px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 18px;
+        background: rgba(6, 6, 8, 0.62);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+      }
+
+      .toggle-copy {
+        display: grid;
+        gap: 4px;
+      }
+
+      .toggle-title {
+        margin: 0;
+        font-size: 1rem;
+        color: var(--text);
+      }
+
+      .toggle-hint {
+        margin: 0;
+        font-size: 0.9rem;
+        color: var(--muted);
+      }
+
+      .toggle-input {
+        width: 52px;
+        height: 32px;
+        margin: 0;
+        accent-color: var(--accent);
+        cursor: pointer;
+      }
+
+      .token-input {
+        min-height: 58px;
+        padding: 0 18px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 18px;
+        background: rgba(6, 6, 8, 0.62);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+        font-size: 1rem;
+        text-align: left;
+        letter-spacing: 0;
+      }
+
+      .token-input:focus {
+        border-color: rgba(240, 219, 194, 0.46);
+        box-shadow: 0 0 0 3px rgba(240, 219, 194, 0.12);
+      }
+
+      .save-button {
+        min-width: 92px;
+        height: 58px;
+        border: 0;
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text);
+        font: inherit;
+        font-size: 0.98rem;
+        cursor: pointer;
+        transition:
+          background-color 120ms ease,
+          transform 120ms ease;
+      }
+
+      .save-button:hover {
+        background: rgba(255, 255, 255, 0.14);
+        transform: translateY(-1px);
+      }
+
+      .save-button:focus {
+        outline: none;
+        box-shadow: 0 0 0 3px rgba(240, 219, 194, 0.12);
+      }
+
+      @media (max-width: 720px) {
+        body {
+          padding: 20px;
+        }
+
+        .card {
+          padding: 20px;
+        }
+
+        .control-shell {
+          grid-template-columns: 72px minmax(0, 1fr) 40px 72px;
+          min-height: 66px;
+          border-radius: 18px;
+        }
+
+        .stepper {
+          height: 54px;
+          border-radius: 14px;
+          font-size: 0.96rem;
+        }
+
+        input {
+          font-size: 1.28rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Playback Settings</h1>
+      <p>
+        Tune how much the overlay buttons move playback speed, and optionally slow videos while they are hovered.
+      </p>
+      <section class="card">
+        <div class="group">
+          <label for="adjustment-step">Overlay step change</label>
+          <div class="control-shell">
+            <button class="stepper" id="decrease-step" type="button" aria-label="Decrease overlay step by 0.25">-0.25</button>
+            <div class="value-wrap">
+              <input id="adjustment-step" type="number" min="0.01" max="16" step="0.01" inputmode="decimal">
+            </div>
+            <div class="suffix">x</div>
+            <button class="stepper" id="increase-step" type="button" aria-label="Increase overlay step by 0.25">+0.25</button>
+          </div>
+          <div class="hint">Each tap of the in-video minus and plus buttons changes speed by this amount.</div>
+        </div>
+        <div class="group">
+          <label for="hover-speed">Slow to this speed on hover</label>
+          <div class="control-shell">
+            <button class="stepper" id="decrease-hover" type="button" aria-label="Decrease hover speed by 0.25">-0.25</button>
+            <div class="value-wrap">
+              <input id="hover-speed" type="number" min="0" max="16" step="0.01" inputmode="decimal">
+            </div>
+            <div class="suffix">x</div>
+            <button class="stepper" id="increase-hover" type="button" aria-label="Increase hover speed by 0.25">+0.25</button>
+          </div>
+          <div class="hint">Temporarily slows the hovered video to this speed. Set it to 0 to turn hover slowdown off.</div>
+        </div>
+        <div class="group">
+          <label>Overlay buttons</label>
+          <div class="toggle-list">
+            <label class="toggle-item" for="show-downie">
+              <span class="toggle-copy">
+                <span class="toggle-title">Show Downie button</span>
+                <span class="toggle-hint">Keeps the download-to-Downie icon in the overlay.</span>
+              </span>
+              <input class="toggle-input" id="show-downie" type="checkbox">
+            </label>
+            <label class="toggle-item" for="show-reader">
+              <span class="toggle-copy">
+                <span class="toggle-title">Show Reader button</span>
+                <span class="toggle-hint">Keeps the save-to-Reader icon in the overlay.</span>
+              </span>
+              <input class="toggle-input" id="show-reader" type="checkbox">
+            </label>
+          </div>
+        </div>
+        <div class="group">
+          <label for="reader-token">Reader API token</label>
+          <div class="token-row">
+            <input class="token-input" id="reader-token" type="password" spellcheck="false" autocomplete="off">
+            <button class="save-button" id="save-token" type="button">Save</button>
+          </div>
+          <div class="hint">Used by the Reader icon in the video overlay to save the current page URL. Get your token from <a href="https://readwise.io/access_token" target="_blank" rel="noreferrer">readwise.io/access_token</a>.</div>
+        </div>
+        <div class="status" id="status" aria-live="polite"></div>
+      </section>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>
