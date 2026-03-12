@@ -14,6 +14,9 @@
   };
   let activeVideo = null;
   let activeTarget = null;
+  let activeAnchor = null;
+  let activeMetadataTarget = null;
+  let activeMode = "player";
   let hoveredVideo = null;
   let hoveredTarget = null;
   let activePanel = false;
@@ -144,10 +147,45 @@
         transform: translate3d(0, 0, 0);
       }
 
+      .panel[data-mode="card"] {
+        padding: 5px;
+        border-radius: 11px;
+      }
+
       .controls {
         display: inline-flex;
         align-items: center;
         gap: 4px;
+      }
+
+      .drag-handle {
+        width: 24px;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.05);
+        color: rgba(245, 241, 232, 0.64);
+        font-size: 10px;
+        letter-spacing: -0.08em;
+        cursor: grab;
+        user-select: none;
+        touch-action: none;
+      }
+
+      .drag-handle:hover {
+        background: rgba(255, 255, 255, 0.12);
+        color: rgba(245, 241, 232, 0.86);
+        transform: none;
+      }
+
+      .drag-handle:active,
+      .drag-handle[data-dragging="true"] {
+        cursor: grabbing;
+        background: rgba(255, 255, 255, 0.16);
+        color: rgba(245, 241, 232, 0.94);
+        transform: none;
+      }
+
+      .panel[data-mode="card"] .controls {
+        gap: 5px;
       }
 
       .feedback {
@@ -261,15 +299,29 @@
         color: #0f0f0f;
       }
 
+      .panel[data-mode="card"] .speed-control {
+        display: none;
+      }
+
+      .panel[data-mode="card"] button {
+        width: 28px;
+        height: 28px;
+      }
+
+      .panel[data-mode="card"] .drag-handle {
+        width: 24px;
+      }
+
     </style>
-    <div class="panel" data-visible="false" aria-hidden="true">
+    <div class="panel" data-visible="false" data-mode="player" aria-hidden="true">
       <div class="controls">
-        <button class="preset" data-rate="1" type="button">1x</button>
-        <button class="preset" data-rate="2" type="button">2x</button>
-        <button class="preset" data-rate="3" type="button">3x</button>
-        <button class="adjust" data-action="decrease" type="button" aria-label="Decrease speed">-</button>
-        <div class="readout" aria-live="polite">1.0x</div>
-        <button class="adjust" data-action="increase" type="button" aria-label="Increase speed">+</button>
+        <button class="drag-handle" type="button" aria-label="Drag controls" title="Drag controls">::</button>
+        <button class="preset speed-control" data-rate="1" type="button">1x</button>
+        <button class="preset speed-control" data-rate="2" type="button">2x</button>
+        <button class="preset speed-control" data-rate="3" type="button">3x</button>
+        <button class="adjust speed-control" data-action="decrease" type="button" aria-label="Decrease speed">-</button>
+        <div class="readout speed-control" aria-live="polite">1.0x</div>
+        <button class="adjust speed-control" data-action="increase" type="button" aria-label="Increase speed">+</button>
         <button class="icon-button" data-action="downie" type="button" aria-label="Open in Downie" title="Open in Downie">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M12 4v9"></path>
@@ -296,11 +348,19 @@
   const feedback = shadowRoot.querySelector(".feedback");
   const feedbackText = shadowRoot.querySelector(".feedback-text");
   const feedbackLink = shadowRoot.querySelector(".feedback-link");
+  const dragHandle = shadowRoot.querySelector(".drag-handle");
   const downieButton = shadowRoot.querySelector('[data-action="downie"]');
   const readerButton = shadowRoot.querySelector('[data-action="reader"]');
   let buttonStatusTimer = 0;
   let feedbackTimer = 0;
   let feedbackTarget = null;
+  let dragState = null;
+  let overlayPositionX = null;
+  let overlayPositionY = null;
+  const PANEL_MARGIN = 10;
+  const VIEWPORT_MARGIN = 8;
+  const MIN_MEDIA_WIDTH = 80;
+  const MIN_MEDIA_HEIGHT = 45;
 
   const clearHideTimer = () => {
     if (hideTimer) {
@@ -364,14 +424,62 @@
     clearHideTimer();
     stopPreview();
     clearFeedback();
+    dragState = null;
+    overlayPositionX = null;
+    overlayPositionY = null;
+    delete dragHandle.dataset.dragging;
     panel.dataset.visible = "false";
+    panel.dataset.mode = "player";
     panel.setAttribute("aria-hidden", "true");
     activeVideo = null;
     activeTarget = null;
+    activeAnchor = null;
+    activeMetadataTarget = null;
+    activeMode = "player";
+  };
+
+  const getPanelBounds = () => {
+    const panelRect = panel.getBoundingClientRect();
+    return {
+      width: panelRect.width || panel.offsetWidth || 0,
+      height: panelRect.height || panel.offsetHeight || 0
+    };
+  };
+
+  const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+  const getRelativePanelOffset = (anchorRect) => {
+    const { width: panelWidth, height: panelHeight } = getPanelBounds();
+    const maxLeft = Math.max(0, anchorRect.width - panelWidth);
+    const maxTop = Math.max(0, anchorRect.height - panelHeight);
+
+    if (Number.isFinite(overlayPositionX) && Number.isFinite(overlayPositionY)) {
+      return {
+        left: clamp(overlayPositionX, 0, 1) * maxLeft,
+        top: clamp(overlayPositionY, 0, 1) * maxTop
+      };
+    }
+
+    return {
+      left: Math.min(PANEL_MARGIN, maxLeft),
+      top: Math.min(PANEL_MARGIN, maxTop)
+    };
+  };
+
+  const positionPanelWithinAnchor = (anchorRect) => {
+    const { width: panelWidth, height: panelHeight } = getPanelBounds();
+    const { left: relativeLeft, top: relativeTop } = getRelativePanelOffset(anchorRect);
+    const minLeft = Math.max(VIEWPORT_MARGIN, anchorRect.left);
+    const minTop = Math.max(VIEWPORT_MARGIN, anchorRect.top);
+    const maxLeft = Math.max(minLeft, Math.min(anchorRect.right - panelWidth, window.innerWidth - panelWidth - VIEWPORT_MARGIN));
+    const maxTop = Math.max(minTop, Math.min(anchorRect.bottom - panelHeight, window.innerHeight - panelHeight - VIEWPORT_MARGIN));
+
+    panel.style.left = `${clamp(anchorRect.left + relativeLeft, minLeft, maxLeft)}px`;
+    panel.style.top = `${clamp(anchorRect.top + relativeTop, minTop, maxTop)}px`;
   };
 
   const syncPanelPosition = () => {
-    const anchor = activeTarget || activeVideo;
+    const anchor = activeAnchor || activeTarget || activeVideo;
 
     if (!anchor || !anchor.isConnected) {
       hidePanel();
@@ -385,8 +493,7 @@
       return;
     }
 
-    panel.style.top = `${Math.max(8, rect.top + 10)}px`;
-    panel.style.left = `${Math.max(8, rect.left + 10)}px`;
+    positionPanelWithinAnchor(rect);
   };
 
   const updateUi = (video) => {
@@ -418,7 +525,26 @@
     readerButton.hidden = !settings.showReader;
   };
 
-  const showPanelForTarget = ({ video, target }) => {
+  const refreshVisiblePanelMode = () => {
+    if (panel.dataset.visible !== "true") {
+      return;
+    }
+
+    panel.dataset.mode = resolvePanelMode(activeMode);
+    syncPanelPosition();
+  };
+
+  const resolvePanelMode = (mode) => {
+    if (mode !== "card") {
+      return "player";
+    }
+
+    return settings.showDownie || settings.showReader ? "card" : "player";
+  };
+
+  const getCurrentContextSource = () => activeMetadataTarget || activeTarget || activeVideo;
+
+  const showPanelForContext = ({ video, target, anchor, metadataTarget, mode }) => {
     if (!target) {
       return;
     }
@@ -430,6 +556,10 @@
     clearHideTimer();
     activeVideo = video;
     activeTarget = target;
+    activeAnchor = anchor || target || video;
+    activeMetadataTarget = metadataTarget || target || video;
+    activeMode = mode === "card" ? "card" : "player";
+    panel.dataset.mode = resolvePanelMode(activeMode);
     updateControlsAvailability(video);
 
     if (video) {
@@ -446,6 +576,44 @@
     panel.setAttribute("aria-hidden", "false");
   };
 
+  const updateDragPosition = (clientX, clientY) => {
+    if (!dragState) {
+      return;
+    }
+
+    const anchor = activeAnchor || activeTarget || activeVideo;
+
+    if (!anchor || !anchor.isConnected) {
+      hidePanel();
+      return;
+    }
+
+    const anchorRect = anchor.getBoundingClientRect();
+    const { width: panelWidth, height: panelHeight } = getPanelBounds();
+    const maxLeft = Math.max(0, anchorRect.width - panelWidth);
+    const maxTop = Math.max(0, anchorRect.height - panelHeight);
+    const relativeLeft = clamp(clientX - dragState.pointerOffsetX - anchorRect.left, 0, maxLeft);
+    const relativeTop = clamp(clientY - dragState.pointerOffsetY - anchorRect.top, 0, maxTop);
+
+    overlayPositionX = maxLeft > 0 ? relativeLeft / maxLeft : 0;
+    overlayPositionY = maxTop > 0 ? relativeTop / maxTop : 0;
+    positionPanelWithinAnchor(anchorRect);
+  };
+
+  const stopDragging = () => {
+    if (!dragState) {
+      return;
+    }
+
+    dragState = null;
+    delete dragHandle.dataset.dragging;
+    activePanel = panel.matches(":hover");
+
+    if (!activePanel) {
+      scheduleHide();
+    }
+  };
+
   const scheduleHide = () => {
     clearHideTimer();
     hideTimer = window.setTimeout(() => {
@@ -453,7 +621,11 @@
         return;
       }
 
-      if (activeTarget?.matches?.(":hover") || activeVideo?.matches?.(":hover")) {
+      if (
+        activeTarget?.matches?.(":hover") ||
+        activeAnchor?.matches?.(":hover") ||
+        activeVideo?.matches?.(":hover")
+      ) {
         return;
       }
 
@@ -518,6 +690,32 @@
     "a[href*='/live/']",
     "a[href*='youtu.be/']"
   ].join(",");
+  const MEDIA_ANCHOR_SELECTORS = [
+    "video",
+    "img",
+    "picture img",
+    "canvas",
+    "a#thumbnail",
+    "ytd-thumbnail",
+    "yt-thumbnail-view-model",
+    '[class*="thumbnail"]',
+    '[class*="Thumbnail"]',
+    '[data-testid*="thumbnail"]'
+  ].join(",");
+  const VIDEO_URL_PATTERN = /(youtu\.be\/|\/watch(?:\?|$)|\/video\/|\/videos\/|\/shorts\/|\/live\/)/i;
+  const CHANNEL_URL_PATTERN = /\/(@|channel\/|c\/|user\/)/i;
+  const METADATA_CONTAINER_SELECTORS = [
+    CARD_CONTAINER_SELECTORS,
+    "article",
+    "li",
+    '[role="article"]',
+    '[class*="card"]',
+    '[class*="Card"]',
+    '[class*="item"]',
+    '[class*="Item"]',
+    '[class*="video"]',
+    '[class*="Video"]'
+  ].join(",");
 
   const getAncestorElements = (node) => {
     const ancestors = [];
@@ -538,38 +736,80 @@
     return ancestors;
   };
 
-  const getTargetCandidatesFromNode = (node) => {
+  const isDailymotionPage = () => {
+    try {
+      const url = new URL(window.location.href);
+      return ["dailymotion.com", "www.dailymotion.com"].includes(url.hostname);
+    } catch {
+      return false;
+    }
+  };
+
+  const isCardHoverEnabledPage = () => isYouTubePage() || isDailymotionPage();
+
+  const isRectVisible = (rect) =>
+    rect.width > 0 &&
+    rect.height > 0 &&
+    rect.right > 0 &&
+    rect.bottom > 0 &&
+    rect.left < window.innerWidth &&
+    rect.top < window.innerHeight;
+
+  const getRectArea = (rect) => rect.width * rect.height;
+  const getDistanceToRect = (rect, clientX, clientY) => {
+    const dx = clientX < rect.left ? rect.left - clientX : clientX > rect.right ? clientX - rect.right : 0;
+    const dy = clientY < rect.top ? rect.top - clientY : clientY > rect.bottom ? clientY - rect.bottom : 0;
+    return Math.hypot(dx, dy);
+  };
+
+  const getCardSourceCandidatesFromNode = (node) => {
+    if (!isCardHoverEnabledPage() || !(node instanceof Element)) {
+      return [];
+    }
+
+    const candidates = [];
+
+    for (const ancestor of getAncestorElements(node).slice(0, 12)) {
+      if (
+        ancestor === document.body ||
+        ancestor === document.documentElement ||
+        ancestor === host
+      ) {
+        continue;
+      }
+
+      candidates.push(ancestor);
+    }
+
+    return candidates;
+  };
+
+  const getYouTubeCardCandidatesFromNode = (node) => {
     if (!isYouTubePage() || !(node instanceof Element)) {
       return [];
     }
 
     const candidates = [];
 
-    for (const ancestor of getAncestorElements(node)) {
+    for (const ancestor of getAncestorElements(node).slice(0, 12)) {
+      if (ancestor === document.body || ancestor === document.documentElement || ancestor === host) {
+        continue;
+      }
+
       if (ancestor.matches?.(CARD_CONTAINER_SELECTORS)) {
-        candidates.push(ancestor);
+        candidates.push({ source: ancestor, priority: 3 });
       }
 
       if (ancestor.matches?.(THUMBNAIL_TARGET_SELECTORS)) {
-        candidates.push(ancestor);
+        candidates.push({ source: ancestor, priority: 2 });
       }
 
       if (ancestor.matches?.(VIDEO_PAGE_SELECTORS.join(","))) {
-        candidates.push(ancestor);
+        candidates.push({ source: ancestor, priority: 1 });
       }
     }
 
     return candidates;
-  };
-
-  const pickClosestElement = (elements, clientX, clientY) => {
-    const containingElements = elements
-      .filter((element) => element?.isConnected)
-      .map((element) => ({ element, rect: element.getBoundingClientRect() }))
-      .filter(({ rect }) => rect.width > 0 && rect.height > 0 && isPointInsideRect(rect, clientX, clientY))
-      .sort((a, b) => a.rect.width * a.rect.height - b.rect.width * b.rect.height);
-
-    return containingElements[0]?.element || null;
   };
 
   const pickClosestVideo = (videos, clientX, clientY) => {
@@ -582,17 +822,312 @@
     return containingVideos[0]?.video || null;
   };
 
+  const collectMediaAnchors = (source) => {
+    if (!(source instanceof Element)) {
+      return [];
+    }
+
+    const candidates = [];
+
+    if (source instanceof HTMLVideoElement || source.matches?.(MEDIA_ANCHOR_SELECTORS)) {
+      candidates.push(source);
+    }
+
+    for (const node of source.querySelectorAll(MEDIA_ANCHOR_SELECTORS)) {
+      candidates.push(node);
+    }
+
+    for (const node of source.shadowRoot?.querySelectorAll?.(MEDIA_ANCHOR_SELECTORS) || []) {
+      candidates.push(node);
+    }
+
+    return Array.from(new Set(candidates));
+  };
+
+  const getAssociatedAnchor = (source) => {
+    if (!(source instanceof Element)) {
+      return null;
+    }
+
+    const anchors = [];
+
+    if (source instanceof HTMLAnchorElement && source.href) {
+      anchors.push(source);
+    }
+
+    for (const anchor of source.querySelectorAll("a[href]")) {
+      anchors.push(anchor);
+    }
+
+    let bestAnchor = null;
+    let bestScore = -Infinity;
+
+    for (const anchor of anchors) {
+      const absoluteUrl = resolveUrl(anchor.href);
+
+      if (
+        !absoluteUrl ||
+        absoluteUrl.startsWith("javascript:") ||
+        absoluteUrl.startsWith("mailto:") ||
+        absoluteUrl.startsWith("tel:")
+      ) {
+        continue;
+      }
+
+      let score = 0;
+
+      if (VIDEO_URL_PATTERN.test(absoluteUrl)) {
+        score += 120;
+      }
+
+      if (CHANNEL_URL_PATTERN.test(absoluteUrl)) {
+        score -= 60;
+      }
+
+      if (anchor.querySelector(MEDIA_ANCHOR_SELECTORS)) {
+        score += 24;
+      }
+
+      const signalText = cleanText(
+        anchor.getAttribute("title") ||
+        anchor.getAttribute("aria-label") ||
+        anchor.textContent
+      );
+
+      if (signalText) {
+        score += 10;
+      }
+
+      const selectorSignal = `${anchor.id} ${anchor.className}`.toLowerCase();
+
+      if (/(thumbnail|video-title|title)/.test(selectorSignal)) {
+        score += 16;
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestAnchor = anchor;
+      }
+    }
+
+    return bestAnchor;
+  };
+
+  const getBestMediaAnchorForSource = (source, directVideo) => {
+    if (!(source instanceof Element)) {
+      return null;
+    }
+
+    const candidates = collectMediaAnchors(source)
+      .filter((candidate) => candidate instanceof Element && source.contains(candidate))
+      .map((candidate) => ({ candidate, rect: candidate.getBoundingClientRect() }))
+      .filter(({ rect }) => isRectVisible(rect) && rect.width >= MIN_MEDIA_WIDTH && rect.height >= MIN_MEDIA_HEIGHT)
+      .sort((a, b) => {
+        const aIsVideo = a.candidate instanceof HTMLVideoElement;
+        const bIsVideo = b.candidate instanceof HTMLVideoElement;
+
+        if (aIsVideo !== bIsVideo) {
+          return aIsVideo ? -1 : 1;
+        }
+
+        const areaDiff = getRectArea(b.rect) - getRectArea(a.rect);
+
+        if (Math.abs(areaDiff) > 1) {
+          return areaDiff;
+        }
+
+        return a.rect.top - b.rect.top;
+      });
+
+    if (
+      directVideo instanceof HTMLVideoElement &&
+      source.contains(directVideo) &&
+      directVideo.isConnected
+    ) {
+      return directVideo;
+    }
+
+    return candidates[0]?.candidate || null;
+  };
+
+  const getVisibleMediaEntries = (source) =>
+    collectMediaAnchors(source)
+      .filter((candidate) => candidate instanceof Element && source.contains(candidate))
+      .map((candidate) => ({ candidate, rect: candidate.getBoundingClientRect() }))
+      .filter(({ rect }) => isRectVisible(rect) && rect.width >= MIN_MEDIA_WIDTH && rect.height >= MIN_MEDIA_HEIGHT);
+
+  const getVideoLinkCount = (source) => {
+    if (!(source instanceof Element)) {
+      return 0;
+    }
+
+    let count = 0;
+
+    for (const anchor of source.querySelectorAll("a[href]")) {
+      const absoluteUrl = resolveUrl(anchor.href);
+
+      if (absoluteUrl && VIDEO_URL_PATTERN.test(absoluteUrl)) {
+        count += 1;
+      }
+    }
+
+    return count;
+  };
+
+  const getMetadataContainerForSource = (source) => {
+    if (!(source instanceof Element)) {
+      return null;
+    }
+
+    const directCardContainer = getVideoCardContainer(source);
+
+    if (directCardContainer) {
+      return directCardContainer;
+    }
+
+    const sourceArea = getRectArea(source.getBoundingClientRect());
+    const viewportArea = window.innerWidth * window.innerHeight;
+
+    for (const ancestor of getAncestorElements(source).slice(1, 10)) {
+      if (
+        ancestor === document.body ||
+        ancestor === document.documentElement ||
+        ancestor === host
+      ) {
+        continue;
+      }
+
+      if (!ancestor.matches?.(METADATA_CONTAINER_SELECTORS)) {
+        continue;
+      }
+
+      const rect = ancestor.getBoundingClientRect();
+      const area = getRectArea(rect);
+
+      if (
+        !isRectVisible(rect) ||
+        area < sourceArea * 1.05 ||
+        area > viewportArea * 0.45
+      ) {
+        continue;
+      }
+
+      return ancestor;
+    }
+
+    return null;
+  };
+
+  const getCardContextFromSource = (source, directVideo, clientX, clientY, options = {}) => {
+    if (!(source instanceof Element)) {
+      return null;
+    }
+
+    const sourceRect = source.getBoundingClientRect();
+    const viewportArea = window.innerWidth * window.innerHeight;
+
+    if (
+      !isPointInsideRect(sourceRect, clientX, clientY) ||
+      !isRectVisible(sourceRect) ||
+      sourceRect.width < MIN_MEDIA_WIDTH ||
+      sourceRect.height < MIN_MEDIA_HEIGHT ||
+      getRectArea(sourceRect) > viewportArea * 0.6
+    ) {
+      return null;
+    }
+
+    const anchor = getBestMediaAnchorForSource(source, directVideo);
+
+    if (!(anchor instanceof Element)) {
+      return null;
+    }
+
+    const anchorRect = anchor.getBoundingClientRect();
+
+    if (
+      !isRectVisible(anchorRect) ||
+      anchorRect.width < MIN_MEDIA_WIDTH ||
+      anchorRect.height < MIN_MEDIA_HEIGHT
+    ) {
+      return null;
+    }
+
+    const sourceArea = getRectArea(sourceRect);
+    const anchorArea = getRectArea(anchorRect);
+    const areaRatio = sourceArea / anchorArea;
+    const metadataTarget = options.metadataTarget || getMetadataContainerForSource(source) || source;
+    const metadataRect = metadataTarget.getBoundingClientRect();
+    const metadataAreaRatio = getRectArea(metadataRect) / anchorArea;
+    const isMediaOnlySource = source === anchor || areaRatio <= 1.05;
+    const strictAreaRatio = options.strictAreaRatio ?? true;
+    const priorityScore = options.priorityScore ?? 0;
+
+    if (
+      metadataAreaRatio <= 1.05 ||
+      metadataAreaRatio > 8.5 ||
+      (strictAreaRatio && areaRatio > 4.2 && metadataTarget === source)
+    ) {
+      return null;
+    }
+
+    const associatedAnchor = getAssociatedAnchor(metadataTarget) || getAssociatedAnchor(source);
+    const associatedUrl = resolveUrl(associatedAnchor?.href);
+    const hasVideoLikeLink = Boolean(associatedUrl && VIDEO_URL_PATTERN.test(associatedUrl));
+    const previewVideo = directVideo instanceof HTMLVideoElement && source.contains(directVideo) ? directVideo : null;
+    const maxLargeMediaCount = options.maxLargeMediaCount ?? (previewVideo ? 4 : 2);
+    const maxVideoLinkCount = options.maxVideoLinkCount ?? (previewVideo ? 6 : 4);
+    const mediaEntries = getVisibleMediaEntries(metadataTarget);
+    const largeMediaCount = mediaEntries.filter(({ rect }) => getRectArea(rect) >= anchorArea * 0.33).length;
+    const videoLinkCount = getVideoLinkCount(metadataTarget);
+    const distanceToAnchor = getDistanceToRect(anchorRect, clientX, clientY);
+
+    if (!previewVideo && !hasVideoLikeLink) {
+      return null;
+    }
+
+    if (largeMediaCount > maxLargeMediaCount || videoLinkCount > maxVideoLinkCount) {
+      return null;
+    }
+
+    if (isMediaOnlySource && metadataTarget === source && !previewVideo) {
+      return null;
+    }
+
+    return {
+      video: previewVideo,
+      target: metadataTarget,
+      anchor,
+      metadataTarget,
+      mode: "card",
+      score:
+        priorityScore +
+        (previewVideo ? 160 : 0) +
+        (hasVideoLikeLink ? 120 : 0) -
+        metadataAreaRatio * 24 -
+        largeMediaCount * 24 -
+        videoLinkCount * 18 -
+        (metadataTarget !== source ? 18 : 0) -
+        distanceToAnchor * 0.12
+    };
+  };
+
   const getHoverContext = (event) => {
     const videoCandidates = new Set();
-    const targetCandidates = new Set();
+    const cardSourceCandidates = new Set();
+    const youtubeCardCandidates = new Map();
 
     for (const node of event.composedPath()) {
       for (const video of getVideosFromNode(node)) {
         videoCandidates.add(video);
       }
 
-      for (const target of getTargetCandidatesFromNode(node)) {
-        targetCandidates.add(target);
+      for (const candidate of getYouTubeCardCandidatesFromNode(node)) {
+        const currentPriority = youtubeCardCandidates.get(candidate.source) || 0;
+        youtubeCardCandidates.set(candidate.source, Math.max(currentPriority, candidate.priority));
+      }
+
+      for (const source of getCardSourceCandidatesFromNode(node)) {
+        cardSourceCandidates.add(source);
       }
     }
 
@@ -601,19 +1136,70 @@
         videoCandidates.add(video);
       }
 
-      for (const target of getTargetCandidatesFromNode(node)) {
-        targetCandidates.add(target);
+      for (const candidate of getYouTubeCardCandidatesFromNode(node)) {
+        const currentPriority = youtubeCardCandidates.get(candidate.source) || 0;
+        youtubeCardCandidates.set(candidate.source, Math.max(currentPriority, candidate.priority));
+      }
+
+      for (const source of getCardSourceCandidatesFromNode(node)) {
+        cardSourceCandidates.add(source);
       }
     }
 
     const video = pickClosestVideo(Array.from(videoCandidates), event.clientX, event.clientY);
-    const target = pickClosestElement(Array.from(targetCandidates), event.clientX, event.clientY) || video;
+    const youtubeCardContext = Array.from(youtubeCardCandidates.entries())
+      .map(([source, priority]) =>
+        getCardContextFromSource(source, video, event.clientX, event.clientY, {
+          metadataTarget: getVideoCardContainer(source) || getMetadataContainerForSource(source) || source,
+          strictAreaRatio: false,
+          maxLargeMediaCount: 6,
+          maxVideoLinkCount: 8,
+          priorityScore: priority * 100
+        })
+      )
+      .filter(Boolean)
+      .sort((a, b) => {
+        if (b.score !== a.score) {
+          return b.score - a.score;
+        }
 
-    if (!video && !target) {
+        const aRect = a.target.getBoundingClientRect();
+        const bRect = b.target.getBoundingClientRect();
+        return getRectArea(aRect) - getRectArea(bRect);
+      })[0];
+
+    if (youtubeCardContext) {
+      return youtubeCardContext;
+    }
+
+    const genericCardContext = Array.from(cardSourceCandidates)
+      .map((source) => getCardContextFromSource(source, video, event.clientX, event.clientY))
+      .filter(Boolean)
+      .sort((a, b) => {
+        if (b.score !== a.score) {
+          return b.score - a.score;
+        }
+
+        const aRect = a.target.getBoundingClientRect();
+        const bRect = b.target.getBoundingClientRect();
+        return getRectArea(aRect) - getRectArea(bRect);
+      })[0];
+
+    if (genericCardContext) {
+      return genericCardContext;
+    }
+
+    if (!video) {
       return null;
     }
 
-    return { video, target: target || video };
+    return {
+      video,
+      target: video,
+      anchor: video,
+      metadataTarget: video,
+      mode: "player"
+    };
   };
 
   const isCurrentPageVideoUrl = () => {
@@ -715,7 +1301,7 @@
 
   const showFeedback = (kind, message, linkUrl = null, linkLabel = "Open") => {
     window.clearTimeout(feedbackTimer);
-    feedbackTarget = activeTarget;
+    feedbackTarget = getCurrentContextSource();
     feedbackText.textContent = message;
     feedback.dataset.kind = kind;
     feedback.dataset.visible = "true";
@@ -860,6 +1446,16 @@
           }
         }
       }
+
+      const containerAnchor = getAssociatedAnchor(container);
+
+      if (containerAnchor instanceof HTMLAnchorElement) {
+        const absoluteUrl = resolveUrl(containerAnchor.href);
+
+        if (absoluteUrl) {
+          return absoluteUrl;
+        }
+      }
     }
 
     for (let node = source; node && node !== document.body; node = node.parentElement) {
@@ -882,6 +1478,16 @@
           }
         }
       }
+
+      const associatedAnchor = getAssociatedAnchor(node);
+
+      if (associatedAnchor instanceof HTMLAnchorElement) {
+        const absoluteUrl = resolveUrl(associatedAnchor.href);
+
+        if (absoluteUrl) {
+          return absoluteUrl;
+        }
+      }
     }
 
     const fallbackAnchor = source.closest("a[href]");
@@ -895,6 +1501,54 @@
 
     const normalized = value.replace(/\s+/g, " ").trim();
     return normalized || null;
+  };
+
+  const YOUTUBE_UI_TEXT = new Set([
+    "share link",
+    "share",
+    "save",
+    "clip",
+    "download",
+    "open app",
+    "watch later",
+    "more actions",
+    "show more",
+    "show less",
+    "play all",
+    "queue",
+    "menu"
+  ]);
+
+  const cleanTitle = (value) => {
+    const normalized = cleanText(value);
+
+    if (!normalized) {
+      return null;
+    }
+
+    const lower = normalized.toLowerCase();
+
+    if (YOUTUBE_UI_TEXT.has(lower)) {
+      return null;
+    }
+
+    return normalized;
+  };
+
+  const extractTitleFromLabel = (value) => {
+    const normalized = cleanTitle(value);
+
+    if (!normalized) {
+      return null;
+    }
+
+    const byMatch = normalized.match(/^(.+?)\s+by\s+.+$/i);
+
+    if (byMatch?.[1]) {
+      return cleanTitle(byMatch[1]);
+    }
+
+    return normalized;
   };
 
   const cleanAuthor = (value) => {
@@ -957,23 +1611,57 @@
         "h1.ytd-watch-metadata yt-formatted-string",
         "h1.title yt-formatted-string",
         "meta[property='og:title']"
-      ]);
+      ], cleanTitle);
     }
 
     const container = getVideoCardContainer(source);
 
     if (container) {
-      return pickTextFromSelectors(container, [
+      const primaryTitle = pickTextFromSelectors(container, [
         "#video-title",
         "#video-title-link",
         "a[href*='/watch?'][title]",
-        "a[aria-label*=' by ']",
         "a#thumbnail[title]",
-        "meta[property='og:title']"
-      ]);
+        "h3 a[href*='/watch?']",
+        "h3",
+        "h2"
+      ], cleanTitle);
+
+      if (primaryTitle) {
+        return primaryTitle;
+      }
+
+      const labelTitle = pickTextFromSelectors(container, [
+        "a[href*='/watch?'][aria-label]",
+        "a#thumbnail[aria-label]",
+        "a[aria-label*=' by ']"
+      ], extractTitleFromLabel);
+
+      if (labelTitle) {
+        return labelTitle;
+      }
+
+      const containerTitle = pickTextFromSelectors(container, [
+        "meta[property='og:title']",
+        "a[title]",
+        "img[alt]",
+      ], cleanTitle);
+
+      if (containerTitle) {
+        return containerTitle;
+      }
     }
 
-    return null;
+    return pickTextFromSelectors(source, [
+      "#video-title",
+      "#video-title-link",
+      "a[href*='/watch?'][title]",
+      "a[href*='/watch?'][aria-label]",
+      "a[title]",
+      "img[alt]",
+      "h3",
+      "h2"
+    ], (value) => extractTitleFromLabel(value) || cleanTitle(value));
   };
 
   const getAssociatedAuthor = (source) => {
@@ -1060,7 +1748,21 @@
       );
     }
 
-    return null;
+    return pickTextFromSelectors(
+      source,
+      [
+        "[class*='channel']",
+        "[class*='Channel']",
+        "[class*='author']",
+        "[class*='Author']",
+        "[class*='byline']",
+        "[class*='Byline']",
+        "[data-testid*='channel']",
+        "[data-testid*='author']",
+        "a[rel='author']"
+      ],
+      cleanAuthor
+    );
   };
 
   shadowRoot.addEventListener("click", safeEventHandler(async (event) => {
@@ -1098,17 +1800,16 @@
     }
 
     if (action === "downie") {
-      const source = activeTarget || activeVideo;
+      const source = getCurrentContextSource();
       const { response, error } = await sendRuntimeMessage({
         type: "open-in-downie",
         videoUrl: getDirectVideoUrl(activeVideo),
         pageUrl: getAssociatedPageUrl(source)
       });
 
-      setButtonStatus(button, response?.ok && !error ? "success" : "error");
-      const feedbackState = getDownieFeedback(response, error);
-
-      if (activeTarget === source) {
+      if (getCurrentContextSource() === source) {
+        setButtonStatus(button, response?.ok && !error ? "success" : "error");
+        const feedbackState = getDownieFeedback(response, error);
         showFeedback(feedbackState.kind, feedbackState.message);
       }
 
@@ -1116,7 +1817,7 @@
     }
 
     if (action === "reader") {
-      const source = activeTarget || activeVideo;
+      const source = getCurrentContextSource();
       const pageUrl = getAssociatedPageUrl(source);
       const title = getAssociatedTitle(source);
       const author = getAssociatedAuthor(source);
@@ -1131,10 +1832,9 @@
         void sendRuntimeMessage({ type: "open-options" });
       }
 
-      setButtonStatus(button, response?.ok && !error ? "success" : "error");
-      const feedbackState = getReaderFeedback(response, error);
-
-      if (activeTarget === source) {
+      if (getCurrentContextSource() === source) {
+        setButtonStatus(button, response?.ok && !error ? "success" : "error");
+        const feedbackState = getReaderFeedback(response, error);
         showFeedback(
           feedbackState.kind,
           feedbackState.message,
@@ -1165,9 +1865,56 @@
     scheduleHide();
   });
 
+  dragHandle.addEventListener("pointerdown", safeEventHandler((event) => {
+    if (!(activeAnchor || activeTarget)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const panelRect = panel.getBoundingClientRect();
+    dragState = {
+      pointerId: event.pointerId,
+      pointerOffsetX: event.clientX - panelRect.left,
+      pointerOffsetY: event.clientY - panelRect.top
+    };
+    dragHandle.dataset.dragging = "true";
+    activePanel = true;
+    clearHideTimer();
+  }));
+
+  window.addEventListener("pointermove", safeEventHandler((event) => {
+    if (!dragState || event.pointerId !== dragState.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    updateDragPosition(event.clientX, event.clientY);
+  }), true);
+
+  const handleDragStop = (event) => {
+    if (!dragState || event.pointerId !== dragState.pointerId) {
+      return;
+    }
+
+    stopDragging();
+  };
+
+  window.addEventListener("pointerup", handleDragStop, true);
+  window.addEventListener("pointercancel", () => {
+    stopDragging();
+  }, true);
+
   document.addEventListener(
     "pointermove",
     safeEventHandler((event) => {
+      if (dragState) {
+        activePanel = true;
+        clearHideTimer();
+        return;
+      }
+
       const inPanel = event.composedPath().includes(panel);
 
       if (inPanel) {
@@ -1181,8 +1928,14 @@
       const nextContext = getHoverContext(event);
       const nextVideo = nextContext?.video || null;
       const nextTarget = nextContext?.target || null;
+      const nextSource = nextContext?.metadataTarget || nextTarget || nextVideo || null;
 
-      if (feedbackTarget && feedbackTarget !== nextTarget) {
+      if (activeTarget && nextTarget && activeTarget !== nextTarget) {
+        overlayPositionX = null;
+        overlayPositionY = null;
+      }
+
+      if (feedbackTarget && feedbackTarget !== nextSource) {
         clearFeedback();
       }
 
@@ -1191,7 +1944,7 @@
       }
 
       hoveredVideo = nextVideo;
-      hoveredTarget = nextTarget;
+      hoveredTarget = nextSource;
 
       if (!nextTarget) {
         stopPreview();
@@ -1208,10 +1961,14 @@
         return;
       }
 
-      showPanelForTarget(nextContext);
+      showPanelForContext(nextContext);
 
-      if (!activePanel && nextVideo) {
-        startPreview(nextVideo);
+      if (!activePanel) {
+        if (nextVideo) {
+          startPreview(nextVideo);
+        } else {
+          stopPreview();
+        }
       }
     }),
     true
@@ -1260,13 +2017,19 @@
         settings.showDownie = result.showDownie !== false;
         settings.showReader = result.showReader !== false;
         updateIntegrationVisibility();
+        refreshVisiblePanelMode();
       }
     );
 
     storageApi.onChanged?.addListener((changes, areaName) => {
       if (
         areaName !== "local" ||
-        (!changes.hoverSpeed && !changes.adjustmentStep && !changes.showDownie && !changes.showReader)
+        (
+          !changes.hoverSpeed &&
+          !changes.adjustmentStep &&
+          !changes.showDownie &&
+          !changes.showReader
+        )
       ) {
         return;
       }
@@ -1289,6 +2052,7 @@
       }
 
       updateIntegrationVisibility();
+      refreshVisiblePanelMode();
 
       if (settings.hoverSpeed === 0) {
         stopPreview();
