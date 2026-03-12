@@ -211,6 +211,10 @@
         color: #ffd6d6;
       }
 
+      .feedback[data-kind="pending"] {
+        color: rgba(245, 241, 232, 0.82);
+      }
+
       .feedback-link {
         color: inherit;
         text-decoration: underline;
@@ -254,6 +258,23 @@
       .icon-button[data-status="error"] {
         background: rgba(255, 148, 148, 0.18);
         color: #ffd6d6;
+      }
+
+      .icon-button[data-status="loading"] {
+        background: rgba(245, 241, 232, 0.14);
+        color: #f5f1e8;
+        animation: reader-pulse 850ms ease-in-out infinite;
+      }
+
+      @keyframes reader-pulse {
+        0%,
+        100% {
+          opacity: 0.72;
+        }
+
+        50% {
+          opacity: 1;
+        }
       }
 
       button {
@@ -1299,6 +1320,16 @@
     }, 1400);
   };
 
+  const setButtonLoading = (button) => {
+    window.clearTimeout(buttonStatusTimer);
+    button.dataset.status = "loading";
+  };
+
+  const clearButtonStatus = (button) => {
+    window.clearTimeout(buttonStatusTimer);
+    delete button.dataset.status;
+  };
+
   const showFeedback = (kind, message, linkUrl = null, linkLabel = "Open") => {
     window.clearTimeout(feedbackTimer);
     feedbackTarget = getCurrentContextSource();
@@ -1328,6 +1359,16 @@
     feedbackLink.hidden = true;
     feedbackLink.removeAttribute("href");
     delete feedback.dataset.kind;
+  };
+
+  const showPendingFeedback = (message) => {
+    window.clearTimeout(feedbackTimer);
+    feedbackTarget = getCurrentContextSource();
+    feedbackText.textContent = message;
+    feedback.dataset.kind = "pending";
+    feedback.dataset.visible = "true";
+    feedbackLink.hidden = true;
+    feedbackLink.removeAttribute("href");
   };
 
   const getDownieFeedback = (response, error) => {
@@ -1821,6 +1862,8 @@
       const pageUrl = getAssociatedPageUrl(source);
       const title = getAssociatedTitle(source);
       const author = getAssociatedAuthor(source);
+      setButtonLoading(button);
+      showPendingFeedback("Saving to Reader...");
       const { response, error } = await sendRuntimeMessage({
         type: "save-to-reader",
         pageUrl,
@@ -1840,6 +1883,8 @@
           feedbackState.message,
           feedbackState.linkUrl
         );
+      } else {
+        clearButtonStatus(button);
       }
 
       return;
