@@ -33,6 +33,7 @@
   const storageApi = extensionApi?.storage ?? null;
   const RATE_PRECISION = 2;
   const RATE_EPSILON = 0.005;
+  const HOST_Z_INDEX = "1000";
 
   const roundRate = (value) => {
     const factor = 10 ** RATE_PRECISION;
@@ -99,7 +100,7 @@
   Object.assign(host.style, {
     position: "fixed",
     inset: "0",
-    zIndex: "2147483647",
+    zIndex: HOST_Z_INDEX,
     pointerEvents: "none"
   });
   document.documentElement.appendChild(host);
