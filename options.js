@@ -7,6 +7,7 @@ const decreaseStepButton = document.getElementById("decrease-step");
 const increaseStepButton = document.getElementById("increase-step");
 const decreaseOverlayIdleHideDelayButton = document.getElementById("decrease-overlay-idle-hide-delay");
 const increaseOverlayIdleHideDelayButton = document.getElementById("increase-overlay-idle-hide-delay");
+const showHoverSlowZoneHintInput = document.getElementById("show-hover-slow-zone-hint");
 const showDownieInput = document.getElementById("show-downie");
 const showReaderInput = document.getElementById("show-reader");
 const readerTokenInput = document.getElementById("reader-token");
@@ -15,6 +16,7 @@ const status = document.getElementById("status");
 const DEFAULT_HOVER_SPEED = 1;
 const DEFAULT_ADJUSTMENT_STEP = 0.1;
 const DEFAULT_OVERLAY_IDLE_HIDE_DELAY = 2;
+const DEFAULT_SHOW_HOVER_SLOW_ZONE_HINT = false;
 const DEFAULT_SHOW_DOWNIE = true;
 const DEFAULT_SHOW_READER = true;
 const MIN_HOVER_SPEED = 0;
@@ -119,14 +121,16 @@ chrome.storage.local.get(
     hoverSpeed: DEFAULT_HOVER_SPEED,
     adjustmentStep: DEFAULT_ADJUSTMENT_STEP,
     overlayIdleHideDelay: DEFAULT_OVERLAY_IDLE_HIDE_DELAY,
+    showHoverSlowZoneHint: DEFAULT_SHOW_HOVER_SLOW_ZONE_HINT,
     showDownie: DEFAULT_SHOW_DOWNIE,
     showReader: DEFAULT_SHOW_READER,
     readerToken: ""
   },
-  ({ hoverSpeed, adjustmentStep, overlayIdleHideDelay, showDownie, showReader, readerToken }) => {
+  ({ hoverSpeed, adjustmentStep, overlayIdleHideDelay, showHoverSlowZoneHint, showDownie, showReader, readerToken }) => {
     syncInput(hoverSpeedInput, normalizeHoverSpeed(Number(hoverSpeed)));
     syncInput(adjustmentStepInput, normalizeAdjustmentStep(Number(adjustmentStep)));
     syncInput(overlayIdleHideDelayInput, normalizeOverlayIdleHideDelay(Number(overlayIdleHideDelay)));
+    showHoverSlowZoneHintInput.checked = showHoverSlowZoneHint !== false;
     showDownieInput.checked = showDownie !== false;
     showReaderInput.checked = showReader !== false;
     readerTokenInput.value = readerToken;
@@ -179,6 +183,14 @@ decreaseOverlayIdleHideDelayButton.addEventListener("click", () => {
 
 increaseOverlayIdleHideDelayButton.addEventListener("click", () => {
   saveOverlayIdleHideDelay(Number(overlayIdleHideDelayInput.value) + STEP);
+});
+
+showHoverSlowZoneHintInput.addEventListener("change", () => {
+  saveToggle(
+    "showHoverSlowZoneHint",
+    showHoverSlowZoneHintInput.checked,
+    showHoverSlowZoneHintInput.checked ? "Slow-hover hint shown" : "Slow-hover hint hidden"
+  );
 });
 
 showDownieInput.addEventListener("change", () => {

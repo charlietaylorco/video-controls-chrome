@@ -10,6 +10,7 @@
     hoverSpeed: 1,
     adjustmentStep: 0.1,
     overlayIdleHideDelay: 2,
+    showHoverSlowZoneHint: false,
     showDownie: true,
     showReader: true
   };
@@ -25,6 +26,7 @@
   let isApplyingRate = false;
   let hideTimer = 0;
   let idleHideTimer = 0;
+  let hintedVideo = null;
   let previewVideo = null;
   const extensionApi =
     typeof chrome !== "undefined"
@@ -178,6 +180,38 @@
         transition:
           opacity 180ms ease,
           transform 180ms ease,
+          visibility 0s linear 0s;
+      }
+
+      .hover-zone-hint {
+        position: fixed;
+        left: 0;
+        top: 0;
+        box-sizing: border-box;
+        pointer-events: none;
+        border: 1px solid rgba(255, 255, 255, 0.09);
+        border-radius: 14px;
+        background:
+          linear-gradient(
+            180deg,
+            rgba(255, 255, 255, 0.07),
+            rgba(255, 255, 255, 0.03)
+          );
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.04),
+          0 0 0 1px rgba(255, 255, 255, 0.015);
+        visibility: hidden;
+        opacity: 0;
+        transition:
+          opacity 220ms ease,
+          visibility 0s linear 220ms;
+      }
+
+      .hover-zone-hint[data-visible="true"] {
+        visibility: visible;
+        opacity: 1;
+        transition:
+          opacity 220ms ease,
           visibility 0s linear 0s;
       }
 
@@ -368,6 +402,7 @@
       }
 
     </style>
+    <div class="hover-zone-hint" data-visible="false" aria-hidden="true"></div>
     <div class="panel" data-visible="false" data-mode="player" aria-hidden="true">
       <div class="controls">
         <button class="drag-handle" type="button" aria-label="Drag controls" title="Drag controls">::</button>
@@ -398,6 +433,7 @@
   `;
 
   const panel = shadowRoot.querySelector(".panel");
+  const hoverZoneHint = shadowRoot.querySelector(".hover-zone-hint");
   const presetButtons = Array.from(shadowRoot.querySelectorAll(".preset"));
   const readout = shadowRoot.querySelector(".readout");
   const feedback = shadowRoot.querySelector(".feedback");
@@ -486,6 +522,9 @@
   const hidePanel = () => {
     clearHideTimer();
     clearIdleHideTimer();
+    hintedVideo = null;
+    hoverZoneHint.dataset.visible = "false";
+    hoverZoneHint.setAttribute("aria-hidden", "true");
     stopPreview();
     clearFeedback();
     dragState = null;
@@ -524,6 +563,66 @@
 
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
+  const hideHoverZoneHint = () => {
+    hintedVideo = null;
+    hoverZoneHint.dataset.visible = "false";
+    hoverZoneHint.setAttribute("aria-hidden", "true");
+  };
+
+  const updateHoverZoneHintPosition = () => {
+    if (!(hintedVideo instanceof HTMLVideoElement) || !hintedVideo.isConnected) {
+      hideHoverZoneHint();
+      return;
+    }
+
+    const rect = hintedVideo.getBoundingClientRect();
+
+    if (
+      !isRectVisible(rect) ||
+      rect.width < MIN_MEDIA_WIDTH ||
+      rect.height < MIN_MEDIA_HEIGHT
+    ) {
+      hideHoverZoneHint();
+      return;
+    }
+
+    const hintRect = getCenteredWidthRect(rect);
+    hoverZoneHint.style.left = `${hintRect.left}px`;
+    hoverZoneHint.style.top = `${hintRect.top}px`;
+    hoverZoneHint.style.width = `${Math.max(0, hintRect.right - hintRect.left)}px`;
+    hoverZoneHint.style.height = `${Math.max(0, hintRect.bottom - hintRect.top)}px`;
+  };
+
+  const showHoverZoneHint = (video) => {
+    if (!(video instanceof HTMLVideoElement)) {
+      hideHoverZoneHint();
+      return;
+    }
+
+    hintedVideo = video;
+    updateHoverZoneHintPosition();
+
+    if (hintedVideo === video) {
+      hoverZoneHint.dataset.visible = "true";
+      hoverZoneHint.setAttribute("aria-hidden", "false");
+    }
+  };
+
+  const refreshHoverZoneHint = () => {
+    if (
+      !settings.showHoverSlowZoneHint ||
+      settings.hoverSpeed === 0 ||
+      dragState ||
+      panel.dataset.visible !== "true" ||
+      !(hoveredVideo instanceof HTMLVideoElement)
+    ) {
+      hideHoverZoneHint();
+      return;
+    }
+
+    showHoverZoneHint(hoveredVideo);
+  };
+
   const getRelativePanelOffset = (anchorRect) => {
     const { width: panelWidth, height: panelHeight } = getPanelBounds();
     const maxLeft = Math.max(0, anchorRect.width - panelWidth);
@@ -556,6 +655,7 @@
 
   const syncPanelPosition = () => {
     ensureHostMountTarget();
+    updateHoverZoneHintPosition();
 
     const anchor = activeAnchor || activeTarget || activeVideo;
 
@@ -632,6 +732,7 @@
     }
 
     clearHideTimer();
+    hideHoverZoneHint();
     loadOverlayPositionForTarget(target);
     activeVideo = video;
     activeTarget = target;
@@ -653,6 +754,7 @@
     syncPanelPosition();
     panel.dataset.visible = "true";
     panel.setAttribute("aria-hidden", "false");
+    refreshHoverZoneHint();
   };
 
   const updateDragPosition = (clientX, clientY) => {
@@ -730,6 +832,7 @@
     clearFeedback();
     panel.dataset.visible = "false";
     panel.setAttribute("aria-hidden", "true");
+    hideHoverZoneHint();
   };
 
   const scheduleIdleHide = () => {
@@ -2035,6 +2138,7 @@
     activePanel = true;
     clearHideTimer();
     clearIdleHideTimer();
+    hideHoverZoneHint();
     stopPreview();
   });
 
@@ -2071,6 +2175,7 @@
 
     event.preventDefault();
     clearIdleHideTimer();
+    hideHoverZoneHint();
     updateDragPosition(event.clientX, event.clientY);
   }), true);
 
@@ -2094,6 +2199,7 @@
         activePanel = true;
         clearHideTimer();
         clearIdleHideTimer();
+        hideHoverZoneHint();
         return;
       }
 
@@ -2103,6 +2209,7 @@
         activePanel = true;
         clearHideTimer();
         clearIdleHideTimer();
+        hideHoverZoneHint();
         return;
       }
 
@@ -2127,12 +2234,14 @@
       hoveredPreviewEligible = nextPreviewEligible;
 
       if (!nextTarget) {
+        hideHoverZoneHint();
         stopPreview();
         scheduleHide();
         return;
       }
 
       if (nextVideo && getState(nextVideo).closed) {
+        hideHoverZoneHint();
         stopPreview();
         if (activeVideo === nextVideo) {
           hidePanel();
@@ -2163,6 +2272,7 @@
       hoveredPreviewEligible = false;
       activePanel = false;
       clearIdleHideTimer();
+      hideHoverZoneHint();
       stopPreview();
       scheduleHide();
     },
@@ -2191,6 +2301,7 @@
         hoverSpeed: settings.hoverSpeed,
         adjustmentStep: settings.adjustmentStep,
         overlayIdleHideDelay: settings.overlayIdleHideDelay,
+        showHoverSlowZoneHint: settings.showHoverSlowZoneHint,
         showDownie: settings.showDownie,
         showReader: settings.showReader
       },
@@ -2199,10 +2310,12 @@
         settings.hoverSpeed = Number.isFinite(nextValue) && nextValue >= 0 ? nextValue : settings.hoverSpeed;
         settings.adjustmentStep = normalizeAdjustmentStep(Number(result.adjustmentStep));
         settings.overlayIdleHideDelay = normalizeOverlayIdleHideDelay(Number(result.overlayIdleHideDelay));
+        settings.showHoverSlowZoneHint = result.showHoverSlowZoneHint !== false;
         settings.showDownie = result.showDownie !== false;
         settings.showReader = result.showReader !== false;
         updateIntegrationVisibility();
         refreshVisiblePanelMode();
+        refreshHoverZoneHint();
       }
     );
 
@@ -2213,6 +2326,7 @@
           !changes.hoverSpeed &&
           !changes.adjustmentStep &&
           !changes.overlayIdleHideDelay &&
+          !changes.showHoverSlowZoneHint &&
           !changes.showDownie &&
           !changes.showReader
         )
@@ -2231,6 +2345,10 @@
 
       if (changes.overlayIdleHideDelay) {
         settings.overlayIdleHideDelay = normalizeOverlayIdleHideDelay(Number(changes.overlayIdleHideDelay.newValue));
+      }
+
+      if (changes.showHoverSlowZoneHint) {
+        settings.showHoverSlowZoneHint = changes.showHoverSlowZoneHint.newValue !== false;
       }
 
       if (changes.showDownie) {
@@ -2253,6 +2371,7 @@
       }
 
       scheduleIdleHide();
+      refreshHoverZoneHint();
     });
   }
 
