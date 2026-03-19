@@ -331,7 +331,19 @@
             <div class="suffix">x</div>
             <button class="stepper" id="increase-hover" type="button" aria-label="Increase hover speed by 0.25">+0.25</button>
           </div>
-          <div class="hint">Temporarily slows the hovered video to this speed. Set it to 0 to turn hover slowdown off.</div>
+          <div class="hint">Temporarily slows the video when your pointer is within the center 40% of its width. Set it to 0 to turn hover slowdown off.</div>
+        </div>
+        <div class="group">
+          <label for="overlay-idle-hide-delay">Hide overlay after idle</label>
+          <div class="control-shell">
+            <button class="stepper" id="decrease-overlay-idle-hide-delay" type="button" aria-label="Decrease overlay idle hide delay by 0.25 seconds">-0.25</button>
+            <div class="value-wrap">
+              <input id="overlay-idle-hide-delay" type="number" min="0" max="60" step="0.01" inputmode="decimal">
+            </div>
+            <div class="suffix">s</div>
+            <button class="stepper" id="increase-overlay-idle-hide-delay" type="button" aria-label="Increase overlay idle hide delay by 0.25 seconds">+0.25</button>
+          </div>
+          <div class="hint">Hides the overlay after this many seconds without mouse movement over a video. Move the mouse to show it again. Set it to 0 to keep it visible.</div>
         </div>
         <div class="group">
           <label>Overlay buttons</label>
