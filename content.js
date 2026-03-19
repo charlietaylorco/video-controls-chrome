@@ -19,6 +19,7 @@
   let activeMode = "player";
   let hoveredVideo = null;
   let hoveredTarget = null;
+  let hoveredPreviewEligible = false;
   let activePanel = false;
   let isApplyingRate = false;
   let hideTimer = 0;
@@ -34,6 +35,7 @@
   const RATE_PRECISION = 2;
   const RATE_EPSILON = 0.005;
   const HOST_Z_INDEX = "1000";
+  const HOVER_PREVIEW_CENTER_WIDTH_RATIO = 0.4;
 
   const roundRate = (value) => {
     const factor = 10 ** RATE_PRECISION;
@@ -103,7 +105,22 @@
     zIndex: HOST_Z_INDEX,
     pointerEvents: "none"
   });
-  document.documentElement.appendChild(host);
+
+  const getFullscreenElement = () =>
+    document.fullscreenElement instanceof Element ? document.fullscreenElement : null;
+
+  // Fullscreen only renders the fullscreen subtree, so the overlay has to live there.
+  const ensureHostMountTarget = () => {
+    const mountTarget = getFullscreenElement() || document.documentElement;
+
+    if (!(mountTarget instanceof Element) || host.parentElement === mountTarget) {
+      return;
+    }
+
+    mountTarget.appendChild(host);
+  };
+
+  ensureHostMountTarget();
 
   const shadowRoot = host.attachShadow({ mode: "open" });
   shadowRoot.innerHTML = `
@@ -514,6 +531,8 @@
   };
 
   const syncPanelPosition = () => {
+    ensureHostMountTarget();
+
     const anchor = activeAnchor || activeTarget || activeVideo;
 
     if (!anchor || !anchor.isConnected) {
@@ -691,6 +710,36 @@
     clientX <= rect.right &&
     clientY >= rect.top &&
     clientY <= rect.bottom;
+
+  const getCenteredWidthRect = (rect, ratio = HOVER_PREVIEW_CENTER_WIDTH_RATIO) => {
+    const width = rect.width * ratio;
+    const left = rect.left + (rect.width - width) / 2;
+
+    return {
+      left,
+      top: rect.top,
+      right: left + width,
+      bottom: rect.bottom
+    };
+  };
+
+  const isPointInsidePreviewZone = (video, clientX, clientY) => {
+    if (!(video instanceof HTMLVideoElement)) {
+      return false;
+    }
+
+    const rect = video.getBoundingClientRect();
+
+    if (
+      !isRectVisible(rect) ||
+      rect.width < MIN_MEDIA_WIDTH ||
+      rect.height < MIN_MEDIA_HEIGHT
+    ) {
+      return false;
+    }
+
+    return isPointInsideRect(getCenteredWidthRect(rect), clientX, clientY);
+  };
 
   const getVideosFromNode = (node) => {
     if (!node) {
@@ -1995,6 +2044,7 @@
       const nextVideo = nextContext?.video || null;
       const nextTarget = nextContext?.target || null;
       const nextSource = nextContext?.metadataTarget || nextTarget || nextVideo || null;
+      const nextPreviewEligible = isPointInsidePreviewZone(nextVideo, event.clientX, event.clientY);
 
       if (feedbackTarget && feedbackTarget !== nextSource) {
         clearFeedback();
@@ -2006,6 +2056,7 @@
 
       hoveredVideo = nextVideo;
       hoveredTarget = nextSource;
+      hoveredPreviewEligible = nextPreviewEligible;
 
       if (!nextTarget) {
         stopPreview();
@@ -2025,7 +2076,7 @@
       showPanelForContext(nextContext);
 
       if (!activePanel) {
-        if (nextVideo) {
+        if (nextVideo && nextPreviewEligible) {
           startPreview(nextVideo);
         } else {
           stopPreview();
@@ -2040,6 +2091,7 @@
     () => {
       hoveredVideo = null;
       hoveredTarget = null;
+      hoveredPreviewEligible = false;
       activePanel = false;
       stopPreview();
       scheduleHide();
@@ -2117,8 +2169,10 @@
 
       if (settings.hoverSpeed === 0) {
         stopPreview();
-      } else if (hoveredVideo && !activePanel) {
+      } else if (hoveredVideo && hoveredPreviewEligible && !activePanel) {
         startPreview(hoveredVideo);
+      } else {
+        stopPreview();
       }
     });
   }
