@@ -1,9 +1,12 @@
 const hoverSpeedInput = document.getElementById("hover-speed");
 const adjustmentStepInput = document.getElementById("adjustment-step");
+const overlayIdleHideDelayInput = document.getElementById("overlay-idle-hide-delay");
 const decreaseHoverButton = document.getElementById("decrease-hover");
 const increaseHoverButton = document.getElementById("increase-hover");
 const decreaseStepButton = document.getElementById("decrease-step");
 const increaseStepButton = document.getElementById("increase-step");
+const decreaseOverlayIdleHideDelayButton = document.getElementById("decrease-overlay-idle-hide-delay");
+const increaseOverlayIdleHideDelayButton = document.getElementById("increase-overlay-idle-hide-delay");
 const showDownieInput = document.getElementById("show-downie");
 const showReaderInput = document.getElementById("show-reader");
 const readerTokenInput = document.getElementById("reader-token");
@@ -11,12 +14,15 @@ const saveTokenButton = document.getElementById("save-token");
 const status = document.getElementById("status");
 const DEFAULT_HOVER_SPEED = 1;
 const DEFAULT_ADJUSTMENT_STEP = 0.1;
+const DEFAULT_OVERLAY_IDLE_HIDE_DELAY = 2;
 const DEFAULT_SHOW_DOWNIE = true;
 const DEFAULT_SHOW_READER = true;
 const MIN_HOVER_SPEED = 0;
 const MIN_ADJUSTMENT_STEP = 0.01;
+const MIN_OVERLAY_IDLE_HIDE_DELAY = 0;
 const MAX_HOVER_SPEED = 16;
 const MAX_ADJUSTMENT_STEP = 16;
+const MAX_OVERLAY_IDLE_HIDE_DELAY = 60;
 const PRECISION = 2;
 const STEP = 0.25;
 
@@ -53,6 +59,19 @@ const normalizeAdjustmentStep = (value) => {
   return clampAdjustmentStep(value);
 };
 
+const clampOverlayIdleHideDelay = (value) => {
+  const rounded = roundToPrecision(value);
+  return Math.min(MAX_OVERLAY_IDLE_HIDE_DELAY, Math.max(MIN_OVERLAY_IDLE_HIDE_DELAY, rounded));
+};
+
+const normalizeOverlayIdleHideDelay = (value) => {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_OVERLAY_IDLE_HIDE_DELAY;
+  }
+
+  return clampOverlayIdleHideDelay(value);
+};
+
 const showStatus = (message) => {
   status.textContent = message;
   window.clearTimeout(showStatus.timeoutId);
@@ -81,6 +100,14 @@ const saveAdjustmentStep = (value) => {
   });
 };
 
+const saveOverlayIdleHideDelay = (value) => {
+  const nextValue = normalizeOverlayIdleHideDelay(value);
+  chrome.storage.local.set({ overlayIdleHideDelay: nextValue }, () => {
+    syncInput(overlayIdleHideDelayInput, nextValue);
+    showStatus(nextValue === 0 ? "Overlay idle hide off" : "Overlay timeout saved");
+  });
+};
+
 const saveToggle = (key, value, message) => {
   chrome.storage.local.set({ [key]: value }, () => {
     showStatus(message);
@@ -91,13 +118,15 @@ chrome.storage.local.get(
   {
     hoverSpeed: DEFAULT_HOVER_SPEED,
     adjustmentStep: DEFAULT_ADJUSTMENT_STEP,
+    overlayIdleHideDelay: DEFAULT_OVERLAY_IDLE_HIDE_DELAY,
     showDownie: DEFAULT_SHOW_DOWNIE,
     showReader: DEFAULT_SHOW_READER,
     readerToken: ""
   },
-  ({ hoverSpeed, adjustmentStep, showDownie, showReader, readerToken }) => {
+  ({ hoverSpeed, adjustmentStep, overlayIdleHideDelay, showDownie, showReader, readerToken }) => {
     syncInput(hoverSpeedInput, normalizeHoverSpeed(Number(hoverSpeed)));
     syncInput(adjustmentStepInput, normalizeAdjustmentStep(Number(adjustmentStep)));
+    syncInput(overlayIdleHideDelayInput, normalizeOverlayIdleHideDelay(Number(overlayIdleHideDelay)));
     showDownieInput.checked = showDownie !== false;
     showReaderInput.checked = showReader !== false;
     readerTokenInput.value = readerToken;
@@ -112,12 +141,20 @@ adjustmentStepInput.addEventListener("change", () => {
   saveAdjustmentStep(Number(adjustmentStepInput.value));
 });
 
+overlayIdleHideDelayInput.addEventListener("change", () => {
+  saveOverlayIdleHideDelay(Number(overlayIdleHideDelayInput.value));
+});
+
 hoverSpeedInput.addEventListener("blur", () => {
   syncInput(hoverSpeedInput, normalizeHoverSpeed(Number(hoverSpeedInput.value)));
 });
 
 adjustmentStepInput.addEventListener("blur", () => {
   syncInput(adjustmentStepInput, normalizeAdjustmentStep(Number(adjustmentStepInput.value)));
+});
+
+overlayIdleHideDelayInput.addEventListener("blur", () => {
+  syncInput(overlayIdleHideDelayInput, normalizeOverlayIdleHideDelay(Number(overlayIdleHideDelayInput.value)));
 });
 
 decreaseHoverButton.addEventListener("click", () => {
@@ -134,6 +171,14 @@ decreaseStepButton.addEventListener("click", () => {
 
 increaseStepButton.addEventListener("click", () => {
   saveAdjustmentStep(Number(adjustmentStepInput.value) + STEP);
+});
+
+decreaseOverlayIdleHideDelayButton.addEventListener("click", () => {
+  saveOverlayIdleHideDelay(Number(overlayIdleHideDelayInput.value) - STEP);
+});
+
+increaseOverlayIdleHideDelayButton.addEventListener("click", () => {
+  saveOverlayIdleHideDelay(Number(overlayIdleHideDelayInput.value) + STEP);
 });
 
 showDownieInput.addEventListener("change", () => {

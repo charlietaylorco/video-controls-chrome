@@ -9,6 +9,7 @@
   const settings = {
     hoverSpeed: 1,
     adjustmentStep: 0.1,
+    overlayIdleHideDelay: 2,
     showDownie: true,
     showReader: true
   };
@@ -23,6 +24,7 @@
   let activePanel = false;
   let isApplyingRate = false;
   let hideTimer = 0;
+  let idleHideTimer = 0;
   let previewVideo = null;
   const extensionApi =
     typeof chrome !== "undefined"
@@ -80,6 +82,15 @@
 
     const rounded = roundRate(value);
     return Math.min(16, Math.max(0.01, rounded));
+  };
+
+  const normalizeOverlayIdleHideDelay = (value) => {
+    if (!Number.isFinite(value)) {
+      return settings.overlayIdleHideDelay;
+    }
+
+    const rounded = roundRate(value);
+    return Math.min(60, Math.max(0, rounded));
   };
 
   const getState = (video) => {
@@ -154,8 +165,9 @@
         opacity: 0;
         transform: translate3d(0, -6px, 0);
         transition:
-          opacity 120ms ease,
-          transform 120ms ease;
+          opacity 180ms ease,
+          transform 180ms ease,
+          visibility 0s linear 180ms;
       }
 
       .panel[data-visible="true"] {
@@ -163,6 +175,10 @@
         visibility: visible;
         opacity: 1;
         transform: translate3d(0, 0, 0);
+        transition:
+          opacity 180ms ease,
+          transform 180ms ease,
+          visibility 0s linear 0s;
       }
 
       .panel[data-mode="card"] {
@@ -409,6 +425,13 @@
     }
   };
 
+  const clearIdleHideTimer = () => {
+    if (idleHideTimer) {
+      window.clearTimeout(idleHideTimer);
+      idleHideTimer = 0;
+    }
+  };
+
   const getBaseRate = (video) => {
     const state = getState(video);
     return Number.isFinite(state.baseRate) ? state.baseRate : clampRate(video.playbackRate || 1);
@@ -462,6 +485,7 @@
 
   const hidePanel = () => {
     clearHideTimer();
+    clearIdleHideTimer();
     stopPreview();
     clearFeedback();
     dragState = null;
@@ -672,11 +696,13 @@
 
     if (!activePanel) {
       scheduleHide();
+      scheduleIdleHide();
     }
   };
 
   const scheduleHide = () => {
     clearHideTimer();
+    clearIdleHideTimer();
     hideTimer = window.setTimeout(() => {
       if (activePanel) {
         return;
@@ -692,6 +718,42 @@
 
       hidePanel();
     }, 80);
+  };
+
+  const hidePanelForIdle = () => {
+    clearIdleHideTimer();
+
+    if (panel.dataset.visible !== "true") {
+      return;
+    }
+
+    clearFeedback();
+    panel.dataset.visible = "false";
+    panel.setAttribute("aria-hidden", "true");
+  };
+
+  const scheduleIdleHide = () => {
+    clearIdleHideTimer();
+
+    const delayMs = normalizeOverlayIdleHideDelay(settings.overlayIdleHideDelay) * 1000;
+
+    if (
+      delayMs <= 0 ||
+      activePanel ||
+      dragState ||
+      panel.dataset.visible !== "true" ||
+      !(hoveredTarget || hoveredVideo)
+    ) {
+      return;
+    }
+
+    idleHideTimer = window.setTimeout(() => {
+      if (activePanel || dragState) {
+        return;
+      }
+
+      hidePanelForIdle();
+    }, delayMs);
   };
 
   const applyRate = (video, nextRate) => {
@@ -1972,12 +2034,14 @@
   panel.addEventListener("pointerenter", () => {
     activePanel = true;
     clearHideTimer();
+    clearIdleHideTimer();
     stopPreview();
   });
 
   panel.addEventListener("pointerleave", () => {
     activePanel = false;
     scheduleHide();
+    scheduleIdleHide();
   });
 
   dragHandle.addEventListener("pointerdown", safeEventHandler((event) => {
@@ -1997,6 +2061,7 @@
     dragHandle.dataset.dragging = "true";
     activePanel = true;
     clearHideTimer();
+    clearIdleHideTimer();
   }));
 
   window.addEventListener("pointermove", safeEventHandler((event) => {
@@ -2005,6 +2070,7 @@
     }
 
     event.preventDefault();
+    clearIdleHideTimer();
     updateDragPosition(event.clientX, event.clientY);
   }), true);
 
@@ -2027,6 +2093,7 @@
       if (dragState) {
         activePanel = true;
         clearHideTimer();
+        clearIdleHideTimer();
         return;
       }
 
@@ -2035,6 +2102,7 @@
       if (inPanel) {
         activePanel = true;
         clearHideTimer();
+        clearIdleHideTimer();
         return;
       }
 
@@ -2074,6 +2142,7 @@
       }
 
       showPanelForContext(nextContext);
+      scheduleIdleHide();
 
       if (!activePanel) {
         if (nextVideo && nextPreviewEligible) {
@@ -2093,6 +2162,7 @@
       hoveredTarget = null;
       hoveredPreviewEligible = false;
       activePanel = false;
+      clearIdleHideTimer();
       stopPreview();
       scheduleHide();
     },
@@ -2120,6 +2190,7 @@
       {
         hoverSpeed: settings.hoverSpeed,
         adjustmentStep: settings.adjustmentStep,
+        overlayIdleHideDelay: settings.overlayIdleHideDelay,
         showDownie: settings.showDownie,
         showReader: settings.showReader
       },
@@ -2127,6 +2198,7 @@
         const nextValue = Number(result.hoverSpeed);
         settings.hoverSpeed = Number.isFinite(nextValue) && nextValue >= 0 ? nextValue : settings.hoverSpeed;
         settings.adjustmentStep = normalizeAdjustmentStep(Number(result.adjustmentStep));
+        settings.overlayIdleHideDelay = normalizeOverlayIdleHideDelay(Number(result.overlayIdleHideDelay));
         settings.showDownie = result.showDownie !== false;
         settings.showReader = result.showReader !== false;
         updateIntegrationVisibility();
@@ -2140,6 +2212,7 @@
         (
           !changes.hoverSpeed &&
           !changes.adjustmentStep &&
+          !changes.overlayIdleHideDelay &&
           !changes.showDownie &&
           !changes.showReader
         )
@@ -2154,6 +2227,10 @@
 
       if (changes.adjustmentStep) {
         settings.adjustmentStep = normalizeAdjustmentStep(Number(changes.adjustmentStep.newValue));
+      }
+
+      if (changes.overlayIdleHideDelay) {
+        settings.overlayIdleHideDelay = normalizeOverlayIdleHideDelay(Number(changes.overlayIdleHideDelay.newValue));
       }
 
       if (changes.showDownie) {
@@ -2174,6 +2251,8 @@
       } else {
         stopPreview();
       }
+
+      scheduleIdleHide();
     });
   }
 
