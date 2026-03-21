@@ -9,6 +9,7 @@ Minimal Chrome extension that injects a compact hover-only speed controller into
 - `-` decreases playback speed by the configured overlay step for that specific video
 - `1x`, `2x`, `3x` jump that video to preset speeds
 - `+` increases playback speed by the configured overlay step for that specific video
+- The picture-in-picture button toggles PiP for that specific video when the site allows it
 - The speed readout shows the current saved speed for that video
 - The download icon opens the current video or page in Downie when possible
 
@@ -24,6 +25,7 @@ Minimal Chrome extension that injects a compact hover-only speed controller into
 ## Embeds
 
 - The content script runs in all frames, including related `about:`, `blob:`, and embedded iframe contexts, so embedded players get their own overlay too
+- Picture-in-picture availability still depends on the browser API and the site or embed permissions policy, so some videos may not expose the PiP button
 - The Reader icon saves the top-level page URL, while the Downie icon prefers the direct video URL when one is available
 
 ## Load In Chrome
