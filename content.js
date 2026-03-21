@@ -334,6 +334,11 @@
         animation: reader-pulse 850ms ease-in-out infinite;
       }
 
+      .icon-button[data-active="true"] {
+        background: #f5f1e8;
+        color: #0f0f0f;
+      }
+
       @keyframes reader-pulse {
         0%,
         100% {
@@ -412,6 +417,12 @@
         <button class="adjust speed-control" data-action="decrease" type="button" aria-label="Decrease speed">-</button>
         <div class="readout speed-control" aria-live="polite">1.0x</div>
         <button class="adjust speed-control" data-action="increase" type="button" aria-label="Increase speed">+</button>
+        <button class="icon-button" data-action="pip" type="button" aria-label="Enter picture-in-picture" title="Enter picture-in-picture">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="3.5" y="5.5" width="17" height="13" rx="2"></rect>
+            <path d="M12.5 12.5h5v4h-5z"></path>
+          </svg>
+        </button>
         <button class="icon-button" data-action="downie" type="button" aria-label="Open in Downie" title="Open in Downie">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M12 4v9"></path>
@@ -440,6 +451,7 @@
   const feedbackText = shadowRoot.querySelector(".feedback-text");
   const feedbackLink = shadowRoot.querySelector(".feedback-link");
   const dragHandle = shadowRoot.querySelector(".drag-handle");
+  const pipButton = shadowRoot.querySelector('[data-action="pip"]');
   const downieButton = shadowRoot.querySelector('[data-action="downie"]');
   const readerButton = shadowRoot.querySelector('[data-action="reader"]');
   let buttonStatusTimer = 0;
@@ -686,6 +698,14 @@
       const presetRate = Number(button.dataset.rate);
       button.dataset.active = String(Math.abs(currentRate - presetRate) < RATE_EPSILON);
     });
+
+    const isActivePictureInPicture = document.pictureInPictureElement === video;
+    pipButton.dataset.active = String(isActivePictureInPicture);
+    const pipLabel = isActivePictureInPicture
+      ? "Exit picture-in-picture"
+      : "Enter picture-in-picture";
+    pipButton.title = pipLabel;
+    pipButton.setAttribute("aria-label", pipLabel);
   };
 
   const updateControlsAvailability = (video) => {
@@ -695,7 +715,17 @@
       button.disabled = !isInteractive;
     }
 
+    pipButton.disabled = !canTogglePictureInPicture(video);
     readout.style.opacity = isInteractive ? "1" : "0.7";
+  };
+
+  const updatePictureInPictureVisibility = () => {
+    const isAvailable =
+      typeof document.pictureInPictureEnabled === "boolean" &&
+      typeof document.exitPictureInPicture === "function" &&
+      (document.pictureInPictureEnabled || document.pictureInPictureElement instanceof HTMLVideoElement);
+
+    pipButton.hidden = !isAvailable;
   };
 
   const updateIntegrationVisibility = () => {
@@ -749,6 +779,9 @@
       presetButtons.forEach((button) => {
         button.dataset.active = "false";
       });
+      pipButton.dataset.active = "false";
+      pipButton.title = "Enter picture-in-picture";
+      pipButton.setAttribute("aria-label", "Enter picture-in-picture");
     }
 
     syncPanelPosition();
@@ -1663,6 +1696,61 @@
     return /^https?:\/\//i.test(candidate) ? candidate : null;
   };
 
+  const canTogglePictureInPicture = (video) =>
+    video instanceof HTMLVideoElement &&
+    typeof document.pictureInPictureEnabled === "boolean" &&
+    typeof document.exitPictureInPicture === "function" &&
+    typeof video.requestPictureInPicture === "function" &&
+    (document.pictureInPictureEnabled || document.pictureInPictureElement === video) &&
+    !video.disablePictureInPicture;
+
+  const getPictureInPictureFailureMessage = (error) => {
+    switch (error?.name) {
+      case "NotAllowedError":
+        return "Picture-in-picture was blocked";
+      case "NotSupportedError":
+        return "Picture-in-picture isn't available here";
+      case "InvalidStateError":
+        return "Video isn't ready for picture-in-picture";
+      default:
+        return "Picture-in-picture failed";
+    }
+  };
+
+  const togglePictureInPicture = async (video) => {
+    if (!canTogglePictureInPicture(video)) {
+      return {
+        ok: false,
+        kind: "error",
+        message: "Picture-in-picture isn't available here"
+      };
+    }
+
+    try {
+      if (document.pictureInPictureElement === video) {
+        await document.exitPictureInPicture();
+        return {
+          ok: true,
+          kind: "success",
+          message: "Picture-in-picture off"
+        };
+      }
+
+      await video.requestPictureInPicture();
+      return {
+        ok: true,
+        kind: "success",
+        message: "Picture-in-picture on"
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        kind: "error",
+        message: getPictureInPictureFailureMessage(error)
+      };
+    }
+  };
+
   const VIDEO_PAGE_SELECTORS = [
     'a#thumbnail[href*="/watch?"]',
     'a#video-title-link[href*="/watch?"]',
@@ -2092,6 +2180,29 @@
       return;
     }
 
+    if (action === "pip") {
+      if (!activeVideo) {
+        return;
+      }
+
+      const source = getCurrentContextSource();
+      const result = await togglePictureInPicture(activeVideo);
+
+      if (getCurrentContextSource() === source) {
+        if (!result.ok) {
+          setButtonStatus(button, "error");
+        } else {
+          clearButtonStatus(button);
+        }
+
+        updateUi(activeVideo);
+        updateControlsAvailability(activeVideo);
+        showFeedback(result.kind, result.message);
+      }
+
+      return;
+    }
+
     if (action === "reader") {
       const source = getCurrentContextSource();
       const pageUrl = getAssociatedPageUrl(source);
@@ -2295,6 +2406,28 @@
     true
   );
 
+  document.addEventListener(
+    "enterpictureinpicture",
+    (event) => {
+      if (event.target === activeVideo) {
+        updateUi(activeVideo);
+        updateControlsAvailability(activeVideo);
+      }
+    },
+    true
+  );
+
+  document.addEventListener(
+    "leavepictureinpicture",
+    (event) => {
+      if (event.target === activeVideo) {
+        updateUi(activeVideo);
+        updateControlsAvailability(activeVideo);
+      }
+    },
+    true
+  );
+
   if (storageApi?.local) {
     storageApi.local.get(
       {
@@ -2313,6 +2446,7 @@
         settings.showHoverSlowZoneHint = result.showHoverSlowZoneHint !== false;
         settings.showDownie = result.showDownie !== false;
         settings.showReader = result.showReader !== false;
+        updatePictureInPictureVisibility();
         updateIntegrationVisibility();
         refreshVisiblePanelMode();
         refreshHoverZoneHint();
@@ -2359,6 +2493,7 @@
         settings.showReader = changes.showReader.newValue !== false;
       }
 
+      updatePictureInPictureVisibility();
       updateIntegrationVisibility();
       refreshVisiblePanelMode();
 
@@ -2375,6 +2510,7 @@
     });
   }
 
+  updatePictureInPictureVisibility();
   window.addEventListener("scroll", syncPanelPosition, true);
   window.addEventListener("resize", syncPanelPosition);
   document.addEventListener("fullscreenchange", syncPanelPosition);
