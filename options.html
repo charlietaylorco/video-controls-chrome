@@ -169,6 +169,82 @@
         line-height: 1.5;
       }
 
+      .hover-band-list {
+        display: grid;
+        gap: 16px;
+      }
+
+      .hover-band-summary {
+        margin: 0 0 16px;
+        padding: 14px 16px;
+        border: 1px solid rgba(240, 219, 194, 0.16);
+        border-radius: 18px;
+        background:
+          linear-gradient(180deg, rgba(240, 219, 194, 0.08), rgba(240, 219, 194, 0.03));
+        color: var(--text);
+        line-height: 1.5;
+      }
+
+      .hover-band-summary-title {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 0.74rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .hover-band-summary-value {
+        margin: 0;
+        font-size: 0.98rem;
+      }
+
+      .hover-band {
+        padding: 18px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 20px;
+        background: rgba(6, 6, 8, 0.42);
+      }
+
+      .hover-band-title {
+        margin: 0;
+        font-size: 1rem;
+        color: var(--text);
+        letter-spacing: -0.02em;
+      }
+
+      .hover-band-copy {
+        margin: 8px 0 14px;
+        color: var(--muted);
+        font-size: 0.95rem;
+        line-height: 1.45;
+      }
+
+      .hover-band-controls {
+        display: grid;
+        gap: 12px;
+      }
+
+      .band-control label {
+        margin-bottom: 8px;
+        font-size: 0.72rem;
+      }
+
+      .control-shell.compact {
+        grid-template-columns: 64px minmax(0, 1fr) 44px 64px;
+        min-height: 62px;
+      }
+
+      .control-shell.compact .stepper {
+        height: 50px;
+        border-radius: 14px;
+        font-size: 0.95rem;
+      }
+
+      .control-shell.compact input {
+        font-size: 1.22rem;
+      }
+
       .hint a {
         color: var(--accent);
         text-decoration: none;
@@ -296,6 +372,15 @@
           font-size: 0.96rem;
         }
 
+        .control-shell.compact {
+          grid-template-columns: 56px minmax(0, 1fr) 38px 56px;
+        }
+
+        .control-shell.compact .stepper {
+          height: 46px;
+          font-size: 0.9rem;
+        }
+
         input {
           font-size: 1.28rem;
         }
@@ -312,36 +397,118 @@
         <div class="group">
           <label for="adjustment-step">Overlay step change</label>
           <div class="control-shell">
-            <button class="stepper" id="decrease-step" type="button" aria-label="Decrease overlay step by 0.25">-0.25</button>
+            <button class="stepper" data-setting="adjustmentStep" data-delta="-0.25" type="button" aria-label="Decrease overlay step by 0.25">-0.25</button>
             <div class="value-wrap">
               <input id="adjustment-step" type="number" min="0.01" max="16" step="0.01" inputmode="decimal">
             </div>
             <div class="suffix">x</div>
-            <button class="stepper" id="increase-step" type="button" aria-label="Increase overlay step by 0.25">+0.25</button>
+            <button class="stepper" data-setting="adjustmentStep" data-delta="0.25" type="button" aria-label="Increase overlay step by 0.25">+0.25</button>
           </div>
           <div class="hint">Each tap of the in-video minus and plus buttons changes speed by this amount.</div>
         </div>
         <div class="group">
-          <label for="hover-speed">Slow to this speed on hover</label>
-          <div class="control-shell">
-            <button class="stepper" id="decrease-hover" type="button" aria-label="Decrease hover speed by 0.25">-0.25</button>
-            <div class="value-wrap">
-              <input id="hover-speed" type="number" min="0" max="16" step="0.01" inputmode="decimal">
-            </div>
-            <div class="suffix">x</div>
-            <button class="stepper" id="increase-hover" type="button" aria-label="Increase hover speed by 0.25">+0.25</button>
+          <label>Hover preview bands</label>
+          <div class="hover-band-summary" aria-live="polite">
+            <span class="hover-band-summary-title">Effective layout</span>
+            <p class="hover-band-summary-value" id="hover-band-summary"></p>
           </div>
-          <div class="hint">Temporarily slows the video when your pointer is within the center 40% of its width. Set it to 0 to turn hover slowdown off.</div>
+          <div class="hover-band-list">
+            <article class="hover-band">
+              <h2 class="hover-band-title">Center band</h2>
+              <div class="hover-band-copy">The middle of the video. Default: 20% total width at 1x.</div>
+              <div class="hover-band-controls">
+                <div class="band-control">
+                  <label for="hover-center-width">Total width</label>
+                  <div class="control-shell compact">
+                    <button class="stepper" data-setting="hoverCenterWidthPercent" data-delta="-1" type="button" aria-label="Decrease center hover width by 1 percent">-1</button>
+                    <div class="value-wrap">
+                      <input id="hover-center-width" type="number" min="0" max="100" step="0.01" inputmode="decimal">
+                    </div>
+                    <div class="suffix">%</div>
+                    <button class="stepper" data-setting="hoverCenterWidthPercent" data-delta="1" type="button" aria-label="Increase center hover width by 1 percent">+1</button>
+                  </div>
+                </div>
+                <div class="band-control">
+                  <label for="hover-center-speed">Speed</label>
+                  <div class="control-shell compact">
+                    <button class="stepper" data-setting="hoverCenterSpeed" data-delta="-0.25" type="button" aria-label="Decrease center hover speed by 0.25">-0.25</button>
+                    <div class="value-wrap">
+                      <input id="hover-center-speed" type="number" min="0" max="16" step="0.01" inputmode="decimal">
+                    </div>
+                    <div class="suffix">x</div>
+                    <button class="stepper" data-setting="hoverCenterSpeed" data-delta="0.25" type="button" aria-label="Increase center hover speed by 0.25">+0.25</button>
+                  </div>
+                </div>
+              </div>
+            </article>
+            <article class="hover-band">
+              <h2 class="hover-band-title">Middle band</h2>
+              <div class="hover-band-copy">Extends equally on both sides of the center band. Default: 10% per side at 1.5x.</div>
+              <div class="hover-band-controls">
+                <div class="band-control">
+                  <label for="hover-middle-width">Width per side</label>
+                  <div class="control-shell compact">
+                    <button class="stepper" data-setting="hoverMiddleWidthPercent" data-delta="-1" type="button" aria-label="Decrease middle hover width by 1 percent">-1</button>
+                    <div class="value-wrap">
+                      <input id="hover-middle-width" type="number" min="0" max="100" step="0.01" inputmode="decimal">
+                    </div>
+                    <div class="suffix">%</div>
+                    <button class="stepper" data-setting="hoverMiddleWidthPercent" data-delta="1" type="button" aria-label="Increase middle hover width by 1 percent">+1</button>
+                  </div>
+                </div>
+                <div class="band-control">
+                  <label for="hover-middle-speed">Speed</label>
+                  <div class="control-shell compact">
+                    <button class="stepper" data-setting="hoverMiddleSpeed" data-delta="-0.25" type="button" aria-label="Decrease middle hover speed by 0.25">-0.25</button>
+                    <div class="value-wrap">
+                      <input id="hover-middle-speed" type="number" min="0" max="16" step="0.01" inputmode="decimal">
+                    </div>
+                    <div class="suffix">x</div>
+                    <button class="stepper" data-setting="hoverMiddleSpeed" data-delta="0.25" type="button" aria-label="Increase middle hover speed by 0.25">+0.25</button>
+                  </div>
+                </div>
+              </div>
+            </article>
+            <article class="hover-band">
+              <h2 class="hover-band-title">Outer band</h2>
+              <div class="hover-band-copy">Extends equally on both sides of the middle band. Default: 10% per side at 2x.</div>
+              <div class="hover-band-controls">
+                <div class="band-control">
+                  <label for="hover-outer-width">Width per side</label>
+                  <div class="control-shell compact">
+                    <button class="stepper" data-setting="hoverOuterWidthPercent" data-delta="-1" type="button" aria-label="Decrease outer hover width by 1 percent">-1</button>
+                    <div class="value-wrap">
+                      <input id="hover-outer-width" type="number" min="0" max="100" step="0.01" inputmode="decimal">
+                    </div>
+                    <div class="suffix">%</div>
+                    <button class="stepper" data-setting="hoverOuterWidthPercent" data-delta="1" type="button" aria-label="Increase outer hover width by 1 percent">+1</button>
+                  </div>
+                </div>
+                <div class="band-control">
+                  <label for="hover-outer-speed">Speed</label>
+                  <div class="control-shell compact">
+                    <button class="stepper" data-setting="hoverOuterSpeed" data-delta="-0.25" type="button" aria-label="Decrease outer hover speed by 0.25">-0.25</button>
+                    <div class="value-wrap">
+                      <input id="hover-outer-speed" type="number" min="0" max="16" step="0.01" inputmode="decimal">
+                    </div>
+                    <div class="suffix">x</div>
+                    <button class="stepper" data-setting="hoverOuterSpeed" data-delta="0.25" type="button" aria-label="Increase outer hover speed by 0.25">+0.25</button>
+                  </div>
+                </div>
+              </div>
+            </article>
+          </div>
+          <div class="hint">The center width is the full middle band. The middle and outer widths are added on each side of the previous band. Set a width or speed to 0 to disable that band. Hovering outside these bands uses the video’s normal saved speed.</div>
         </div>
         <div class="group">
           <label for="overlay-idle-hide-delay">Hide overlay after idle</label>
           <div class="control-shell">
-            <button class="stepper" id="decrease-overlay-idle-hide-delay" type="button" aria-label="Decrease overlay idle hide delay by 0.25 seconds">-0.25</button>
+            <button class="stepper" data-setting="overlayIdleHideDelay" data-delta="-0.25" type="button" aria-label="Decrease overlay idle hide delay by 0.25 seconds">-0.25</button>
             <div class="value-wrap">
               <input id="overlay-idle-hide-delay" type="number" min="0" max="60" step="0.01" inputmode="decimal">
             </div>
             <div class="suffix">s</div>
-            <button class="stepper" id="increase-overlay-idle-hide-delay" type="button" aria-label="Increase overlay idle hide delay by 0.25 seconds">+0.25</button>
+            <button class="stepper" data-setting="overlayIdleHideDelay" data-delta="0.25" type="button" aria-label="Increase overlay idle hide delay by 0.25 seconds">+0.25</button>
           </div>
           <div class="hint">Hides the overlay after this many seconds without mouse movement over a video. Move the mouse to show it again. Set it to 0 to keep it visible.</div>
         </div>
@@ -351,7 +518,7 @@
             <label class="toggle-item" for="show-hover-slow-zone-hint">
               <span class="toggle-copy">
                 <span class="toggle-title">Show slow-hover hint</span>
-                <span class="toggle-hint">Shows a faint center band while the controls are visible so the slowdown zone stays discoverable.</span>
+                <span class="toggle-hint">Shows faint hover bands while the controls are visible so the preview zones stay discoverable.</span>
               </span>
               <input class="toggle-input" id="show-hover-slow-zone-hint" type="checkbox">
             </label>

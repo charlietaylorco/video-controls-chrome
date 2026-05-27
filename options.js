@@ -1,32 +1,31 @@
-const hoverSpeedInput = document.getElementById("hover-speed");
 const adjustmentStepInput = document.getElementById("adjustment-step");
 const overlayIdleHideDelayInput = document.getElementById("overlay-idle-hide-delay");
-const decreaseHoverButton = document.getElementById("decrease-hover");
-const increaseHoverButton = document.getElementById("increase-hover");
-const decreaseStepButton = document.getElementById("decrease-step");
-const increaseStepButton = document.getElementById("increase-step");
-const decreaseOverlayIdleHideDelayButton = document.getElementById("decrease-overlay-idle-hide-delay");
-const increaseOverlayIdleHideDelayButton = document.getElementById("increase-overlay-idle-hide-delay");
+const hoverCenterWidthInput = document.getElementById("hover-center-width");
+const hoverCenterSpeedInput = document.getElementById("hover-center-speed");
+const hoverMiddleWidthInput = document.getElementById("hover-middle-width");
+const hoverMiddleSpeedInput = document.getElementById("hover-middle-speed");
+const hoverOuterWidthInput = document.getElementById("hover-outer-width");
+const hoverOuterSpeedInput = document.getElementById("hover-outer-speed");
+const hoverBandSummary = document.getElementById("hover-band-summary");
 const showHoverSlowZoneHintInput = document.getElementById("show-hover-slow-zone-hint");
 const showDownieInput = document.getElementById("show-downie");
 const showReaderInput = document.getElementById("show-reader");
 const readerTokenInput = document.getElementById("reader-token");
 const saveTokenButton = document.getElementById("save-token");
 const status = document.getElementById("status");
-const DEFAULT_HOVER_SPEED = 1;
+
 const DEFAULT_ADJUSTMENT_STEP = 0.1;
 const DEFAULT_OVERLAY_IDLE_HIDE_DELAY = 2;
+const DEFAULT_HOVER_CENTER_WIDTH_PERCENT = 20;
+const DEFAULT_HOVER_CENTER_SPEED = 1;
+const DEFAULT_HOVER_MIDDLE_WIDTH_PERCENT = 10;
+const DEFAULT_HOVER_MIDDLE_SPEED = 1.5;
+const DEFAULT_HOVER_OUTER_WIDTH_PERCENT = 10;
+const DEFAULT_HOVER_OUTER_SPEED = 2;
 const DEFAULT_SHOW_HOVER_SLOW_ZONE_HINT = false;
 const DEFAULT_SHOW_DOWNIE = true;
 const DEFAULT_SHOW_READER = true;
-const MIN_HOVER_SPEED = 0;
-const MIN_ADJUSTMENT_STEP = 0.01;
-const MIN_OVERLAY_IDLE_HIDE_DELAY = 0;
-const MAX_HOVER_SPEED = 16;
-const MAX_ADJUSTMENT_STEP = 16;
-const MAX_OVERLAY_IDLE_HIDE_DELAY = 60;
 const PRECISION = 2;
-const STEP = 0.25;
 
 const roundToPrecision = (value) => {
   const factor = 10 ** PRECISION;
@@ -35,43 +34,9 @@ const roundToPrecision = (value) => {
 
 const formatValue = (value) => roundToPrecision(value).toFixed(PRECISION);
 
-const clampHoverSpeed = (value) => {
+const clampValue = (value, min, max) => {
   const rounded = roundToPrecision(value);
-  return Math.min(MAX_HOVER_SPEED, Math.max(MIN_HOVER_SPEED, rounded));
-};
-
-const clampAdjustmentStep = (value) => {
-  const rounded = roundToPrecision(value);
-  return Math.min(MAX_ADJUSTMENT_STEP, Math.max(MIN_ADJUSTMENT_STEP, rounded));
-};
-
-const normalizeHoverSpeed = (value) => {
-  if (!Number.isFinite(value)) {
-    return DEFAULT_HOVER_SPEED;
-  }
-
-  return clampHoverSpeed(value);
-};
-
-const normalizeAdjustmentStep = (value) => {
-  if (!Number.isFinite(value)) {
-    return DEFAULT_ADJUSTMENT_STEP;
-  }
-
-  return clampAdjustmentStep(value);
-};
-
-const clampOverlayIdleHideDelay = (value) => {
-  const rounded = roundToPrecision(value);
-  return Math.min(MAX_OVERLAY_IDLE_HIDE_DELAY, Math.max(MIN_OVERLAY_IDLE_HIDE_DELAY, rounded));
-};
-
-const normalizeOverlayIdleHideDelay = (value) => {
-  if (!Number.isFinite(value)) {
-    return DEFAULT_OVERLAY_IDLE_HIDE_DELAY;
-  }
-
-  return clampOverlayIdleHideDelay(value);
+  return Math.min(max, Math.max(min, rounded));
 };
 
 const showStatus = (message) => {
@@ -86,104 +51,205 @@ const syncInput = (input, value) => {
   input.value = formatValue(value);
 };
 
-const saveHoverSpeed = (value) => {
-  const nextValue = normalizeHoverSpeed(value);
-  chrome.storage.local.set({ hoverSpeed: nextValue }, () => {
-    syncInput(hoverSpeedInput, nextValue);
-    showStatus(nextValue === 0 ? "Hover preview off" : "Saved");
+const formatDisplayValue = (value) => {
+  const rounded = roundToPrecision(value);
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(PRECISION).replace(/\.?0+$/, "");
+};
+
+const numericSettings = {
+  adjustmentStep: {
+    input: adjustmentStepInput,
+    defaultValue: DEFAULT_ADJUSTMENT_STEP,
+    min: 0.01,
+    max: 16,
+    status: () => "Step saved"
+  },
+  overlayIdleHideDelay: {
+    input: overlayIdleHideDelayInput,
+    defaultValue: DEFAULT_OVERLAY_IDLE_HIDE_DELAY,
+    min: 0,
+    max: 60,
+    status: (value) => (value === 0 ? "Overlay idle hide off" : "Overlay timeout saved")
+  },
+  hoverCenterWidthPercent: {
+    input: hoverCenterWidthInput,
+    defaultValue: DEFAULT_HOVER_CENTER_WIDTH_PERCENT,
+    min: 0,
+    max: 100,
+    status: () => "Saved"
+  },
+  hoverCenterSpeed: {
+    input: hoverCenterSpeedInput,
+    defaultValue: DEFAULT_HOVER_CENTER_SPEED,
+    min: 0,
+    max: 16,
+    status: () => "Saved"
+  },
+  hoverMiddleWidthPercent: {
+    input: hoverMiddleWidthInput,
+    defaultValue: DEFAULT_HOVER_MIDDLE_WIDTH_PERCENT,
+    min: 0,
+    max: 100,
+    status: () => "Saved"
+  },
+  hoverMiddleSpeed: {
+    input: hoverMiddleSpeedInput,
+    defaultValue: DEFAULT_HOVER_MIDDLE_SPEED,
+    min: 0,
+    max: 16,
+    status: () => "Saved"
+  },
+  hoverOuterWidthPercent: {
+    input: hoverOuterWidthInput,
+    defaultValue: DEFAULT_HOVER_OUTER_WIDTH_PERCENT,
+    min: 0,
+    max: 100,
+    status: () => "Saved"
+  },
+  hoverOuterSpeed: {
+    input: hoverOuterSpeedInput,
+    defaultValue: DEFAULT_HOVER_OUTER_SPEED,
+    min: 0,
+    max: 16,
+    status: () => "Saved"
+  }
+};
+
+const normalizeSettingValue = (settingName, value, fallback = numericSettings[settingName].defaultValue) => {
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+
+  const config = numericSettings[settingName];
+  return clampValue(value, config.min, config.max);
+};
+
+const getCurrentNumericSettingValue = (settingName) => {
+  const config = numericSettings[settingName];
+  return normalizeSettingValue(settingName, Number(config.input.value), config.defaultValue);
+};
+
+const updateHoverBandSummary = () => {
+  const centerWidth = getCurrentNumericSettingValue("hoverCenterWidthPercent");
+  const centerSpeed = getCurrentNumericSettingValue("hoverCenterSpeed");
+  const middleWidth = getCurrentNumericSettingValue("hoverMiddleWidthPercent");
+  const middleSpeed = getCurrentNumericSettingValue("hoverMiddleSpeed");
+  const outerWidth = getCurrentNumericSettingValue("hoverOuterWidthPercent");
+  const outerSpeed = getCurrentNumericSettingValue("hoverOuterSpeed");
+  const segments = [];
+
+  if (centerWidth > 0 && centerSpeed > 0) {
+    segments.push(`center ${formatDisplayValue(centerWidth)}% @ ${formatDisplayValue(centerSpeed)}x`);
+  }
+
+  if (middleWidth > 0 && middleSpeed > 0) {
+    segments.push(`next ${formatDisplayValue(middleWidth)}% per side @ ${formatDisplayValue(middleSpeed)}x`);
+  }
+
+  if (outerWidth > 0 && outerSpeed > 0) {
+    segments.push(`next ${formatDisplayValue(outerWidth)}% per side @ ${formatDisplayValue(outerSpeed)}x`);
+  }
+
+  hoverBandSummary.textContent = segments.length > 0
+    ? `${segments.join(" | ")} | outside bands uses the saved speed`
+    : "Hover preview disabled. Everywhere uses the saved speed.";
+};
+
+const saveNumericSetting = (settingName, value) => {
+  const config = numericSettings[settingName];
+  const nextValue = normalizeSettingValue(settingName, value);
+
+  chrome.storage.local.set({ [settingName]: nextValue }, () => {
+    syncInput(config.input, nextValue);
+    updateHoverBandSummary();
+    showStatus(config.status(nextValue));
   });
 };
 
-const saveAdjustmentStep = (value) => {
-  const nextValue = normalizeAdjustmentStep(value);
-  chrome.storage.local.set({ adjustmentStep: nextValue }, () => {
-    syncInput(adjustmentStepInput, nextValue);
-    showStatus("Step saved");
-  });
-};
+chrome.storage.local.get(
+  [
+    "hoverSpeed",
+    ...Object.keys(numericSettings),
+    "showHoverSlowZoneHint",
+    "showDownie",
+    "showReader",
+    "readerToken"
+  ],
+  (result) => {
+    const legacyHoverSpeed = Number(result.hoverSpeed);
+    const hasSavedHoverBandSettings =
+      result.hoverCenterSpeed !== undefined ||
+      result.hoverCenterWidthPercent !== undefined ||
+      result.hoverMiddleSpeed !== undefined ||
+      result.hoverMiddleWidthPercent !== undefined ||
+      result.hoverOuterSpeed !== undefined ||
+      result.hoverOuterWidthPercent !== undefined;
 
-const saveOverlayIdleHideDelay = (value) => {
-  const nextValue = normalizeOverlayIdleHideDelay(value);
-  chrome.storage.local.set({ overlayIdleHideDelay: nextValue }, () => {
-    syncInput(overlayIdleHideDelayInput, nextValue);
-    showStatus(nextValue === 0 ? "Overlay idle hide off" : "Overlay timeout saved");
+    Object.entries(numericSettings).forEach(([settingName, config]) => {
+      const rawValue =
+        settingName === "hoverCenterSpeed" && result.hoverCenterSpeed === undefined
+          ? legacyHoverSpeed
+          : !hasSavedHoverBandSettings &&
+              legacyHoverSpeed === 0 &&
+              (settingName === "hoverMiddleSpeed" || settingName === "hoverOuterSpeed")
+            ? 0
+          : Number(result[settingName]);
+      syncInput(
+        config.input,
+        normalizeSettingValue(settingName, rawValue, config.defaultValue)
+      );
+    });
+
+    showHoverSlowZoneHintInput.checked =
+      typeof result.showHoverSlowZoneHint === "boolean"
+        ? result.showHoverSlowZoneHint
+        : DEFAULT_SHOW_HOVER_SLOW_ZONE_HINT;
+    showDownieInput.checked =
+      typeof result.showDownie === "boolean" ? result.showDownie : DEFAULT_SHOW_DOWNIE;
+    showReaderInput.checked =
+      typeof result.showReader === "boolean" ? result.showReader : DEFAULT_SHOW_READER;
+    readerTokenInput.value = typeof result.readerToken === "string" ? result.readerToken : "";
+    updateHoverBandSummary();
+  }
+);
+
+Object.entries(numericSettings).forEach(([settingName, config]) => {
+  config.input.addEventListener("change", () => {
+    saveNumericSetting(settingName, Number(config.input.value));
   });
-};
+
+  config.input.addEventListener("blur", () => {
+    syncInput(
+      config.input,
+      normalizeSettingValue(settingName, Number(config.input.value), config.defaultValue)
+    );
+    updateHoverBandSummary();
+  });
+
+  config.input.addEventListener("input", () => {
+    updateHoverBandSummary();
+  });
+});
+
+document.querySelectorAll(".stepper[data-setting]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const settingName = button.dataset.setting;
+    const delta = Number(button.dataset.delta);
+    const config = numericSettings[settingName];
+
+    if (!config || !Number.isFinite(delta)) {
+      return;
+    }
+
+    saveNumericSetting(settingName, Number(config.input.value) + delta);
+  });
+});
 
 const saveToggle = (key, value, message) => {
   chrome.storage.local.set({ [key]: value }, () => {
     showStatus(message);
   });
 };
-
-chrome.storage.local.get(
-  {
-    hoverSpeed: DEFAULT_HOVER_SPEED,
-    adjustmentStep: DEFAULT_ADJUSTMENT_STEP,
-    overlayIdleHideDelay: DEFAULT_OVERLAY_IDLE_HIDE_DELAY,
-    showHoverSlowZoneHint: DEFAULT_SHOW_HOVER_SLOW_ZONE_HINT,
-    showDownie: DEFAULT_SHOW_DOWNIE,
-    showReader: DEFAULT_SHOW_READER,
-    readerToken: ""
-  },
-  ({ hoverSpeed, adjustmentStep, overlayIdleHideDelay, showHoverSlowZoneHint, showDownie, showReader, readerToken }) => {
-    syncInput(hoverSpeedInput, normalizeHoverSpeed(Number(hoverSpeed)));
-    syncInput(adjustmentStepInput, normalizeAdjustmentStep(Number(adjustmentStep)));
-    syncInput(overlayIdleHideDelayInput, normalizeOverlayIdleHideDelay(Number(overlayIdleHideDelay)));
-    showHoverSlowZoneHintInput.checked = showHoverSlowZoneHint !== false;
-    showDownieInput.checked = showDownie !== false;
-    showReaderInput.checked = showReader !== false;
-    readerTokenInput.value = readerToken;
-  }
-);
-
-hoverSpeedInput.addEventListener("change", () => {
-  saveHoverSpeed(Number(hoverSpeedInput.value));
-});
-
-adjustmentStepInput.addEventListener("change", () => {
-  saveAdjustmentStep(Number(adjustmentStepInput.value));
-});
-
-overlayIdleHideDelayInput.addEventListener("change", () => {
-  saveOverlayIdleHideDelay(Number(overlayIdleHideDelayInput.value));
-});
-
-hoverSpeedInput.addEventListener("blur", () => {
-  syncInput(hoverSpeedInput, normalizeHoverSpeed(Number(hoverSpeedInput.value)));
-});
-
-adjustmentStepInput.addEventListener("blur", () => {
-  syncInput(adjustmentStepInput, normalizeAdjustmentStep(Number(adjustmentStepInput.value)));
-});
-
-overlayIdleHideDelayInput.addEventListener("blur", () => {
-  syncInput(overlayIdleHideDelayInput, normalizeOverlayIdleHideDelay(Number(overlayIdleHideDelayInput.value)));
-});
-
-decreaseHoverButton.addEventListener("click", () => {
-  saveHoverSpeed(Number(hoverSpeedInput.value) - STEP);
-});
-
-increaseHoverButton.addEventListener("click", () => {
-  saveHoverSpeed(Number(hoverSpeedInput.value) + STEP);
-});
-
-decreaseStepButton.addEventListener("click", () => {
-  saveAdjustmentStep(Number(adjustmentStepInput.value) - STEP);
-});
-
-increaseStepButton.addEventListener("click", () => {
-  saveAdjustmentStep(Number(adjustmentStepInput.value) + STEP);
-});
-
-decreaseOverlayIdleHideDelayButton.addEventListener("click", () => {
-  saveOverlayIdleHideDelay(Number(overlayIdleHideDelayInput.value) - STEP);
-});
-
-increaseOverlayIdleHideDelayButton.addEventListener("click", () => {
-  saveOverlayIdleHideDelay(Number(overlayIdleHideDelayInput.value) + STEP);
-});
 
 showHoverSlowZoneHintInput.addEventListener("change", () => {
   saveToggle(
@@ -194,11 +260,19 @@ showHoverSlowZoneHintInput.addEventListener("change", () => {
 });
 
 showDownieInput.addEventListener("change", () => {
-  saveToggle("showDownie", showDownieInput.checked, showDownieInput.checked ? "Downie button shown" : "Downie button hidden");
+  saveToggle(
+    "showDownie",
+    showDownieInput.checked,
+    showDownieInput.checked ? "Downie button shown" : "Downie button hidden"
+  );
 });
 
 showReaderInput.addEventListener("change", () => {
-  saveToggle("showReader", showReaderInput.checked, showReaderInput.checked ? "Reader button shown" : "Reader button hidden");
+  saveToggle(
+    "showReader",
+    showReaderInput.checked,
+    showReaderInput.checked ? "Reader button shown" : "Reader button hidden"
+  );
 });
 
 saveTokenButton.addEventListener("click", () => {

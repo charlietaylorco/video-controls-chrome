@@ -7,7 +7,12 @@
 
   const videoState = new WeakMap();
   const settings = {
-    hoverSpeed: 1,
+    hoverCenterSpeed: 1,
+    hoverCenterWidthPercent: 20,
+    hoverMiddleSpeed: 1.5,
+    hoverMiddleWidthPercent: 10,
+    hoverOuterSpeed: 2,
+    hoverOuterWidthPercent: 10,
     adjustmentStep: 0.1,
     overlayIdleHideDelay: 2,
     showHoverSlowZoneHint: false,
@@ -21,7 +26,9 @@
   let activeMode = "player";
   let hoveredVideo = null;
   let hoveredTarget = null;
-  let hoveredPreviewEligible = false;
+  let hoveredPreviewRate = null;
+  let hoverPointerClientX = null;
+  let hoverPointerClientY = null;
   let activePanel = false;
   let isApplyingRate = false;
   let hideTimer = 0;
@@ -39,7 +46,6 @@
   const RATE_PRECISION = 2;
   const RATE_EPSILON = 0.005;
   const HOST_Z_INDEX = "1000";
-  const HOVER_PREVIEW_CENTER_WIDTH_RATIO = 0.4;
 
   const roundRate = (value) => {
     const factor = 10 ** RATE_PRECISION;
@@ -93,6 +99,24 @@
 
     const rounded = roundRate(value);
     return Math.min(60, Math.max(0, rounded));
+  };
+
+  const normalizeHoverPreviewSpeed = (value, fallback) => {
+    if (!Number.isFinite(value)) {
+      return fallback;
+    }
+
+    const rounded = roundRate(value);
+    return Math.min(16, Math.max(0, rounded));
+  };
+
+  const normalizeHoverPreviewWidthPercent = (value, fallback) => {
+    if (!Number.isFinite(value)) {
+      return fallback;
+    }
+
+    const rounded = roundRate(value);
+    return Math.min(100, Math.max(0, rounded));
   };
 
   const getState = (video) => {
@@ -189,17 +213,8 @@
         top: 0;
         box-sizing: border-box;
         pointer-events: none;
-        border: 1px solid rgba(255, 255, 255, 0.09);
         border-radius: 14px;
-        background:
-          linear-gradient(
-            180deg,
-            rgba(255, 255, 255, 0.07),
-            rgba(255, 255, 255, 0.03)
-          );
-        box-shadow:
-          inset 0 1px 0 rgba(255, 255, 255, 0.04),
-          0 0 0 1px rgba(255, 255, 255, 0.015);
+        overflow: hidden;
         visibility: hidden;
         opacity: 0;
         transition:
@@ -519,8 +534,8 @@
     }
   };
 
-  const startPreview = (video) => {
-    if (!video || settings.hoverSpeed === 0) {
+  const startPreview = (video, rate) => {
+    if (!video || !Number.isFinite(rate) || rate <= 0) {
       stopPreview();
       return;
     }
@@ -529,7 +544,7 @@
       stopPreview();
     }
 
-    const previewRate = clampRate(settings.hoverSpeed);
+    const previewRate = clampRate(rate);
     const baseRate = getBaseRate(video);
     getState(video).baseRate = baseRate;
 
@@ -610,11 +625,11 @@
       return;
     }
 
-    const hintRect = getCenteredWidthRect(rect);
-    hoverZoneHint.style.left = `${hintRect.left}px`;
-    hoverZoneHint.style.top = `${hintRect.top}px`;
-    hoverZoneHint.style.width = `${Math.max(0, hintRect.right - hintRect.left)}px`;
-    hoverZoneHint.style.height = `${Math.max(0, hintRect.bottom - hintRect.top)}px`;
+    hoverZoneHint.style.left = `${rect.left}px`;
+    hoverZoneHint.style.top = `${rect.top}px`;
+    hoverZoneHint.style.width = `${Math.max(0, rect.right - rect.left)}px`;
+    hoverZoneHint.style.height = `${Math.max(0, rect.bottom - rect.top)}px`;
+    hoverZoneHint.style.background = buildHoverZoneHintGradient();
   };
 
   const showHoverZoneHint = (video) => {
@@ -635,7 +650,7 @@
   const refreshHoverZoneHint = () => {
     if (
       !settings.showHoverSlowZoneHint ||
-      settings.hoverSpeed === 0 ||
+      !hasActiveHoverPreviewBand() ||
       dragState ||
       panel.dataset.visible !== "true" ||
       !(hoveredVideo instanceof HTMLVideoElement)
@@ -973,21 +988,82 @@
     clientY >= rect.top &&
     clientY <= rect.bottom;
 
-  const getCenteredWidthRect = (rect, ratio = HOVER_PREVIEW_CENTER_WIDTH_RATIO) => {
-    const width = rect.width * ratio;
-    const left = rect.left + (rect.width - width) / 2;
+  const getHoverPreviewBandBoundaries = () => {
+    const centerHalfRatio = Math.min(0.5, settings.hoverCenterWidthPercent / 200);
+    const middleBoundaryRatio = Math.min(
+      0.5,
+      centerHalfRatio + settings.hoverMiddleWidthPercent / 100
+    );
+    const outerBoundaryRatio = Math.min(
+      0.5,
+      middleBoundaryRatio + settings.hoverOuterWidthPercent / 100
+    );
 
     return {
-      left,
-      top: rect.top,
-      right: left + width,
-      bottom: rect.bottom
+      centerHalfRatio,
+      middleBoundaryRatio,
+      outerBoundaryRatio
     };
   };
 
-  const isPointInsidePreviewZone = (video, clientX, clientY) => {
+  const hasActiveHoverPreviewBand = () => {
+    const { centerHalfRatio, middleBoundaryRatio, outerBoundaryRatio } =
+      getHoverPreviewBandBoundaries();
+
+    return (
+      (settings.hoverCenterSpeed > 0 && centerHalfRatio > 0) ||
+      (settings.hoverMiddleSpeed > 0 && middleBoundaryRatio > centerHalfRatio) ||
+      (settings.hoverOuterSpeed > 0 && outerBoundaryRatio > middleBoundaryRatio)
+    );
+  };
+
+  const formatGradientStop = (value) => `${Math.min(100, Math.max(0, value)).toFixed(4)}%`;
+
+  const buildHoverZoneHintGradient = () => {
+    const { centerHalfRatio, middleBoundaryRatio, outerBoundaryRatio } =
+      getHoverPreviewBandBoundaries();
+    const centerLeft = 50 - centerHalfRatio * 100;
+    const centerRight = 50 + centerHalfRatio * 100;
+    const middleLeft = 50 - middleBoundaryRatio * 100;
+    const middleRight = 50 + middleBoundaryRatio * 100;
+    const outerLeft = 50 - outerBoundaryRatio * 100;
+    const outerRight = 50 + outerBoundaryRatio * 100;
+    const transparent = "rgba(255, 255, 255, 0)";
+    const outerColor =
+      settings.hoverOuterSpeed > 0 && outerBoundaryRatio > middleBoundaryRatio
+        ? "rgba(255, 255, 255, 0.035)"
+        : transparent;
+    const middleColor =
+      settings.hoverMiddleSpeed > 0 && middleBoundaryRatio > centerHalfRatio
+        ? "rgba(255, 255, 255, 0.055)"
+        : transparent;
+    const centerColor =
+      settings.hoverCenterSpeed > 0 && centerHalfRatio > 0
+        ? "rgba(255, 255, 255, 0.075)"
+        : transparent;
+
+    return `linear-gradient(
+      90deg,
+      ${transparent} 0%,
+      ${transparent} ${formatGradientStop(outerLeft)},
+      ${outerColor} ${formatGradientStop(outerLeft)},
+      ${outerColor} ${formatGradientStop(middleLeft)},
+      ${middleColor} ${formatGradientStop(middleLeft)},
+      ${middleColor} ${formatGradientStop(centerLeft)},
+      ${centerColor} ${formatGradientStop(centerLeft)},
+      ${centerColor} ${formatGradientStop(centerRight)},
+      ${middleColor} ${formatGradientStop(centerRight)},
+      ${middleColor} ${formatGradientStop(middleRight)},
+      ${outerColor} ${formatGradientStop(middleRight)},
+      ${outerColor} ${formatGradientStop(outerRight)},
+      ${transparent} ${formatGradientStop(outerRight)},
+      ${transparent} 100%
+    )`;
+  };
+
+  const getHoverPreviewRateAtPoint = (video, clientX, clientY) => {
     if (!(video instanceof HTMLVideoElement)) {
-      return false;
+      return null;
     }
 
     const rect = video.getBoundingClientRect();
@@ -997,10 +1073,36 @@
       rect.width < MIN_MEDIA_WIDTH ||
       rect.height < MIN_MEDIA_HEIGHT
     ) {
-      return false;
+      return null;
     }
 
-    return isPointInsideRect(getCenteredWidthRect(rect), clientX, clientY);
+    if (!isPointInsideRect(rect, clientX, clientY)) {
+      return null;
+    }
+
+    const { centerHalfRatio, middleBoundaryRatio, outerBoundaryRatio } =
+      getHoverPreviewBandBoundaries();
+    const distanceFromCenterRatio = Math.abs((clientX - rect.left) / rect.width - 0.5);
+
+    if (distanceFromCenterRatio <= centerHalfRatio) {
+      return settings.hoverCenterSpeed > 0 && centerHalfRatio > 0
+        ? clampRate(settings.hoverCenterSpeed)
+        : null;
+    }
+
+    if (distanceFromCenterRatio <= middleBoundaryRatio) {
+      return settings.hoverMiddleSpeed > 0 && middleBoundaryRatio > centerHalfRatio
+        ? clampRate(settings.hoverMiddleSpeed)
+        : null;
+    }
+
+    if (distanceFromCenterRatio <= outerBoundaryRatio) {
+      return settings.hoverOuterSpeed > 0 && outerBoundaryRatio > middleBoundaryRatio
+        ? clampRate(settings.hoverOuterSpeed)
+        : null;
+    }
+
+    return null;
   };
 
   const getVideosFromNode = (node) => {
@@ -1030,6 +1132,9 @@
     "ytd-playlist-video-renderer",
     "ytd-reel-item-renderer",
     "yt-lockup-view-model",
+    "yt-lockup-view-model-wiz",
+    ".yt-lockup-view-model",
+    ".yt-lockup-view-model-wiz",
     "ytm-video-with-context-renderer",
     "ytm-rich-item-renderer"
   ].join(",");
@@ -1037,6 +1142,12 @@
     "a#thumbnail",
     "ytd-thumbnail",
     "yt-thumbnail-view-model",
+    ".ytLockupViewModelContentImage",
+    ".ytThumbnailViewModelHost",
+    ".ytThumbnailViewModelImage",
+    ".yt-thumbnail-view-model__image",
+    ".yt-lockup-view-model__content-image",
+    ".yt-lockup-view-model-wiz__content-image",
     "yt-image",
     "a[href*='/watch?']",
     "a[href*='/shorts/']",
@@ -1051,6 +1162,12 @@
     "a#thumbnail",
     "ytd-thumbnail",
     "yt-thumbnail-view-model",
+    ".ytLockupViewModelContentImage",
+    ".ytThumbnailViewModelHost",
+    ".ytThumbnailViewModelImage",
+    ".yt-thumbnail-view-model__image",
+    ".yt-lockup-view-model__content-image",
+    ".yt-lockup-view-model-wiz__content-image",
     '[class*="thumbnail"]',
     '[class*="Thumbnail"]',
     '[data-testid*="thumbnail"]'
@@ -1197,6 +1314,44 @@
     return Array.from(new Set(candidates));
   };
 
+  const getMediaAnchorPriority = (candidate) => {
+    if (!(candidate instanceof Element)) {
+      return 0;
+    }
+
+    if (candidate instanceof HTMLVideoElement) {
+      return 60;
+    }
+
+    if (candidate instanceof HTMLAnchorElement && VIDEO_URL_PATTERN.test(candidate.href || "")) {
+      return 50;
+    }
+
+    if (
+      candidate.matches?.(
+        [
+          "a#thumbnail",
+          "ytd-thumbnail",
+          "yt-thumbnail-view-model",
+          ".ytLockupViewModelContentImage",
+          ".ytThumbnailViewModelHost",
+          ".ytThumbnailViewModelImage",
+          ".yt-thumbnail-view-model__image",
+          ".yt-lockup-view-model__content-image",
+          ".yt-lockup-view-model-wiz__content-image"
+        ].join(",")
+      )
+    ) {
+      return 40;
+    }
+
+    if (candidate.matches?.("yt-touch-feedback-shape,[class*='TouchFeedback']")) {
+      return -20;
+    }
+
+    return 0;
+  };
+
   const getAssociatedAnchor = (source) => {
     if (!(source instanceof Element)) {
       return null;
@@ -1281,6 +1436,12 @@
 
         if (aIsVideo !== bIsVideo) {
           return aIsVideo ? -1 : 1;
+        }
+
+        const priorityDiff = getMediaAnchorPriority(b.candidate) - getMediaAnchorPriority(a.candidate);
+
+        if (priorityDiff !== 0) {
+          return priorityDiff;
         }
 
         const areaDiff = getRectArea(b.rect) - getRectArea(a.rect);
@@ -1464,27 +1625,100 @@
     };
   };
 
+  const getDirectYouTubeCardContext = (clientX, clientY, nodes) => {
+    if (!isYouTubePage()) {
+      return null;
+    }
+
+    const candidates = new Set();
+
+    for (const node of nodes) {
+      if (!(node instanceof Element)) {
+        continue;
+      }
+
+      for (const ancestor of getAncestorElements(node).slice(0, 12)) {
+        if (
+          ancestor === document.body ||
+          ancestor === document.documentElement ||
+          ancestor === host
+        ) {
+          continue;
+        }
+
+        if (ancestor.matches?.(CARD_CONTAINER_SELECTORS)) {
+          candidates.add(ancestor);
+        }
+      }
+    }
+
+    return Array.from(candidates)
+      .map((target) => {
+        const targetRect = target.getBoundingClientRect();
+
+        if (
+          !isPointInsideRect(targetRect, clientX, clientY) ||
+          !isRectVisible(targetRect) ||
+          targetRect.width < MIN_MEDIA_WIDTH ||
+          targetRect.height < MIN_MEDIA_HEIGHT
+        ) {
+          return null;
+        }
+
+        const videoAnchor = getAssociatedAnchor(target);
+        const videoUrl = resolveUrl(videoAnchor?.href);
+
+        if (!videoUrl || !VIDEO_URL_PATTERN.test(videoUrl)) {
+          return null;
+        }
+
+        const anchor =
+          [
+            ".ytLockupViewModelContentImage",
+            ".yt-lockup-view-model__content-image",
+            ".yt-lockup-view-model-wiz__content-image",
+            "a#thumbnail",
+            "yt-thumbnail-view-model",
+            ".ytThumbnailViewModelHost",
+            ".ytThumbnailViewModelImage"
+          ]
+            .map((selector) => target.querySelector(selector))
+            .find((candidate) => {
+              if (!(candidate instanceof Element)) {
+                return false;
+              }
+
+              const rect = candidate.getBoundingClientRect();
+              return (
+                isRectVisible(rect) &&
+                rect.width >= MIN_MEDIA_WIDTH &&
+                rect.height >= MIN_MEDIA_HEIGHT
+              );
+            }) ||
+          getBestMediaAnchorForSource(target, null) ||
+          videoAnchor ||
+          target;
+
+        return {
+          video: null,
+          target,
+          anchor,
+          metadataTarget: target,
+          mode: "card",
+          score: 10000 - getDistanceToRect(targetRect, clientX, clientY) * 0.12 - getRectArea(targetRect) * 0.0001
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.score - a.score)[0] || null;
+  };
+
   const getHoverContext = (event) => {
     const videoCandidates = new Set();
     const cardSourceCandidates = new Set();
     const youtubeCardCandidates = new Map();
+    const hoverNodes = [...event.composedPath(), ...document.elementsFromPoint(event.clientX, event.clientY)];
 
-    for (const node of event.composedPath()) {
-      for (const video of getVideosFromNode(node)) {
-        videoCandidates.add(video);
-      }
-
-      for (const candidate of getYouTubeCardCandidatesFromNode(node)) {
-        const currentPriority = youtubeCardCandidates.get(candidate.source) || 0;
-        youtubeCardCandidates.set(candidate.source, Math.max(currentPriority, candidate.priority));
-      }
-
-      for (const source of getCardSourceCandidatesFromNode(node)) {
-        cardSourceCandidates.add(source);
-      }
-    }
-
-    for (const node of document.elementsFromPoint(event.clientX, event.clientY)) {
+    for (const node of hoverNodes) {
       for (const video of getVideosFromNode(node)) {
         videoCandidates.add(video);
       }
@@ -1500,6 +1734,16 @@
     }
 
     const video = pickClosestVideo(Array.from(videoCandidates), event.clientX, event.clientY);
+    const directYouTubeCardContext = getDirectYouTubeCardContext(
+      event.clientX,
+      event.clientY,
+      hoverNodes
+    );
+
+    if (directYouTubeCardContext) {
+      return directYouTubeCardContext;
+    }
+
     const youtubeCardContext = Array.from(youtubeCardCandidates.entries())
       .map(([source, priority]) =>
         getCardContextFromSource(source, video, event.clientX, event.clientY, {
@@ -1819,6 +2063,13 @@
     'a#thumbnail[href*="/watch?"]',
     'a#video-title-link[href*="/watch?"]',
     'a#video-title[href*="/watch?"]',
+    'a.ytLockupMetadataViewModelTitle[href*="/watch?"]',
+    'a.ytLockupViewModelContentImage[href*="/watch?"]',
+    'a.yt-lockup-metadata-view-model__title[href*="/watch?"]',
+    'a.yt-lockup-metadata-view-model-wiz__title[href*="/watch?"]',
+    'a.yt-lockup-view-model__content-image[href*="/watch?"]',
+    'a.yt-lockup-view-model-wiz__content-image[href*="/watch?"]',
+    'a.ytThumbnailViewModelHost[href*="/watch?"]',
     'a[href*="/watch?"]',
     'a[href*="/shorts/"]',
     'a[href*="/live/"]',
@@ -2048,6 +2299,9 @@
       const primaryTitle = pickTextFromSelectors(container, [
         "#video-title",
         "#video-title-link",
+        ".ytLockupMetadataViewModelTitle",
+        ".yt-lockup-metadata-view-model__title",
+        ".yt-lockup-metadata-view-model-wiz__title",
         "a[href*='/watch?'][title]",
         "a#thumbnail[title]",
         "h3 a[href*='/watch?']",
@@ -2083,6 +2337,9 @@
     return pickTextFromSelectors(source, [
       "#video-title",
       "#video-title-link",
+      ".ytLockupMetadataViewModelTitle",
+      ".yt-lockup-metadata-view-model__title",
+      ".yt-lockup-metadata-view-model-wiz__title",
       "a[href*='/watch?'][title]",
       "a[href*='/watch?'][aria-label]",
       "a[title]",
@@ -2401,11 +2658,14 @@
 
       activePanel = false;
 
+      hoverPointerClientX = event.clientX;
+      hoverPointerClientY = event.clientY;
+
       const nextContext = getHoverContext(event);
       const nextVideo = nextContext?.video || null;
       const nextTarget = nextContext?.target || null;
       const nextSource = nextContext?.metadataTarget || nextTarget || nextVideo || null;
-      const nextPreviewEligible = isPointInsidePreviewZone(nextVideo, event.clientX, event.clientY);
+      const nextPreviewRate = getHoverPreviewRateAtPoint(nextVideo, event.clientX, event.clientY);
 
       if (feedbackTarget && feedbackTarget !== nextSource) {
         clearFeedback();
@@ -2417,7 +2677,7 @@
 
       hoveredVideo = nextVideo;
       hoveredTarget = nextSource;
-      hoveredPreviewEligible = nextPreviewEligible;
+      hoveredPreviewRate = nextPreviewRate;
 
       if (!nextTarget) {
         hideHoverZoneHint();
@@ -2440,8 +2700,8 @@
       scheduleIdleHide();
 
       if (!activePanel) {
-        if (nextVideo && nextPreviewEligible) {
-          startPreview(nextVideo);
+        if (nextVideo && Number.isFinite(nextPreviewRate)) {
+          startPreview(nextVideo, nextPreviewRate);
         } else {
           stopPreview();
         }
@@ -2455,7 +2715,9 @@
     () => {
       hoveredVideo = null;
       hoveredTarget = null;
-      hoveredPreviewEligible = false;
+      hoveredPreviewRate = null;
+      hoverPointerClientX = null;
+      hoverPointerClientY = null;
       activePanel = false;
       clearIdleHideTimer();
       hideHoverZoneHint();
@@ -2505,22 +2767,69 @@
 
   if (storageApi?.local) {
     storageApi.local.get(
-      {
-        hoverSpeed: settings.hoverSpeed,
-        adjustmentStep: settings.adjustmentStep,
-        overlayIdleHideDelay: settings.overlayIdleHideDelay,
-        showHoverSlowZoneHint: settings.showHoverSlowZoneHint,
-        showDownie: settings.showDownie,
-        showReader: settings.showReader
-      },
+      [
+        "hoverSpeed",
+        "hoverCenterSpeed",
+        "hoverCenterWidthPercent",
+        "hoverMiddleSpeed",
+        "hoverMiddleWidthPercent",
+        "hoverOuterSpeed",
+        "hoverOuterWidthPercent",
+        "adjustmentStep",
+        "overlayIdleHideDelay",
+        "showHoverSlowZoneHint",
+        "showDownie",
+        "showReader"
+      ],
       (result) => {
-        const nextValue = Number(result.hoverSpeed);
-        settings.hoverSpeed = Number.isFinite(nextValue) && nextValue >= 0 ? nextValue : settings.hoverSpeed;
+        const legacyHoverSpeed = Number(result.hoverSpeed);
+        const hasSavedHoverBandSettings =
+          result.hoverCenterSpeed !== undefined ||
+          result.hoverCenterWidthPercent !== undefined ||
+          result.hoverMiddleSpeed !== undefined ||
+          result.hoverMiddleWidthPercent !== undefined ||
+          result.hoverOuterSpeed !== undefined ||
+          result.hoverOuterWidthPercent !== undefined;
+        settings.hoverCenterSpeed = normalizeHoverPreviewSpeed(
+          Number(result.hoverCenterSpeed),
+          Number.isFinite(legacyHoverSpeed) ? legacyHoverSpeed : settings.hoverCenterSpeed
+        );
+        settings.hoverCenterWidthPercent = normalizeHoverPreviewWidthPercent(
+          Number(result.hoverCenterWidthPercent),
+          settings.hoverCenterWidthPercent
+        );
+        settings.hoverMiddleSpeed = normalizeHoverPreviewSpeed(
+          Number(result.hoverMiddleSpeed),
+          settings.hoverMiddleSpeed
+        );
+        settings.hoverMiddleWidthPercent = normalizeHoverPreviewWidthPercent(
+          Number(result.hoverMiddleWidthPercent),
+          settings.hoverMiddleWidthPercent
+        );
+        settings.hoverOuterSpeed = normalizeHoverPreviewSpeed(
+          Number(result.hoverOuterSpeed),
+          settings.hoverOuterSpeed
+        );
+        settings.hoverOuterWidthPercent = normalizeHoverPreviewWidthPercent(
+          Number(result.hoverOuterWidthPercent),
+          settings.hoverOuterWidthPercent
+        );
+
+        if (!hasSavedHoverBandSettings && legacyHoverSpeed === 0) {
+          settings.hoverMiddleSpeed = 0;
+          settings.hoverOuterSpeed = 0;
+        }
+
         settings.adjustmentStep = normalizeAdjustmentStep(Number(result.adjustmentStep));
         settings.overlayIdleHideDelay = normalizeOverlayIdleHideDelay(Number(result.overlayIdleHideDelay));
-        settings.showHoverSlowZoneHint = result.showHoverSlowZoneHint !== false;
-        settings.showDownie = result.showDownie !== false;
-        settings.showReader = result.showReader !== false;
+        settings.showHoverSlowZoneHint =
+          typeof result.showHoverSlowZoneHint === "boolean"
+            ? result.showHoverSlowZoneHint
+            : settings.showHoverSlowZoneHint;
+        settings.showDownie =
+          typeof result.showDownie === "boolean" ? result.showDownie : settings.showDownie;
+        settings.showReader =
+          typeof result.showReader === "boolean" ? result.showReader : settings.showReader;
         updatePictureInPictureVisibility();
         updateIntegrationVisibility();
         refreshVisiblePanelMode();
@@ -2533,6 +2842,12 @@
         areaName !== "local" ||
         (
           !changes.hoverSpeed &&
+          !changes.hoverCenterSpeed &&
+          !changes.hoverCenterWidthPercent &&
+          !changes.hoverMiddleSpeed &&
+          !changes.hoverMiddleWidthPercent &&
+          !changes.hoverOuterSpeed &&
+          !changes.hoverOuterWidthPercent &&
           !changes.adjustmentStep &&
           !changes.overlayIdleHideDelay &&
           !changes.showHoverSlowZoneHint &&
@@ -2544,9 +2859,51 @@
         return;
       }
 
-      if (changes.hoverSpeed) {
-        const nextValue = changes.hoverSpeed.newValue;
-        settings.hoverSpeed = Number.isFinite(nextValue) && nextValue >= 0 ? nextValue : settings.hoverSpeed;
+      if (changes.hoverCenterSpeed) {
+        settings.hoverCenterSpeed = normalizeHoverPreviewSpeed(
+          Number(changes.hoverCenterSpeed.newValue),
+          settings.hoverCenterSpeed
+        );
+      } else if (changes.hoverSpeed) {
+        settings.hoverCenterSpeed = normalizeHoverPreviewSpeed(
+          Number(changes.hoverSpeed.newValue),
+          settings.hoverCenterSpeed
+        );
+      }
+
+      if (changes.hoverCenterWidthPercent) {
+        settings.hoverCenterWidthPercent = normalizeHoverPreviewWidthPercent(
+          Number(changes.hoverCenterWidthPercent.newValue),
+          settings.hoverCenterWidthPercent
+        );
+      }
+
+      if (changes.hoverMiddleSpeed) {
+        settings.hoverMiddleSpeed = normalizeHoverPreviewSpeed(
+          Number(changes.hoverMiddleSpeed.newValue),
+          settings.hoverMiddleSpeed
+        );
+      }
+
+      if (changes.hoverMiddleWidthPercent) {
+        settings.hoverMiddleWidthPercent = normalizeHoverPreviewWidthPercent(
+          Number(changes.hoverMiddleWidthPercent.newValue),
+          settings.hoverMiddleWidthPercent
+        );
+      }
+
+      if (changes.hoverOuterSpeed) {
+        settings.hoverOuterSpeed = normalizeHoverPreviewSpeed(
+          Number(changes.hoverOuterSpeed.newValue),
+          settings.hoverOuterSpeed
+        );
+      }
+
+      if (changes.hoverOuterWidthPercent) {
+        settings.hoverOuterWidthPercent = normalizeHoverPreviewWidthPercent(
+          Number(changes.hoverOuterWidthPercent.newValue),
+          settings.hoverOuterWidthPercent
+        );
       }
 
       if (changes.adjustmentStep) {
@@ -2579,10 +2936,20 @@
 
       refreshReaderSavedState();
 
-      if (settings.hoverSpeed === 0) {
+      if (hoveredVideo && Number.isFinite(hoverPointerClientX) && Number.isFinite(hoverPointerClientY)) {
+        hoveredPreviewRate = getHoverPreviewRateAtPoint(
+          hoveredVideo,
+          hoverPointerClientX,
+          hoverPointerClientY
+        );
+      } else {
+        hoveredPreviewRate = null;
+      }
+
+      if (!hasActiveHoverPreviewBand()) {
         stopPreview();
-      } else if (hoveredVideo && hoveredPreviewEligible && !activePanel) {
-        startPreview(hoveredVideo);
+      } else if (hoveredVideo && Number.isFinite(hoveredPreviewRate) && !activePanel) {
+        startPreview(hoveredVideo, hoveredPreviewRate);
       } else {
         stopPreview();
       }
