@@ -3,6 +3,8 @@ const READER_SAVE_URL = "https://readwise.io/api/v3/save/";
 const READER_SOURCE = "minimal-video-speed";
 const READER_SAVED_URLS_KEY = "readerSavedUrls";
 const MAX_READER_SAVED_URLS = 2000;
+const DOWNIE_SENT_URLS_KEY = "downieSentUrls";
+const MAX_DOWNIE_SENT_URLS = 2000;
 
 const isHttpUrl = (value) => /^https?:\/\//i.test(value || "");
 const YOUTUBE_HOSTS = ["youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"];
@@ -311,6 +313,55 @@ const isReaderUrlSaved = async (targetUrl) => {
   return keys.some((key) => Boolean(savedUrls[key]));
 };
 
+const getDownieSentUrls = () =>
+  new Promise((resolve) => {
+    chrome.storage.local.get({ [DOWNIE_SENT_URLS_KEY]: {} }, (result) => {
+      const sentUrls = result[DOWNIE_SENT_URLS_KEY];
+      resolve(sentUrls && typeof sentUrls === "object" && !Array.isArray(sentUrls) ? sentUrls : {});
+    });
+  });
+
+const setDownieSentUrls = (sentUrls) =>
+  new Promise((resolve) => {
+    chrome.storage.local.set({ [DOWNIE_SENT_URLS_KEY]: sentUrls }, resolve);
+  });
+
+const pruneDownieSentUrls = (sentUrls) => {
+  const entries = Object.entries(sentUrls)
+    .filter(([url, sentAt]) => isHttpUrl(url) && Number.isFinite(Number(sentAt)))
+    .sort((a, b) => Number(b[1]) - Number(a[1]));
+
+  return Object.fromEntries(entries.slice(0, MAX_DOWNIE_SENT_URLS));
+};
+
+const markDownieUrlSent = async (targetUrl) => {
+  const keys = getSavedUrlKeys(targetUrl);
+
+  if (keys.length === 0) {
+    return;
+  }
+
+  const sentUrls = await getDownieSentUrls();
+  const sentAt = Date.now();
+
+  for (const key of keys) {
+    sentUrls[key] = sentAt;
+  }
+
+  await setDownieSentUrls(pruneDownieSentUrls(sentUrls));
+};
+
+const isDownieUrlSent = async (targetUrl) => {
+  const keys = getSavedUrlKeys(targetUrl);
+
+  if (keys.length === 0) {
+    return false;
+  }
+
+  const sentUrls = await getDownieSentUrls();
+  return keys.some((key) => Boolean(sentUrls[key]));
+};
+
 const pickTargetUrl = (message, sender) => {
   const pageUrl = message?.pageUrl;
   if (isPreferredVideoPageUrl(pageUrl)) {
@@ -347,12 +398,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return undefined;
     }
 
-    chrome.tabs.update(tabId, { url: encodeDownieActionUrl(targetUrl) }, () => {
+    chrome.tabs.update(tabId, { url: encodeDownieActionUrl(targetUrl) }, async () => {
       if (chrome.runtime.lastError) {
         sendResponse({ ok: false, error: chrome.runtime.lastError.message });
         return;
       }
 
+      await markDownieUrlSent(targetUrl);
       sendResponse({ ok: true, url: targetUrl });
     });
 
@@ -367,6 +419,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({
           ok: true,
           saved,
+          url: targetUrl
+        });
+      });
+
+      return true;
+    }
+
+    if (message?.type === "get-downie-sent-state") {
+      const targetUrl = pickTargetUrl(message, sender);
+
+      isDownieUrlSent(targetUrl).then((sent) => {
+        sendResponse({
+          ok: true,
+          sent,
           url: targetUrl
         });
       });

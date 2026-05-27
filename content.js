@@ -347,6 +347,11 @@
         fill: rgba(213, 255, 228, 0.18);
       }
 
+      .icon-button[data-downie-sent="true"] {
+        background: rgba(199, 255, 219, 0.18);
+        color: #d5ffe4;
+      }
+
       .icon-button[data-status="error"] {
         background: rgba(255, 148, 148, 0.18);
         color: #ffd6d6;
@@ -481,7 +486,9 @@
   let buttonStatusTimer = 0;
   let feedbackTimer = 0;
   let feedbackTarget = null;
+  let downieSentStateToken = 0;
   let readerSavedStateToken = 0;
+  const downieSentUrlCache = new Map();
   const readerSavedUrlCache = new Map();
   let dragState = null;
   let overlayPositionX = null;
@@ -569,6 +576,7 @@
     overlayPositionX = null;
     overlayPositionY = null;
     delete dragHandle.dataset.dragging;
+    setDownieSentState(false);
     setReaderSavedState(false);
     panel.dataset.visible = "false";
     panel.dataset.mode = "player";
@@ -760,6 +768,60 @@
     readerButton.hidden = !settings.showReader;
   };
 
+  const setDownieSentState = (sent) => {
+    downieButton.dataset.downieSent = String(Boolean(sent));
+    const label = sent ? "Sent to Downie" : "Open in Downie";
+    downieButton.title = label;
+    downieButton.setAttribute("aria-label", label);
+  };
+
+  const refreshDownieSentState = () => {
+    if (!settings.showDownie || panel.dataset.visible !== "true") {
+      return;
+    }
+
+    const source = getCurrentContextSource();
+    const pageUrl = getAssociatedPageUrl(source);
+    const directVideoUrl = getDirectVideoUrl(activeVideo);
+    const cacheKey = pageUrl || directVideoUrl;
+    const token = ++downieSentStateToken;
+
+    if (!cacheKey) {
+      setDownieSentState(false);
+      return;
+    }
+
+    if (downieSentUrlCache.has(cacheKey)) {
+      setDownieSentState(downieSentUrlCache.get(cacheKey));
+      return;
+    }
+
+    setDownieSentState(false);
+
+    sendRuntimeMessage({
+      type: "get-downie-sent-state",
+      videoUrl: directVideoUrl,
+      pageUrl
+    }).then(({ response, error }) => {
+      if (
+        token !== downieSentStateToken ||
+        error ||
+        getCurrentContextSource() !== source
+      ) {
+        return;
+      }
+
+      const sent = Boolean(response?.sent);
+      downieSentUrlCache.set(cacheKey, sent);
+
+      if (response?.url && response.url !== cacheKey) {
+        downieSentUrlCache.set(response.url, sent);
+      }
+
+      setDownieSentState(sent);
+    });
+  };
+
   const setReaderSavedState = (saved) => {
     readerButton.dataset.readerSaved = String(Boolean(saved));
     const label = saved ? "Saved in Reader" : "Save page to Reader";
@@ -865,6 +927,7 @@
     syncPanelPosition();
     panel.dataset.visible = "true";
     panel.setAttribute("aria-hidden", "false");
+    refreshDownieSentState();
     refreshReaderSavedState();
     refreshHoverZoneHint();
   };
@@ -2486,14 +2549,31 @@
 
     if (action === "downie") {
       const source = getCurrentContextSource();
+      const pageUrl = getAssociatedPageUrl(source);
+      const directVideoUrl = getDirectVideoUrl(activeVideo);
       const { response, error } = await sendRuntimeMessage({
         type: "open-in-downie",
-        videoUrl: getDirectVideoUrl(activeVideo),
-        pageUrl: getAssociatedPageUrl(source)
+        videoUrl: directVideoUrl,
+        pageUrl
       });
 
       if (getCurrentContextSource() === source) {
         setButtonStatus(button, response?.ok && !error ? "success" : "error");
+        if (response?.ok && !error) {
+          if (pageUrl) {
+            downieSentUrlCache.set(pageUrl, true);
+          }
+
+          if (directVideoUrl) {
+            downieSentUrlCache.set(directVideoUrl, true);
+          }
+
+          if (response.url) {
+            downieSentUrlCache.set(response.url, true);
+          }
+
+          setDownieSentState(true);
+        }
         const feedbackState = getDownieFeedback(response, error);
         showFeedback(feedbackState.kind, feedbackState.message);
       }
@@ -2853,7 +2933,8 @@
           !changes.showHoverSlowZoneHint &&
           !changes.showDownie &&
           !changes.showReader &&
-          !changes.readerSavedUrls
+          !changes.readerSavedUrls &&
+          !changes.downieSentUrls
         )
       ) {
         return;
@@ -2930,10 +3011,15 @@
       updateIntegrationVisibility();
       refreshVisiblePanelMode();
 
+      if (changes.downieSentUrls) {
+        downieSentUrlCache.clear();
+      }
+
       if (changes.readerSavedUrls) {
         readerSavedUrlCache.clear();
       }
 
+      refreshDownieSentState();
       refreshReaderSavedState();
 
       if (hoveredVideo && Number.isFinite(hoverPointerClientX) && Number.isFinite(hoverPointerClientY)) {
