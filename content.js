@@ -323,6 +323,15 @@
         color: #d5ffe4;
       }
 
+      .icon-button[data-reader-saved="true"] {
+        background: rgba(199, 255, 219, 0.18);
+        color: #d5ffe4;
+      }
+
+      .icon-button[data-reader-saved="true"] svg {
+        fill: rgba(213, 255, 228, 0.18);
+      }
+
       .icon-button[data-status="error"] {
         background: rgba(255, 148, 148, 0.18);
         color: #ffd6d6;
@@ -457,6 +466,8 @@
   let buttonStatusTimer = 0;
   let feedbackTimer = 0;
   let feedbackTarget = null;
+  let readerSavedStateToken = 0;
+  const readerSavedUrlCache = new Map();
   let dragState = null;
   let overlayPositionX = null;
   let overlayPositionY = null;
@@ -543,6 +554,7 @@
     overlayPositionX = null;
     overlayPositionY = null;
     delete dragHandle.dataset.dragging;
+    setReaderSavedState(false);
     panel.dataset.visible = "false";
     panel.dataset.mode = "player";
     panel.setAttribute("aria-hidden", "true");
@@ -733,6 +745,57 @@
     readerButton.hidden = !settings.showReader;
   };
 
+  const setReaderSavedState = (saved) => {
+    readerButton.dataset.readerSaved = String(Boolean(saved));
+    const label = saved ? "Saved in Reader" : "Save page to Reader";
+    readerButton.title = label;
+    readerButton.setAttribute("aria-label", label);
+  };
+
+  const refreshReaderSavedState = () => {
+    if (!settings.showReader || panel.dataset.visible !== "true") {
+      return;
+    }
+
+    const source = getCurrentContextSource();
+    const pageUrl = getAssociatedPageUrl(source);
+    const token = ++readerSavedStateToken;
+
+    if (!pageUrl) {
+      setReaderSavedState(false);
+      return;
+    }
+
+    if (readerSavedUrlCache.has(pageUrl)) {
+      setReaderSavedState(readerSavedUrlCache.get(pageUrl));
+      return;
+    }
+
+    setReaderSavedState(false);
+
+    sendRuntimeMessage({
+      type: "get-reader-save-state",
+      pageUrl
+    }).then(({ response, error }) => {
+      if (
+        token !== readerSavedStateToken ||
+        error ||
+        getCurrentContextSource() !== source
+      ) {
+        return;
+      }
+
+      const saved = Boolean(response?.saved);
+      readerSavedUrlCache.set(pageUrl, saved);
+
+      if (response?.url && response.url !== pageUrl) {
+        readerSavedUrlCache.set(response.url, saved);
+      }
+
+      setReaderSavedState(saved);
+    });
+  };
+
   const refreshVisiblePanelMode = () => {
     if (panel.dataset.visible !== "true") {
       return;
@@ -787,6 +850,7 @@
     syncPanelPosition();
     panel.dataset.visible = "true";
     panel.setAttribute("aria-hidden", "false");
+    refreshReaderSavedState();
     refreshHoverZoneHint();
   };
 
@@ -2223,6 +2287,17 @@
 
       if (getCurrentContextSource() === source) {
         setButtonStatus(button, response?.ok && !error ? "success" : "error");
+        if (response?.ok && !error) {
+          if (pageUrl) {
+            readerSavedUrlCache.set(pageUrl, true);
+          }
+
+          if (response.url) {
+            readerSavedUrlCache.set(response.url, true);
+          }
+
+          setReaderSavedState(true);
+        }
         const feedbackState = getReaderFeedback(response, error);
         showFeedback(
           feedbackState.kind,
@@ -2462,7 +2537,8 @@
           !changes.overlayIdleHideDelay &&
           !changes.showHoverSlowZoneHint &&
           !changes.showDownie &&
-          !changes.showReader
+          !changes.showReader &&
+          !changes.readerSavedUrls
         )
       ) {
         return;
@@ -2496,6 +2572,12 @@
       updatePictureInPictureVisibility();
       updateIntegrationVisibility();
       refreshVisiblePanelMode();
+
+      if (changes.readerSavedUrls) {
+        readerSavedUrlCache.clear();
+      }
+
+      refreshReaderSavedState();
 
       if (settings.hoverSpeed === 0) {
         stopPreview();

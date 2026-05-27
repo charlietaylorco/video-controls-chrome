@@ -1,6 +1,8 @@
 const DOWNIE_PREFIX = "downie://XUOpenLink?url=";
 const READER_SAVE_URL = "https://readwise.io/api/v3/save/";
 const READER_SOURCE = "minimal-video-speed";
+const READER_SAVED_URLS_KEY = "readerSavedUrls";
+const MAX_READER_SAVED_URLS = 2000;
 
 const isHttpUrl = (value) => /^https?:\/\//i.test(value || "");
 const YOUTUBE_HOSTS = ["youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"];
@@ -240,6 +242,75 @@ const normalizeTargetUrl = (value) => {
   }
 };
 
+const getSavedUrlKeys = (value) => {
+  const normalized = normalizeTargetUrl(value);
+
+  if (!isHttpUrl(normalized)) {
+    return [];
+  }
+
+  const keys = new Set([normalized]);
+
+  try {
+    const url = new URL(normalized);
+    url.hash = "";
+    keys.add(url.toString());
+  } catch {
+    // Keep the normalized value above.
+  }
+
+  return Array.from(keys);
+};
+
+const getReaderSavedUrls = () =>
+  new Promise((resolve) => {
+    chrome.storage.local.get({ [READER_SAVED_URLS_KEY]: {} }, (result) => {
+      const savedUrls = result[READER_SAVED_URLS_KEY];
+      resolve(savedUrls && typeof savedUrls === "object" && !Array.isArray(savedUrls) ? savedUrls : {});
+    });
+  });
+
+const setReaderSavedUrls = (savedUrls) =>
+  new Promise((resolve) => {
+    chrome.storage.local.set({ [READER_SAVED_URLS_KEY]: savedUrls }, resolve);
+  });
+
+const pruneReaderSavedUrls = (savedUrls) => {
+  const entries = Object.entries(savedUrls)
+    .filter(([url, savedAt]) => isHttpUrl(url) && Number.isFinite(Number(savedAt)))
+    .sort((a, b) => Number(b[1]) - Number(a[1]));
+
+  return Object.fromEntries(entries.slice(0, MAX_READER_SAVED_URLS));
+};
+
+const markReaderUrlSaved = async (targetUrl, extraUrl = null) => {
+  const keys = [...getSavedUrlKeys(targetUrl), ...getSavedUrlKeys(extraUrl)];
+
+  if (keys.length === 0) {
+    return;
+  }
+
+  const savedUrls = await getReaderSavedUrls();
+  const savedAt = Date.now();
+
+  for (const key of keys) {
+    savedUrls[key] = savedAt;
+  }
+
+  await setReaderSavedUrls(pruneReaderSavedUrls(savedUrls));
+};
+
+const isReaderUrlSaved = async (targetUrl) => {
+  const keys = getSavedUrlKeys(targetUrl);
+
+  if (keys.length === 0) {
+    return false;
+  }
+
+  const savedUrls = await getReaderSavedUrls();
+  return keys.some((key) => Boolean(savedUrls[key]));
+};
+
 const pickTargetUrl = (message, sender) => {
   const pageUrl = message?.pageUrl;
   if (isPreferredVideoPageUrl(pageUrl)) {
@@ -289,6 +360,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type !== "save-to-reader") {
+    if (message?.type === "get-reader-save-state") {
+      const targetUrl = normalizeTargetUrl(message?.pageUrl || sender?.tab?.url);
+
+      isReaderUrlSaved(targetUrl).then((saved) => {
+        sendResponse({
+          ok: true,
+          saved,
+          url: targetUrl
+        });
+      });
+
+      return true;
+    }
+
     if (message?.type === "open-options") {
       chrome.runtime.openOptionsPage();
     }
@@ -342,6 +427,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       } catch {
         result = null;
       }
+
+      await markReaderUrlSaved(targetUrl, result?.url);
 
       sendResponse({
         ok: true,
