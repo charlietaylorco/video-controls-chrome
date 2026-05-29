@@ -308,21 +308,6 @@
         opacity: 0.9;
       }
 
-      .readout {
-        min-width: 46px;
-        height: 30px;
-        padding: 0 8px;
-        border-radius: 8px;
-        background: rgba(255, 255, 255, 0.05);
-        color: rgba(245, 241, 232, 0.92);
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 11px;
-        line-height: 1;
-        box-sizing: border-box;
-      }
-
       .icon-button svg {
         width: 14px;
         height: 14px;
@@ -422,6 +407,11 @@
         color: #0f0f0f;
       }
 
+      .preset {
+        width: 46px;
+        font-size: 13px;
+      }
+
       .panel[data-mode="card"] .speed-control {
         display: none;
       }
@@ -444,7 +434,6 @@
         <button class="preset speed-control" data-rate="2" type="button">2x</button>
         <button class="preset speed-control" data-rate="3" type="button">3x</button>
         <button class="adjust speed-control" data-action="decrease" type="button" aria-label="Decrease speed">-</button>
-        <div class="readout speed-control" aria-live="polite">1.0x</div>
         <button class="adjust speed-control" data-action="increase" type="button" aria-label="Increase speed">+</button>
         <button class="icon-button" data-action="pip" type="button" aria-label="Enter picture-in-picture" title="Enter picture-in-picture">
           <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -475,7 +464,6 @@
   const panel = shadowRoot.querySelector(".panel");
   const hoverZoneHint = shadowRoot.querySelector(".hover-zone-hint");
   const presetButtons = Array.from(shadowRoot.querySelectorAll(".preset"));
-  const readout = shadowRoot.querySelector(".readout");
   const feedback = shadowRoot.querySelector(".feedback");
   const feedbackText = shadowRoot.querySelector(".feedback-text");
   const feedbackLink = shadowRoot.querySelector(".feedback-link");
@@ -727,11 +715,19 @@
     }
 
     const currentRate = getBaseRate(video);
-    readout.textContent = `${formatRate(currentRate)}x`;
+    const activePresetRate = currentRate >= 3 ? 3 : currentRate >= 2 ? 2 : 1;
 
     presetButtons.forEach((button) => {
       const presetRate = Number(button.dataset.rate);
-      button.dataset.active = String(Math.abs(currentRate - presetRate) < RATE_EPSILON);
+      const isActive = presetRate === activePresetRate;
+      button.dataset.active = String(isActive);
+      button.textContent = isActive ? `${formatRate(currentRate)}x` : `${formatRate(presetRate)}x`;
+      button.setAttribute(
+        "aria-label",
+        isActive
+          ? `Current speed ${formatRate(currentRate)}x`
+          : `Set speed to ${formatRate(presetRate)}x`
+      );
     });
 
     const isActivePictureInPicture = document.pictureInPictureElement === video;
@@ -751,7 +747,6 @@
     }
 
     pipButton.disabled = !canTogglePictureInPicture(video);
-    readout.style.opacity = isInteractive ? "1" : "0.7";
   };
 
   const updatePictureInPictureVisibility = () => {
@@ -917,9 +912,11 @@
     if (video) {
       updateUi(video);
     } else {
-      readout.textContent = "--";
       presetButtons.forEach((button) => {
+        const presetRate = Number(button.dataset.rate);
         button.dataset.active = "false";
+        button.textContent = `${formatRate(presetRate)}x`;
+        button.setAttribute("aria-label", `Set speed to ${formatRate(presetRate)}x`);
       });
       pipButton.dataset.active = "false";
       pipButton.title = "Enter picture-in-picture";
