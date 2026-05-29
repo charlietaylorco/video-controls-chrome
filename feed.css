@@ -213,20 +213,27 @@ body.modal-open {
 }
 
 .list-drag-handle {
-  width: 12px;
-  height: 16px;
-  border-radius: 4px;
+  width: 18px;
+  height: 22px;
+  border-radius: 6px;
   color: var(--text-muted);
-  background: repeating-linear-gradient(
-    180deg,
-    currentColor,
-    currentColor 2px,
-    transparent 2px,
-    transparent 4px
-  );
   opacity: 0.5;
   flex: 0 0 auto;
-  margin-right: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 2px;
+  cursor: grab;
+}
+
+.list-drag-handle svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+.list-item.dragging .list-drag-handle {
+  cursor: grabbing;
 }
 
 .list-item:hover .list-drag-handle {

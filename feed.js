@@ -14,6 +14,8 @@ const DOWNIE_SENT_URLS_KEY = 'downieSentUrls';
 const READWISE_SAVE_ENDPOINT = 'https://readwise.io/api/v3/save/';
 const READWISE_AUTH_ENDPOINT = 'https://readwise.io/api/v2/auth/';
 const SMART_READER_SAVED_ID = 'reader-saved';
+const SMART_DOWNIE_SENT_ID = 'downie-sent';
+const SMART_LIST_IDS = new Set(['all', SMART_READER_SAVED_ID, SMART_DOWNIE_SENT_ID]);
 const SYNC_KEYS = new Set([
   LIST_ORDER_KEY,
   SELECTED_KEY,
@@ -376,6 +378,10 @@ function isItemSentToDownie(item) {
   return isUrlMarked(state.downieSentUrls, item?.link);
 }
 
+function isSmartListId(id) {
+  return SMART_LIST_IDS.has(id);
+}
+
 function markLocalUrlState(key, url) {
   if (!url) return;
   const savedAt = Date.now();
@@ -623,7 +629,9 @@ function ensureDuration(videoId) {
 }
 
 function updateHeader(channelCount, itemCount) {
-  const list = state.selectedListId === SMART_READER_SAVED_ID
+  const list = state.selectedListId === SMART_DOWNIE_SENT_ID
+    ? { name: 'Sent to Downie' }
+    : state.selectedListId === SMART_READER_SAVED_ID
     ? { name: 'Saved to Reader' }
     : state.selectedListId === 'all'
     ? { name: 'All lists' }
@@ -704,7 +712,7 @@ async function applyImport(payload) {
   }
 
   syncListOrder();
-  if (state.selectedListId !== 'all' && state.selectedListId !== SMART_READER_SAVED_ID && !state.lists.find((entry) => entry.id === state.selectedListId)) {
+  if (!isSmartListId(state.selectedListId) && !state.lists.find((entry) => entry.id === state.selectedListId)) {
     state.selectedListId = 'all';
   }
 
@@ -1122,6 +1130,7 @@ function getFilteredItems() {
   const query = state.searchQuery.trim().toLowerCase();
   return state.items.filter((item) => {
     if (state.selectedListId === SMART_READER_SAVED_ID && !isItemSavedToReader(item)) return false;
+    if (state.selectedListId === SMART_DOWNIE_SENT_ID && !isItemSentToDownie(item)) return false;
     if (state.hideShorts && item.isShort) return false;
     if (state.hideArchived && isItemArchived(item)) return false;
     if (query) {
@@ -1137,6 +1146,15 @@ function getFilteredItems() {
 
 function countSavedReaderItems() {
   return (state.items || []).filter((item) => isItemSavedToReader(item)).length;
+}
+
+function countSentDownieItems() {
+  return (state.items || []).filter((item) => isItemSentToDownie(item)).length;
+}
+
+function smartListMatches(name, query) {
+  if (!query) return true;
+  return name.toLowerCase().includes(query);
 }
 
 function listMatchesQuery(list, query) {
@@ -1194,7 +1212,7 @@ function uniqueChannelsFromLists(lists) {
 }
 
 function getChannelsForSelection() {
-  if (state.selectedListId === 'all' || state.selectedListId === SMART_READER_SAVED_ID) {
+  if (isSmartListId(state.selectedListId)) {
     return uniqueChannelsFromLists(state.lists);
   }
   const list = state.lists.find((entry) => entry.id === state.selectedListId);
@@ -1207,24 +1225,14 @@ function syncListOrder() {
   const nextOrder = [];
 
   state.listOrder.forEach((id) => {
-    if (id === 'all' || knownIds.has(id)) {
+    if (knownIds.has(id)) {
       nextOrder.push(id);
       knownIds.delete(id);
     }
   });
 
   if (knownIds.size) {
-    const remaining = Array.from(knownIds);
-    const allIndex = nextOrder.indexOf('all');
-    if (allIndex >= 0) {
-      nextOrder.splice(allIndex, 0, ...remaining);
-    } else {
-      nextOrder.push(...remaining);
-    }
-  }
-
-  if (!nextOrder.includes('all')) {
-    nextOrder.push('all');
+    nextOrder.push(...Array.from(knownIds));
   }
 
   state.listOrder = nextOrder;
@@ -1236,12 +1244,7 @@ function syncListOrder() {
 
 function insertListOrder(id) {
   if (!id || state.listOrder.includes(id)) return;
-  const allIndex = state.listOrder.indexOf('all');
-  if (allIndex >= 0) {
-    state.listOrder.splice(allIndex, 0, id);
-  } else {
-    state.listOrder.push(id);
-  }
+  state.listOrder.push(id);
   setStorage(LIST_ORDER_KEY, state.listOrder);
 }
 
@@ -1259,19 +1262,21 @@ function renderLists() {
   const ordered = [];
   const query = state.searchQuery.trim();
   const normalizedQuery = query.toLowerCase();
-  const matchesAnyList = query
-    ? state.lists.some((list) => listMatchesQuery(list, query))
-    : true;
 
-  if (!query || 'saved to reader'.includes(normalizedQuery) || 'reader'.includes(normalizedQuery)) {
+  if (smartListMatches('All lists', normalizedQuery)) {
+    ordered.push({ id: 'all', name: 'All lists', count: uniqueChannelsFromLists(state.lists).length });
+  }
+
+  if (smartListMatches('Saved to Reader', normalizedQuery)) {
     ordered.push({ id: SMART_READER_SAVED_ID, name: 'Saved to Reader', count: countSavedReaderItems() });
   }
 
+  if (smartListMatches('Sent to Downie', normalizedQuery)) {
+    ordered.push({ id: SMART_DOWNIE_SENT_ID, name: 'Sent to Downie', count: countSentDownieItems() });
+  }
+
   state.listOrder.forEach((id) => {
-    if (id === 'all') {
-      if (matchesAnyList || query.toLowerCase().includes('all')) {
-        ordered.push({ id: 'all', name: 'All lists', count: uniqueChannelsFromLists(state.lists).length });
-      }
+    if (isSmartListId(id)) {
       return;
     }
     const list = listMap.get(id);
@@ -1289,10 +1294,6 @@ function renderLists() {
     });
   }
 
-  if (!state.listOrder.includes('all') && (matchesAnyList || query.toLowerCase().includes('all'))) {
-    ordered.push({ id: 'all', name: 'All lists', count: uniqueChannelsFromLists(state.lists).length });
-  }
-
   ordered.forEach((entry) => {
     const button = buildListButton(entry);
     elements.listItems.appendChild(button);
@@ -1302,18 +1303,31 @@ function renderLists() {
 }
 
 function buildListButton({ id, name, count }) {
+  const isSmartList = isSmartListId(id);
   const button = document.createElement('div');
-  button.className = `list-item${state.selectedListId === id ? ' active' : ''}`;
+  button.className = `list-item${state.selectedListId === id ? ' active' : ''}${isSmartList ? ' smart' : ''}`;
   button.dataset.listId = id;
-  button.draggable = id !== SMART_READER_SAVED_ID;
+  button.draggable = !isSmartList;
   button.setAttribute('role', 'button');
   button.setAttribute('tabindex', '0');
   button.setAttribute('aria-pressed', state.selectedListId === id ? 'true' : 'false');
 
-  const handle = document.createElement('span');
-  handle.className = 'list-drag-handle';
-  handle.setAttribute('aria-hidden', 'true');
-  button.appendChild(handle);
+  if (!isSmartList) {
+    const handle = document.createElement('span');
+    handle.className = 'list-drag-handle';
+    handle.setAttribute('aria-hidden', 'true');
+    handle.innerHTML = `
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <circle cx="9" cy="6" r="1.4"></circle>
+        <circle cx="15" cy="6" r="1.4"></circle>
+        <circle cx="9" cy="12" r="1.4"></circle>
+        <circle cx="15" cy="12" r="1.4"></circle>
+        <circle cx="9" cy="18" r="1.4"></circle>
+        <circle cx="15" cy="18" r="1.4"></circle>
+      </svg>
+    `;
+    button.appendChild(handle);
+  }
 
   const nameSpan = document.createElement('span');
   nameSpan.className = 'list-name';
@@ -1335,7 +1349,7 @@ function buildListButton({ id, name, count }) {
     }
   });
 
-  if (id !== 'all' && id !== SMART_READER_SAVED_ID) {
+  if (!isSmartList) {
     const renameButton = document.createElement('button');
     renameButton.type = 'button';
     renameButton.className = 'list-rename';
@@ -1410,6 +1424,10 @@ function setupListDrag() {
   elements.listItems.addEventListener('dragstart', (event) => {
     const item = getListItem(event.target);
     if (!item) return;
+    if (isSmartListId(item.dataset.listId)) {
+      event.preventDefault();
+      return;
+    }
     draggedId = item.dataset.listId;
     item.classList.add('dragging');
     event.dataTransfer.effectAllowed = 'move';
@@ -1429,6 +1447,7 @@ function setupListDrag() {
 
     const target = getListItem(event.target);
     if (!target || target === draggingEl) return;
+    if (isSmartListId(target.dataset.listId)) return;
 
     const rect = target.getBoundingClientRect();
     const axis = getAxis();
@@ -1448,13 +1467,12 @@ function setupListDrag() {
 
     const orderedIds = Array.from(elements.listItems.querySelectorAll('.list-item'))
       .map((item) => item.dataset.listId)
-      .filter((id) => id);
+      .filter((id) => id && !isSmartListId(id));
 
     state.listOrder = orderedIds;
 
     const map = new Map(state.lists.map((list) => [list.id, list]));
     state.lists = orderedIds
-      .filter((id) => id !== 'all')
       .map((id) => map.get(id))
       .filter(Boolean);
 
@@ -1566,14 +1584,14 @@ async function loadFeed(options = {}) {
   }
 
   state.lists = (await getStorage(STORAGE_KEY, [])) || [];
-  if (state.selectedListId !== 'all' && state.selectedListId !== SMART_READER_SAVED_ID && !state.lists.find((entry) => entry.id === state.selectedListId)) {
+  if (!isSmartListId(state.selectedListId) && !state.lists.find((entry) => entry.id === state.selectedListId)) {
     state.selectedListId = 'all';
     await setStorage(SELECTED_KEY, 'all');
   }
 
   await normalizeStoredChannels();
   const channels = getChannelsForSelection();
-  elements.manageList.disabled = state.selectedListId === 'all' || state.selectedListId === SMART_READER_SAVED_ID;
+  elements.manageList.disabled = isSmartListId(state.selectedListId);
   updateHeader(channels.length, 0);
 
   if (!channels.length) {
@@ -1860,11 +1878,14 @@ async function handleSendToDownie(item, button) {
   });
 
   if (response?.ok && !error) {
-    markLocalUrlState(DOWNIE_SENT_URLS_KEY, response.url || item.link);
+    markLocalUrlState(DOWNIE_SENT_URLS_KEY, item.link);
+    markLocalUrlState(DOWNIE_SENT_URLS_KEY, response.url);
+    item.isSentToDownie = true;
     button.dataset.state = 'saved';
     button.setAttribute('aria-label', 'Sent to Downie');
     button.title = 'Sent to Downie';
     showToast(`Sent "${item.title}" to Downie.`);
+    renderLists();
     window.setTimeout(() => {
       button.dataset.state = isItemSentToDownie(item) ? 'saved' : 'idle';
     }, 1400);
@@ -1958,7 +1979,7 @@ function buildVideoCard(item) {
     await handleSendToDownie(item, downieAction);
   });
 
-  readerActions.append(readerAction, downieAction);
+  readerActions.append(downieAction, readerAction);
   thumb.appendChild(readerActions);
 
   if (!item.durationSeconds && item.videoId) {
@@ -2478,7 +2499,7 @@ async function init() {
   await loadDurationCacheFromStorage();
   await loadFeedCacheFromStorage();
   await loadArchivedFromStorage();
-  if (state.selectedListId !== 'all' && state.selectedListId !== SMART_READER_SAVED_ID && !state.lists.find((entry) => entry.id === state.selectedListId)) {
+  if (!isSmartListId(state.selectedListId) && !state.lists.find((entry) => entry.id === state.selectedListId)) {
     state.selectedListId = 'all';
     await setStorage(SELECTED_KEY, 'all');
   }
@@ -2684,6 +2705,8 @@ chrome.storage.onChanged.addListener((changes, area) => {
     state.items.forEach((item) => {
       item.isSentToDownie = isItemSentToDownie(item);
     });
+    renderLists();
+    updateHeader(getChannelsForSelection().length, getFilteredItems().length);
     renderFeed();
   }
 
