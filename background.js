@@ -5,6 +5,7 @@ const READER_SAVED_URLS_KEY = "readerSavedUrls";
 const MAX_READER_SAVED_URLS = 2000;
 const DOWNIE_SENT_URLS_KEY = "downieSentUrls";
 const MAX_DOWNIE_SENT_URLS = 2000;
+const FEED_URL = chrome.runtime.getURL("feed.html");
 
 const isHttpUrl = (value) => /^https?:\/\//i.test(value || "");
 const YOUTUBE_HOSTS = ["youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"];
@@ -389,6 +390,13 @@ const pickTargetUrl = (message, sender) => {
 };
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "open-yt-lists" || message?.type === "ytListsOpenFeed") {
+    chrome.tabs.create({ url: FEED_URL }, () => {
+      sendResponse({ ok: !chrome.runtime.lastError });
+    });
+    return true;
+  }
+
   if (message?.type === "open-in-downie") {
     const tabId = sender?.tab?.id;
     const targetUrl = pickTargetUrl(message, sender);
@@ -450,7 +458,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const targetUrl = normalizeTargetUrl(message?.pageUrl || sender?.tab?.url);
 
   chrome.storage.local.get({ readerToken: "" }, async ({ readerToken }) => {
-    if (!targetUrl || !isHttpUrl(targetUrl)) {
+    if (!targetUrl || !isHttpUrl(targetUrl) || !isYouTubeVideoPageUrl(targetUrl)) {
       sendResponse({ ok: false, code: "invalid_url" });
       return;
     }
@@ -507,4 +515,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   });
 
   return true;
+});
+
+chrome.action?.onClicked?.addListener(() => {
+  chrome.tabs.create({ url: FEED_URL });
 });

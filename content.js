@@ -765,7 +765,8 @@
 
   const updateIntegrationVisibility = () => {
     downieButton.hidden = !settings.showDownie;
-    readerButton.hidden = !settings.showReader;
+    const pageUrl = getAssociatedPageUrl(getCurrentContextSource());
+    readerButton.hidden = !settings.showReader || !isYouTubeVideoUrl(pageUrl);
   };
 
   const setDownieSentState = (sent) => {
@@ -838,7 +839,7 @@
     const pageUrl = getAssociatedPageUrl(source);
     const token = ++readerSavedStateToken;
 
-    if (!pageUrl) {
+    if (!isYouTubeVideoUrl(pageUrl)) {
       setReaderSavedState(false);
       return;
     }
@@ -911,6 +912,7 @@
     activeMode = mode === "card" ? "card" : "player";
     panel.dataset.mode = resolvePanelMode(activeMode);
     updateControlsAvailability(video);
+    updateIntegrationVisibility();
 
     if (video) {
       updateUi(video);
@@ -1903,6 +1905,20 @@
     }
   };
 
+  const isYouTubeVideoUrl = (value) => {
+    if (!value) {
+      return false;
+    }
+
+    try {
+      const url = new URL(value, window.location.href);
+      const isYoutubeHost = ["youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"].includes(url.hostname);
+      return isYoutubeHost && (url.pathname === "/watch" || /^\/(shorts|live)\//.test(url.pathname));
+    } catch {
+      return false;
+    }
+  };
+
   const getMessageTimeout = (message) => {
     if (message?.type === "save-to-reader") {
       return 12000;
@@ -2609,6 +2625,11 @@
       const pageUrl = getAssociatedPageUrl(source);
       const title = getAssociatedTitle(source);
       const author = getAssociatedAuthor(source);
+      if (!isYouTubeVideoUrl(pageUrl)) {
+        setButtonStatus(button, "error");
+        showFeedback("error", "Reader is YouTube-only");
+        return;
+      }
       setButtonLoading(button);
       showPendingFeedback("Saving to Reader...");
       const { response, error } = await sendRuntimeMessage({

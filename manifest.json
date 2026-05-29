@@ -3,6 +3,9 @@
   "name": "Minimal Video Speed",
   "version": "1.0.0",
   "description": "A minimal top-left overlay for controlling HTML video playback speed.",
+  "action": {
+    "default_title": "Video Controls"
+  },
   "permissions": [
     "storage",
     "tabs"
@@ -22,6 +25,17 @@
     "open_in_tab": true
   },
   "content_scripts": [
+    {
+      "matches": [
+        "https://www.youtube.com/*",
+        "https://youtube.com/*",
+        "https://m.youtube.com/*"
+      ],
+      "js": [
+        "yt-lists-content.js"
+      ],
+      "run_at": "document_start"
+    },
     {
       "matches": [
         "<all_urls>"
