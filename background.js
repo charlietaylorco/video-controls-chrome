@@ -11,6 +11,8 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value || "");
 const YOUTUBE_HOSTS = ["youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"];
 const isYouTubeWatchUrl = (url) =>
   YOUTUBE_HOSTS.includes(url.hostname) && url.pathname === "/watch";
+const isYouTubeEmbedUrl = (url) =>
+  YOUTUBE_HOSTS.includes(url.hostname) && /^\/embed\/[^/]+/.test(url.pathname);
 const isYouTubeChannelPageUrl = (value) => {
   if (!isHttpUrl(value)) {
     return false;
@@ -35,7 +37,7 @@ const isYouTubeVideoPageUrl = (value) => {
 
   try {
     const url = new URL(value);
-    return isYouTubeWatchUrl(url) || /^\/(shorts|live)\//.test(url.pathname);
+    return isYouTubeWatchUrl(url) || isYouTubeEmbedUrl(url) || /^\/(shorts|live)\//.test(url.pathname);
   } catch {
     return false;
   }
@@ -52,7 +54,11 @@ const isPreferredVideoPageUrl = (value) => {
       return true;
     }
 
-    return ["youtu.be", "www.youtu.be"].includes(url.hostname) || /^\/(shorts|live)\//.test(url.pathname);
+    return (
+      ["youtu.be", "www.youtu.be"].includes(url.hostname) ||
+      isYouTubeEmbedUrl(url) ||
+      /^\/(shorts|live)\//.test(url.pathname)
+    );
   } catch {
     return false;
   }
@@ -237,6 +243,14 @@ const normalizeTargetUrl = (value) => {
       }
 
       return url.toString();
+    }
+
+    if (isYouTubeEmbedUrl(url)) {
+      const videoId = url.pathname.split("/")[2];
+
+      if (videoId) {
+        return `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
+      }
     }
 
     return url.toString();

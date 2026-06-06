@@ -786,7 +786,7 @@
   const updateIntegrationVisibility = () => {
     downieButton.hidden = !settings.showDownie;
     const pageUrl = getAssociatedPageUrl(getCurrentContextSource());
-    readerButton.hidden = !settings.showReader || !isYouTubeVideoUrl(pageUrl);
+    readerButton.hidden = !settings.showReader || !isYouTubeReaderSaveUrl(pageUrl);
   };
 
   const setDownieSentState = (sent) => {
@@ -804,7 +804,7 @@
     const source = getCurrentContextSource();
     const pageUrl = getAssociatedPageUrl(source);
     const directVideoUrl = getDirectVideoUrl(activeVideo);
-    const cacheKey = pageUrl || directVideoUrl;
+    const cacheKey = normalizeYouTubeStateUrl(pageUrl || directVideoUrl);
     const token = ++downieSentStateToken;
 
     if (!cacheKey) {
@@ -836,7 +836,7 @@
       downieSentUrlCache.set(cacheKey, sent);
 
       if (response?.url && response.url !== cacheKey) {
-        downieSentUrlCache.set(response.url, sent);
+        downieSentUrlCache.set(normalizeYouTubeStateUrl(response.url), sent);
       }
 
       setDownieSentState(sent);
@@ -857,15 +857,16 @@
 
     const source = getCurrentContextSource();
     const pageUrl = getAssociatedPageUrl(source);
+    const cacheKey = normalizeYouTubeStateUrl(pageUrl);
     const token = ++readerSavedStateToken;
 
-    if (!isYouTubeVideoUrl(pageUrl)) {
+    if (!isYouTubeReaderSaveUrl(pageUrl)) {
       setReaderSavedState(false);
       return;
     }
 
-    if (readerSavedUrlCache.has(pageUrl)) {
-      setReaderSavedState(readerSavedUrlCache.get(pageUrl));
+    if (readerSavedUrlCache.has(cacheKey)) {
+      setReaderSavedState(readerSavedUrlCache.get(cacheKey));
       return;
     }
 
@@ -884,10 +885,10 @@
       }
 
       const saved = Boolean(response?.saved);
-      readerSavedUrlCache.set(pageUrl, saved);
+      readerSavedUrlCache.set(cacheKey, saved);
 
       if (response?.url && response.url !== pageUrl) {
-        readerSavedUrlCache.set(response.url, saved);
+        readerSavedUrlCache.set(normalizeYouTubeStateUrl(response.url), saved);
       }
 
       setReaderSavedState(saved);
@@ -1893,7 +1894,7 @@
         url.hostname
       );
 
-      if (isYoutubeHost && (url.pathname === "/watch" || /^\/(shorts|live)\//.test(url.pathname))) {
+      if (isYoutubeHost && (url.pathname === "/watch" || /^\/(shorts|live|embed)\//.test(url.pathname))) {
         return true;
       }
 
@@ -1935,9 +1936,58 @@
     try {
       const url = new URL(value, window.location.href);
       const isYoutubeHost = ["youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"].includes(url.hostname);
+      return isYoutubeHost && (url.pathname === "/watch" || /^\/(shorts|live|embed)\//.test(url.pathname));
+    } catch {
+      return false;
+    }
+  };
+
+  const isYouTubeReaderSaveUrl = (value) => {
+    if (!value) {
+      return false;
+    }
+
+    try {
+      const url = new URL(value, window.location.href);
+      const isYoutubeHost = ["youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"].includes(url.hostname);
       return isYoutubeHost && (url.pathname === "/watch" || /^\/(shorts|live)\//.test(url.pathname));
     } catch {
       return false;
+    }
+  };
+
+  const normalizeYouTubeStateUrl = (value) => {
+    if (!value) {
+      return null;
+    }
+
+    try {
+      const url = new URL(value, window.location.href);
+      const isYoutubeHost = ["youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"].includes(url.hostname);
+
+      if (!isYoutubeHost) {
+        return url.toString();
+      }
+
+      if (["/watch"].includes(url.pathname)) {
+        const videoId = url.searchParams.get("v");
+
+        if (videoId) {
+          return `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
+        }
+      }
+
+      if (/^\/embed\/[^/]+/.test(url.pathname)) {
+        const videoId = url.pathname.split("/")[2];
+
+        if (videoId) {
+          return `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
+        }
+      }
+
+      return url.toString();
+    } catch {
+      return value;
     }
   };
 
@@ -2238,6 +2288,10 @@
       }
     }
 
+    if (isCurrentPageVideoUrl()) {
+      return window.location.href;
+    }
+
     for (let node = source; node && node !== document.body; node = node.parentElement) {
       if (node instanceof HTMLAnchorElement && node.href) {
         const absoluteUrl = resolveUrl(node.href);
@@ -2268,10 +2322,6 @@
           return absoluteUrl;
         }
       }
-    }
-
-    if (isCurrentPageVideoUrl()) {
-      return window.location.href;
     }
 
     const fallbackAnchor = source.closest("a[href]");
@@ -2603,15 +2653,15 @@
         setButtonStatus(button, response?.ok && !error ? "success" : "error");
         if (response?.ok && !error) {
           if (pageUrl) {
-            downieSentUrlCache.set(pageUrl, true);
+            downieSentUrlCache.set(normalizeYouTubeStateUrl(pageUrl), true);
           }
 
           if (directVideoUrl) {
-            downieSentUrlCache.set(directVideoUrl, true);
+            downieSentUrlCache.set(normalizeYouTubeStateUrl(directVideoUrl), true);
           }
 
           if (response.url) {
-            downieSentUrlCache.set(response.url, true);
+            downieSentUrlCache.set(normalizeYouTubeStateUrl(response.url), true);
           }
 
           setDownieSentState(true);
@@ -2651,7 +2701,7 @@
       const pageUrl = getAssociatedPageUrl(source);
       const title = getAssociatedTitle(source);
       const author = getAssociatedAuthor(source);
-      if (!isYouTubeVideoUrl(pageUrl)) {
+      if (!isYouTubeReaderSaveUrl(pageUrl)) {
         setButtonStatus(button, "error");
         showFeedback("error", "Reader is YouTube-only");
         return;
@@ -2673,11 +2723,11 @@
         setButtonStatus(button, response?.ok && !error ? "success" : "error");
         if (response?.ok && !error) {
           if (pageUrl) {
-            readerSavedUrlCache.set(pageUrl, true);
+            readerSavedUrlCache.set(normalizeYouTubeStateUrl(pageUrl), true);
           }
 
           if (response.url) {
-            readerSavedUrlCache.set(response.url, true);
+            readerSavedUrlCache.set(normalizeYouTubeStateUrl(response.url), true);
           }
 
           setReaderSavedState(true);
