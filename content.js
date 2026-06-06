@@ -60,19 +60,26 @@
   const isInvalidatedContextError = (error) =>
     String(error?.message || error).includes("Extension context invalidated");
 
+  const isHandledBrowserDomException = (error) =>
+    error instanceof DOMException ||
+    String(error).includes("[object DOMException]");
+
+  const shouldLogEventHandlerError = (error) =>
+    !isInvalidatedContextError(error) && !isHandledBrowserDomException(error);
+
   const safeEventHandler = (handler) => (event) => {
     try {
       const result = handler(event);
 
       if (result && typeof result.catch === "function") {
         result.catch((error) => {
-          if (!isInvalidatedContextError(error)) {
+          if (shouldLogEventHandlerError(error)) {
             console.error(error);
           }
         });
       }
     } catch (error) {
-      if (!isInvalidatedContextError(error)) {
+      if (shouldLogEventHandlerError(error)) {
         console.error(error);
       }
     }
@@ -408,11 +415,14 @@
       }
 
       .preset {
-        width: 46px;
-        font-size: 13px;
+        width: 40px;
+        font-size: 12px;
+        letter-spacing: 0;
+        font-variant-numeric: tabular-nums;
       }
 
-      .panel[data-mode="card"] .speed-control {
+      .panel[data-mode="card"] .speed-control,
+      .panel[data-mode="card"] [data-action="pip"] {
         display: none;
       }
 
@@ -472,6 +482,7 @@
   const downieButton = shadowRoot.querySelector('[data-action="downie"]');
   const readerButton = shadowRoot.querySelector('[data-action="reader"]');
   let buttonStatusTimer = 0;
+  let buttonStatusTarget = null;
   let feedbackTimer = 0;
   let feedbackTarget = null;
   let downieSentStateToken = 0;
@@ -552,6 +563,15 @@
     setPlaybackRate(video, previewRate);
   };
 
+  const clearTransientButtonStatuses = () => {
+    window.clearTimeout(buttonStatusTimer);
+    buttonStatusTarget = null;
+
+    for (const button of [pipButton, downieButton, readerButton]) {
+      delete button.dataset.status;
+    }
+  };
+
   const hidePanel = () => {
     clearHideTimer();
     clearIdleHideTimer();
@@ -560,6 +580,7 @@
     hoverZoneHint.setAttribute("aria-hidden", "true");
     stopPreview();
     clearFeedback();
+    clearTransientButtonStatuses();
     dragState = null;
     overlayPositionX = null;
     overlayPositionY = null;
@@ -720,8 +741,12 @@
     presetButtons.forEach((button) => {
       const presetRate = Number(button.dataset.rate);
       const isActive = presetRate === activePresetRate;
+      const formattedCurrentRate = formatRate(currentRate);
+      const label = isActive
+        ? (formattedCurrentRate.includes(".") ? formattedCurrentRate : `${formattedCurrentRate}x`)
+        : `${formatRate(presetRate)}x`;
       button.dataset.active = String(isActive);
-      button.textContent = isActive ? `${formatRate(currentRate)}x` : `${formatRate(presetRate)}x`;
+      button.textContent = label;
       button.setAttribute(
         "aria-label",
         isActive
@@ -1966,19 +1991,23 @@
 
   const setButtonStatus = (button, status) => {
     window.clearTimeout(buttonStatusTimer);
+    buttonStatusTarget = getCurrentContextSource();
     button.dataset.status = status;
     buttonStatusTimer = window.setTimeout(() => {
       delete button.dataset.status;
+      buttonStatusTarget = null;
     }, 1400);
   };
 
   const setButtonLoading = (button) => {
     window.clearTimeout(buttonStatusTimer);
+    buttonStatusTarget = getCurrentContextSource();
     button.dataset.status = "loading";
   };
 
   const clearButtonStatus = (button) => {
     window.clearTimeout(buttonStatusTimer);
+    buttonStatusTarget = null;
     delete button.dataset.status;
   };
 
@@ -2183,10 +2212,6 @@
       return null;
     }
 
-    if (isCurrentPageVideoUrl()) {
-      return window.location.href;
-    }
-
     const container = getVideoCardContainer(source);
 
     if (container) {
@@ -2243,6 +2268,10 @@
           return absoluteUrl;
         }
       }
+    }
+
+    if (isCurrentPageVideoUrl()) {
+      return window.location.href;
     }
 
     const fallbackAnchor = source.closest("a[href]");
@@ -2360,15 +2389,6 @@
       return null;
     }
 
-    if (isCurrentPageVideoUrl()) {
-      return pickTextFromSelectors(document, [
-        "ytd-watch-metadata h1 yt-formatted-string",
-        "h1.ytd-watch-metadata yt-formatted-string",
-        "h1.title yt-formatted-string",
-        "meta[property='og:title']"
-      ], cleanTitle);
-    }
-
     const container = getVideoCardContainer(source);
 
     if (container) {
@@ -2410,6 +2430,15 @@
       }
     }
 
+    if (isCurrentPageVideoUrl()) {
+      return pickTextFromSelectors(document, [
+        "ytd-watch-metadata h1 yt-formatted-string",
+        "h1.ytd-watch-metadata yt-formatted-string",
+        "h1.title yt-formatted-string",
+        "meta[property='og:title']"
+      ], cleanTitle);
+    }
+
     return pickTextFromSelectors(source, [
       "#video-title",
       "#video-title-link",
@@ -2428,19 +2457,6 @@
   const getAssociatedAuthor = (source) => {
     if (!(source instanceof Element)) {
       return null;
-    }
-
-    if (isCurrentPageVideoUrl()) {
-      return pickTextFromSelectors(
-        document,
-        [
-          "#channel-name a",
-          "ytd-watch-metadata ytd-channel-name a",
-          "ytd-watch-metadata #owner a",
-          "link[itemprop='name']"
-        ],
-        cleanAuthor
-      );
     }
 
     if (isYouTubeChannelPage()) {
@@ -2506,6 +2522,19 @@
           "a#thumbnail[aria-label]"
         ],
         extractAuthorFromLabel
+      );
+    }
+
+    if (isCurrentPageVideoUrl()) {
+      return pickTextFromSelectors(
+        document,
+        [
+          "#channel-name a",
+          "ytd-watch-metadata ytd-channel-name a",
+          "ytd-watch-metadata #owner a",
+          "link[itemprop='name']"
+        ],
+        cleanAuthor
       );
     }
 
@@ -2764,6 +2793,10 @@
       const nextTarget = nextContext?.target || null;
       const nextSource = nextContext?.metadataTarget || nextTarget || nextVideo || null;
       const nextPreviewRate = getHoverPreviewRateAtPoint(nextVideo, event.clientX, event.clientY);
+
+      if (buttonStatusTarget && buttonStatusTarget !== nextSource) {
+        clearTransientButtonStatuses();
+      }
 
       if (feedbackTarget && feedbackTarget !== nextSource) {
         clearFeedback();

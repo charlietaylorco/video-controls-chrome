@@ -82,12 +82,51 @@ body.modal-open {
   font-size: 18px;
 }
 
+.brand span {
+  flex: 1 1 auto;
+}
+
 .brand-dot {
   width: 10px;
   height: 10px;
   border-radius: 50%;
   background: var(--accent);
   box-shadow: 0 0 0 4px rgba(255, 0, 51, 0.12);
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.sidebar-settings {
+  width: 100%;
+  min-height: 38px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  cursor: pointer;
+  padding: 0 12px;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.sidebar-settings svg {
+  width: 14px;
+  height: 14px;
+  fill: var(--text-muted);
+  flex: 0 0 auto;
+}
+
+.sidebar-settings:hover {
+  background: var(--surface-muted);
 }
 
 .primary {
@@ -246,31 +285,8 @@ body.modal-open {
   flex: 1 1 auto;
 }
 
-.list-settings {
-  margin-left: auto;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  padding: 0;
-}
-
-.list-settings svg {
-  width: 14px;
-  height: 14px;
-  fill: var(--text-muted);
-}
-
-.list-settings:hover {
-  background: var(--surface-muted);
-}
-
-.list-rename {
+.list-rename,
+.list-hide {
   margin-left: auto;
   width: 26px;
   height: 26px;
@@ -288,20 +304,32 @@ body.modal-open {
   transition: opacity 0.15s ease;
 }
 
-.list-rename svg {
+.list-hide {
+  margin-left: 0;
+}
+
+.list-rename svg,
+.list-hide svg {
   width: 14px;
   height: 14px;
   fill: var(--text-muted);
+  stroke: var(--text-muted);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
 }
 
 .list-item:hover .list-rename,
+.list-item:hover .list-hide,
+.list-item:focus-within .list-hide,
 .list-item:focus-within .list-rename {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
 }
 
-.list-rename:hover {
+.list-rename:hover,
+.list-hide:hover {
   background: var(--surface-muted);
 }
 
@@ -352,6 +380,10 @@ body.modal-open {
   display: flex;
   gap: 6px;
   padding: 2px 4px 4px;
+}
+
+.settings-popover-list {
+  padding: 0;
 }
 
 .settings-theme-option {
@@ -438,8 +470,9 @@ body.modal-open {
 .ghost:focus-visible,
 .primary:focus-visible,
 .icon-button:focus-visible,
-.list-settings:focus-visible,
+.sidebar-settings:focus-visible,
 .list-rename:focus-visible,
+.list-hide:focus-visible,
 .settings-popover-item:focus-visible,
 .settings-theme-option:focus-visible,
 .toast-button:focus-visible,

@@ -29,6 +29,14 @@
           <div class="list-items" id="list-items"></div>
           <div class="list-search-empty" id="list-search-empty" hidden>No lists match this search.</div>
         </div>
+        <div class="sidebar-footer">
+          <button class="sidebar-settings" id="sidebar-settings" type="button" aria-label="List tools">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.95l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.06 7.06 0 0 0-1.64-.95l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.58.23-1.12.54-1.64.95l-2.39-.96a.5.5 0 0 0-.6.22L2.7 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.05.31-.07.63-.07.95s.02.64.07.94L2.82 14.53a.5.5 0 0 0-.12.64l1.92 3.32c.13.23.4.32.64.22l2.39-.96c.5.41 1.06.73 1.64.95l.36 2.54c.04.24.25.42.5.42h3.84c.25 0 .46-.18.5-.42l.36-2.54c.58-.22 1.14-.54 1.64-.95l2.39.96c.24.1.51.01.64-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.02-1.59ZM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5Z"></path>
+            </svg>
+            <span>Settings</span>
+          </button>
+        </div>
       </aside>
 
       <main class="main">
@@ -43,6 +51,8 @@
             <button class="ghost" id="toggle-feed-videos" aria-pressed="false">Focus mode: off</button>
             <button class="ghost" id="toggle-shorts">Show Shorts</button>
             <button class="ghost" id="toggle-archived">Show Hidden</button>
+            <button class="ghost" id="toggle-reader-saved">Hide Reader Saved</button>
+            <button class="ghost" id="toggle-downie-sent">Hide Downie Sent</button>
             <button class="ghost" id="manage-list" disabled>Manage</button>
             <button class="ghost" id="refresh-feed">Refresh</button>
           </div>

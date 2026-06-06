@@ -3,10 +3,13 @@ const SELECTED_KEY = 'ytListsSelectedId';
 const HIDE_SHORTS_KEY = 'ytListsHideShorts';
 const HIDE_ARCHIVED_KEY = 'ytListsHideArchived';
 const HIDE_FEED_VIDEOS_KEY = 'ytListsHideFeedVideos';
+const HIDE_READER_SAVED_KEY = 'ytListsHideReaderSaved';
+const HIDE_DOWNIE_SENT_KEY = 'ytListsHideDownieSent';
 const FEED_CACHE_KEY = 'ytListsFeedCache';
 const DURATION_CACHE_KEY = 'ytListsDurationCache';
 const ARCHIVE_KEY = 'ytListsArchived';
 const LIST_ORDER_KEY = 'ytListsOrder';
+const HIDDEN_SMART_LISTS_KEY = 'ytListsHiddenSmartLists';
 const THEME_KEY = 'ytListsTheme';
 const READWISE_API_KEY_KEY = 'readerToken';
 const READER_SAVED_URLS_KEY = 'readerSavedUrls';
@@ -16,12 +19,20 @@ const READWISE_AUTH_ENDPOINT = 'https://readwise.io/api/v2/auth/';
 const SMART_READER_SAVED_ID = 'reader-saved';
 const SMART_DOWNIE_SENT_ID = 'downie-sent';
 const SMART_LIST_IDS = new Set(['all', SMART_READER_SAVED_ID, SMART_DOWNIE_SENT_ID]);
+const SMART_LISTS = [
+  { id: 'all', name: 'All lists' },
+  { id: SMART_READER_SAVED_ID, name: 'Saved to Reader' },
+  { id: SMART_DOWNIE_SENT_ID, name: 'Sent to Downie' },
+];
 const SYNC_KEYS = new Set([
   LIST_ORDER_KEY,
+  HIDDEN_SMART_LISTS_KEY,
   SELECTED_KEY,
   HIDE_SHORTS_KEY,
   HIDE_ARCHIVED_KEY,
   HIDE_FEED_VIDEOS_KEY,
+  HIDE_READER_SAVED_KEY,
+  HIDE_DOWNIE_SENT_KEY,
   THEME_KEY,
 ]);
 const MAX_PER_CHANNEL = 20;
@@ -41,11 +52,14 @@ const state = {
   hideShorts: true,
   hideArchived: true,
   hideFeedVideos: false,
+  hideReaderSaved: false,
+  hideDownieSent: false,
   feedCache: {},
   archived: new Map(),
   readerSavedUrls: {},
   downieSentUrls: {},
   listOrder: [],
+  hiddenSmartListIds: new Set(),
   theme: 'system',
   searchQuery: '',
   readwiseApiKey: '',
@@ -63,6 +77,7 @@ let settingsPopoverExport = null;
 let settingsPopoverImport = null;
 let settingsPopoverReader = null;
 let settingsPopoverAnchor = null;
+const settingsSmartListButtons = new Map();
 const settingsThemeButtons = new Map();
 const readerButtonResetTimers = new WeakMap();
 const durationQueue = [];
@@ -155,6 +170,8 @@ const elements = {
   toggleFeedVideos: document.getElementById('toggle-feed-videos'),
   toggleShorts: document.getElementById('toggle-shorts'),
   toggleArchived: document.getElementById('toggle-archived'),
+  toggleReaderSaved: document.getElementById('toggle-reader-saved'),
+  toggleDownieSent: document.getElementById('toggle-downie-sent'),
   modalBackdrop: document.getElementById('modal-backdrop'),
   modalTitle: document.getElementById('modal-title'),
   modalBody: document.getElementById('modal-body'),
@@ -164,6 +181,7 @@ const elements = {
   archiveToastText: document.getElementById('archive-toast-text'),
   archiveUndo: document.getElementById('archive-undo'),
   importFile: document.getElementById('import-file'),
+  sidebarSettings: document.getElementById('sidebar-settings'),
   listSearch: document.getElementById('list-search'),
   listSearchClear: document.getElementById('list-search-clear'),
   listSearchEmpty: document.getElementById('list-search-empty'),
@@ -380,6 +398,42 @@ function isItemSentToDownie(item) {
 
 function isSmartListId(id) {
   return SMART_LIST_IDS.has(id);
+}
+
+function isSmartListHideable(id) {
+  return isSmartListId(id);
+}
+
+function isSmartListHidden(id) {
+  return isSmartListHideable(id) && state.hiddenSmartListIds.has(id);
+}
+
+function sanitizeHiddenSmartListIds(value) {
+  const ids = Array.isArray(value) ? value : [];
+  return ids.filter((id) => isSmartListHideable(id));
+}
+
+async function setSmartListHidden(id, hidden) {
+  if (!isSmartListHideable(id)) return;
+  if (hidden) {
+    state.hiddenSmartListIds.add(id);
+    if (state.selectedListId === id) {
+      state.selectedListId = getFallbackListId(id);
+      await setStorage(SELECTED_KEY, state.selectedListId);
+    }
+  } else {
+    state.hiddenSmartListIds.delete(id);
+  }
+  await setStorage(HIDDEN_SMART_LISTS_KEY, Array.from(state.hiddenSmartListIds));
+  renderLists({ keepSettingsPopoverOpen: true });
+  updateHeader(getChannelsForSelection().length, getFilteredItems().length);
+  renderFeed();
+}
+
+function getFallbackListId(excludedId = '') {
+  const visibleSmartList = SMART_LISTS.find((list) => list.id !== excludedId && !isSmartListHidden(list.id));
+  if (visibleSmartList) return visibleSmartList.id;
+  return state.lists[0]?.id || 'all';
 }
 
 function markLocalUrlState(key, url) {
@@ -677,6 +731,9 @@ function buildExportPayload() {
       hideShorts: state.hideShorts,
       hideArchived: state.hideArchived,
       hideFeedVideos: state.hideFeedVideos,
+      hideReaderSaved: state.hideReaderSaved,
+      hideDownieSent: state.hideDownieSent,
+      hiddenSmartListIds: Array.from(state.hiddenSmartListIds),
       theme: state.theme,
     },
     archived: Object.fromEntries(state.archived),
@@ -700,6 +757,9 @@ async function applyImport(payload) {
   state.hideShorts = payload.settings?.hideShorts ?? true;
   state.hideArchived = payload.settings?.hideArchived ?? true;
   state.hideFeedVideos = payload.settings?.hideFeedVideos ?? false;
+  state.hideReaderSaved = payload.settings?.hideReaderSaved ?? false;
+  state.hideDownieSent = payload.settings?.hideDownieSent ?? false;
+  state.hiddenSmartListIds = new Set(sanitizeHiddenSmartListIds(payload.settings?.hiddenSmartListIds));
   state.theme = normalizeTheme(payload.settings?.theme);
 
   state.archived = new Map();
@@ -712,8 +772,8 @@ async function applyImport(payload) {
   }
 
   syncListOrder();
-  if (!isSmartListId(state.selectedListId) && !state.lists.find((entry) => entry.id === state.selectedListId)) {
-    state.selectedListId = 'all';
+  if (isSmartListHidden(state.selectedListId) || (!isSmartListId(state.selectedListId) && !state.lists.find((entry) => entry.id === state.selectedListId))) {
+    state.selectedListId = getFallbackListId(state.selectedListId);
   }
 
   await setStorage(STORAGE_KEY, state.lists);
@@ -722,6 +782,9 @@ async function applyImport(payload) {
   await setStorage(HIDE_SHORTS_KEY, state.hideShorts);
   await setStorage(HIDE_ARCHIVED_KEY, state.hideArchived);
   await setStorage(HIDE_FEED_VIDEOS_KEY, state.hideFeedVideos);
+  await setStorage(HIDE_READER_SAVED_KEY, state.hideReaderSaved);
+  await setStorage(HIDE_DOWNIE_SENT_KEY, state.hideDownieSent);
+  await setStorage(HIDDEN_SMART_LISTS_KEY, Array.from(state.hiddenSmartListIds));
   await setStorage(THEME_KEY, state.theme);
   await setStorage(ARCHIVE_KEY, Object.fromEntries(state.archived));
 
@@ -729,6 +792,9 @@ async function applyImport(payload) {
   updateShortsToggle();
   updateArchivedToggle();
   updateFeedVideosToggle();
+  updateReaderSavedToggle();
+  updateDownieSentToggle();
+  updateSmartListSettingsButtons();
   applyTheme(state.theme);
   updateThemeButtons();
   await loadFeed();
@@ -778,6 +844,15 @@ function hasReadwiseApiKey() {
 function updateReaderSettingsButton() {
   if (!settingsPopoverReader) return;
   settingsPopoverReader.textContent = hasReadwiseApiKey() ? 'Reader connected' : 'Set up Reader';
+}
+
+function updateSmartListSettingsButtons() {
+  settingsSmartListButtons.forEach((button, id) => {
+    const hidden = isSmartListHidden(id);
+    const name = SMART_LISTS.find((list) => list.id === id)?.name || 'Smart list';
+    button.textContent = hidden ? `Show ${name}` : `Hide ${name}`;
+    button.setAttribute('aria-pressed', hidden ? 'false' : 'true');
+  });
 }
 
 async function validateReadwiseApiKey(apiKey) {
@@ -1035,6 +1110,27 @@ function ensureSettingsPopover() {
     closeSettingsPopover();
   });
 
+  const smartTitle = document.createElement('div');
+  smartTitle.className = 'settings-popover-title';
+  smartTitle.textContent = 'Smart lists';
+
+  const smartGroup = document.createElement('div');
+  smartGroup.className = 'settings-popover-list';
+  smartGroup.setAttribute('role', 'group');
+
+  SMART_LISTS.filter((list) => isSmartListHideable(list.id)).forEach((list) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'settings-popover-item';
+    button.setAttribute('role', 'menuitemcheckbox');
+    button.addEventListener('click', async () => {
+      await setSmartListHidden(list.id, !isSmartListHidden(list.id));
+      updateSmartListSettingsButtons();
+    });
+    smartGroup.appendChild(button);
+    settingsSmartListButtons.set(list.id, button);
+  });
+
   const appearanceTitle = document.createElement('div');
   appearanceTitle.className = 'settings-popover-title';
   appearanceTitle.textContent = 'Appearance';
@@ -1063,7 +1159,7 @@ function ensureSettingsPopover() {
     settingsThemeButtons.set(id, button);
   });
 
-  popover.append(title, helpBtn, exportBtn, importBtn, readerTitle, readerBtn, appearanceTitle, themeGroup);
+  popover.append(title, helpBtn, exportBtn, importBtn, readerTitle, readerBtn, smartTitle, smartGroup, appearanceTitle, themeGroup);
   popover.addEventListener('click', (event) => event.stopPropagation());
 
   document.body.appendChild(popover);
@@ -1072,6 +1168,7 @@ function ensureSettingsPopover() {
   settingsPopoverImport = importBtn;
   settingsPopoverReader = readerBtn;
   updateReaderSettingsButton();
+  updateSmartListSettingsButtons();
   updateThemeButtons();
 }
 
@@ -1118,6 +1215,10 @@ function closeSettingsPopover() {
   settingsPopoverAnchor = null;
 }
 
+function isSettingsPopoverOpen() {
+  return !!settingsPopover && !settingsPopover.classList.contains('hidden');
+}
+
 function toggleSettingsPopover(anchor) {
   if (settingsPopoverAnchor === anchor && settingsPopover && !settingsPopover.classList.contains('hidden')) {
     closeSettingsPopover();
@@ -1131,6 +1232,10 @@ function getFilteredItems() {
   return state.items.filter((item) => {
     if (state.selectedListId === SMART_READER_SAVED_ID && !isItemSavedToReader(item)) return false;
     if (state.selectedListId === SMART_DOWNIE_SENT_ID && !isItemSentToDownie(item)) return false;
+    if (state.selectedListId !== SMART_READER_SAVED_ID && state.selectedListId !== SMART_DOWNIE_SENT_ID) {
+      if (state.hideReaderSaved && isItemSavedToReader(item)) return false;
+      if (state.hideDownieSent && isItemSentToDownie(item)) return false;
+    }
     if (state.hideShorts && item.isShort) return false;
     if (state.hideArchived && isItemArchived(item)) return false;
     if (query) {
@@ -1150,6 +1255,13 @@ function countSavedReaderItems() {
 
 function countSentDownieItems() {
   return (state.items || []).filter((item) => isItemSentToDownie(item)).length;
+}
+
+function getSmartListCount(id) {
+  if (id === 'all') return uniqueChannelsFromLists(state.lists).length;
+  if (id === SMART_READER_SAVED_ID) return countSavedReaderItems();
+  if (id === SMART_DOWNIE_SENT_ID) return countSentDownieItems();
+  return 0;
 }
 
 function smartListMatches(name, query) {
@@ -1192,6 +1304,18 @@ function updateArchivedToggle() {
   elements.toggleArchived.textContent = state.hideArchived ? 'Show Hidden' : 'Hide Hidden';
 }
 
+function updateReaderSavedToggle() {
+  if (!elements.toggleReaderSaved) return;
+  elements.toggleReaderSaved.textContent = state.hideReaderSaved ? 'Show Reader Saved' : 'Hide Reader Saved';
+  elements.toggleReaderSaved.setAttribute('aria-pressed', state.hideReaderSaved ? 'true' : 'false');
+}
+
+function updateDownieSentToggle() {
+  if (!elements.toggleDownieSent) return;
+  elements.toggleDownieSent.textContent = state.hideDownieSent ? 'Show Downie Sent' : 'Hide Downie Sent';
+  elements.toggleDownieSent.setAttribute('aria-pressed', state.hideDownieSent ? 'true' : 'false');
+}
+
 function updateFeedVideosToggle() {
   if (!elements.toggleFeedVideos) return;
   const enabled = !!state.hideFeedVideos;
@@ -1220,20 +1344,28 @@ function getChannelsForSelection() {
 }
 
 function syncListOrder() {
-  const knownIds = new Set(state.lists.map((list) => list.id));
+  const smartIds = SMART_LISTS.map((list) => list.id);
+  const knownIds = new Set([...smartIds, ...state.lists.map((list) => list.id)]);
   const prevOrder = [...state.listOrder];
-  const nextOrder = [];
+  let nextOrder = [];
 
   state.listOrder.forEach((id) => {
-    if (knownIds.has(id)) {
+    if (knownIds.has(id) && !nextOrder.includes(id)) {
       nextOrder.push(id);
       knownIds.delete(id);
     }
   });
 
-  if (knownIds.size) {
-    nextOrder.push(...Array.from(knownIds));
-  }
+  smartIds.forEach((id, defaultIndex) => {
+    if (nextOrder.includes(id)) return;
+    const precedingSmartIds = smartIds.slice(0, defaultIndex);
+    const insertAfter = Math.max(-1, ...precedingSmartIds.map((smartId) => nextOrder.indexOf(smartId)));
+    nextOrder.splice(insertAfter + 1, 0, id);
+    knownIds.delete(id);
+  });
+
+  const remainingUserIds = Array.from(knownIds).filter((id) => !isSmartListId(id));
+  nextOrder.push(...remainingUserIds);
 
   state.listOrder = nextOrder;
 
@@ -1254,29 +1386,28 @@ function removeListOrder(id) {
   setStorage(LIST_ORDER_KEY, state.listOrder);
 }
 
-function renderLists() {
-  closeSettingsPopover();
+function renderLists({ keepSettingsPopoverOpen = false } = {}) {
+  if (!keepSettingsPopoverOpen) {
+    closeSettingsPopover();
+  }
   elements.listItems.innerHTML = '';
 
   const listMap = new Map(state.lists.map((list) => [list.id, list]));
+  const entryMap = new Map();
   const ordered = [];
   const query = state.searchQuery.trim();
   const normalizedQuery = query.toLowerCase();
 
-  if (smartListMatches('All lists', normalizedQuery)) {
-    ordered.push({ id: 'all', name: 'All lists', count: uniqueChannelsFromLists(state.lists).length });
-  }
-
-  if (smartListMatches('Saved to Reader', normalizedQuery)) {
-    ordered.push({ id: SMART_READER_SAVED_ID, name: 'Saved to Reader', count: countSavedReaderItems() });
-  }
-
-  if (smartListMatches('Sent to Downie', normalizedQuery)) {
-    ordered.push({ id: SMART_DOWNIE_SENT_ID, name: 'Sent to Downie', count: countSentDownieItems() });
-  }
+  SMART_LISTS.forEach((list) => {
+    if (!isSmartListHidden(list.id) && smartListMatches(list.name, normalizedQuery)) {
+      entryMap.set(list.id, { ...list, count: getSmartListCount(list.id) });
+    }
+  });
 
   state.listOrder.forEach((id) => {
-    if (isSmartListId(id)) {
+    if (entryMap.has(id)) {
+      ordered.push(entryMap.get(id));
+      entryMap.delete(id);
       return;
     }
     const list = listMap.get(id);
@@ -1294,6 +1425,10 @@ function renderLists() {
     });
   }
 
+  if (entryMap.size) {
+    ordered.push(...entryMap.values());
+  }
+
   ordered.forEach((entry) => {
     const button = buildListButton(entry);
     elements.listItems.appendChild(button);
@@ -1307,27 +1442,25 @@ function buildListButton({ id, name, count }) {
   const button = document.createElement('div');
   button.className = `list-item${state.selectedListId === id ? ' active' : ''}${isSmartList ? ' smart' : ''}`;
   button.dataset.listId = id;
-  button.draggable = !isSmartList;
+  button.draggable = true;
   button.setAttribute('role', 'button');
   button.setAttribute('tabindex', '0');
   button.setAttribute('aria-pressed', state.selectedListId === id ? 'true' : 'false');
 
-  if (!isSmartList) {
-    const handle = document.createElement('span');
-    handle.className = 'list-drag-handle';
-    handle.setAttribute('aria-hidden', 'true');
-    handle.innerHTML = `
-      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-        <circle cx="9" cy="6" r="1.4"></circle>
-        <circle cx="15" cy="6" r="1.4"></circle>
-        <circle cx="9" cy="12" r="1.4"></circle>
-        <circle cx="15" cy="12" r="1.4"></circle>
-        <circle cx="9" cy="18" r="1.4"></circle>
-        <circle cx="15" cy="18" r="1.4"></circle>
-      </svg>
-    `;
-    button.appendChild(handle);
-  }
+  const handle = document.createElement('span');
+  handle.className = 'list-drag-handle';
+  handle.setAttribute('aria-hidden', 'true');
+  handle.innerHTML = `
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <circle cx="9" cy="6" r="1.4"></circle>
+      <circle cx="15" cy="6" r="1.4"></circle>
+      <circle cx="9" cy="12" r="1.4"></circle>
+      <circle cx="15" cy="12" r="1.4"></circle>
+      <circle cx="9" cy="18" r="1.4"></circle>
+      <circle cx="15" cy="18" r="1.4"></circle>
+    </svg>
+  `;
+  button.appendChild(handle);
 
   const nameSpan = document.createElement('span');
   nameSpan.className = 'list-name';
@@ -1374,31 +1507,32 @@ function buildListButton({ id, name, count }) {
     button.append(renameButton);
   }
 
-  if (id === 'all') {
-    const settingsButton = document.createElement('button');
-    settingsButton.type = 'button';
-    settingsButton.className = 'list-settings';
-    settingsButton.setAttribute('aria-label', 'List tools');
-    settingsButton.setAttribute('aria-expanded', 'false');
-    settingsButton.setAttribute('aria-controls', 'settings-popover');
-    settingsButton.innerHTML = `
+  if (isSmartListHideable(id)) {
+    const hideButton = document.createElement('button');
+    hideButton.type = 'button';
+    hideButton.className = 'list-hide';
+    hideButton.setAttribute('aria-label', `Hide ${name}`);
+    hideButton.innerHTML = `
       <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-        <path d="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.95l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.06 7.06 0 0 0-1.64-.95l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.58.23-1.12.54-1.64.95l-2.39-.96a.5.5 0 0 0-.6.22L2.7 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.05.31-.07.63-.07.95s.02.64.07.94L2.82 14.53a.5.5 0 0 0-.12.64l1.92 3.32c.13.23.4.32.64.22l2.39-.96c.5.41 1.06.73 1.64.95l.36 2.54c.04.24.25.42.5.42h3.84c.25 0 .46-.18.5-.42l.36-2.54c.58-.22 1.14-.54 1.64-.95l2.39.96c.24.1.51.01.64-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.02-1.59ZM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5Z"></path>
+        <path d="m3 3 18 18"></path>
+        <path d="M10.6 10.6a2.5 2.5 0 0 0 2.8 2.8"></path>
+        <path d="M9.5 5.3A8.7 8.7 0 0 1 12 5c5.5 0 9 7 9 7a16 16 0 0 1-2.1 3.1"></path>
+        <path d="M6.6 6.6C4.3 8.1 3 12 3 12s3.5 7 9 7a8.9 8.9 0 0 0 4.1-1"></path>
       </svg>
     `;
-    settingsButton.addEventListener('click', (event) => {
+    hideButton.addEventListener('click', async (event) => {
       event.preventDefault();
       event.stopPropagation();
-      toggleSettingsPopover(settingsButton);
+      await setSmartListHidden(id, true);
     });
-    settingsButton.addEventListener('mousedown', (event) => {
+    hideButton.addEventListener('mousedown', (event) => {
       event.stopPropagation();
     });
-    settingsButton.addEventListener('dragstart', (event) => {
+    hideButton.addEventListener('dragstart', (event) => {
       event.preventDefault();
       event.stopPropagation();
     });
-    button.append(settingsButton);
+    button.append(hideButton);
   }
 
   return button;
@@ -1424,10 +1558,6 @@ function setupListDrag() {
   elements.listItems.addEventListener('dragstart', (event) => {
     const item = getListItem(event.target);
     if (!item) return;
-    if (isSmartListId(item.dataset.listId)) {
-      event.preventDefault();
-      return;
-    }
     draggedId = item.dataset.listId;
     item.classList.add('dragging');
     event.dataTransfer.effectAllowed = 'move';
@@ -1447,7 +1577,6 @@ function setupListDrag() {
 
     const target = getListItem(event.target);
     if (!target || target === draggingEl) return;
-    if (isSmartListId(target.dataset.listId)) return;
 
     const rect = target.getBoundingClientRect();
     const axis = getAxis();
@@ -1467,9 +1596,10 @@ function setupListDrag() {
 
     const orderedIds = Array.from(elements.listItems.querySelectorAll('.list-item'))
       .map((item) => item.dataset.listId)
-      .filter((id) => id && !isSmartListId(id));
+      .filter((id) => id);
+    const hiddenOrderedIds = state.listOrder.filter((id) => isSmartListHidden(id) && !orderedIds.includes(id));
 
-    state.listOrder = orderedIds;
+    state.listOrder = [...orderedIds, ...hiddenOrderedIds];
 
     const map = new Map(state.lists.map((list) => [list.id, list]));
     state.lists = orderedIds
@@ -1478,7 +1608,7 @@ function setupListDrag() {
 
     await setStorage(STORAGE_KEY, state.lists);
     await setStorage(LIST_ORDER_KEY, state.listOrder);
-    renderLists();
+    renderLists({ keepSettingsPopoverOpen: isSettingsPopoverOpen() });
   });
 }
 
@@ -1584,9 +1714,9 @@ async function loadFeed(options = {}) {
   }
 
   state.lists = (await getStorage(STORAGE_KEY, [])) || [];
-  if (!isSmartListId(state.selectedListId) && !state.lists.find((entry) => entry.id === state.selectedListId)) {
-    state.selectedListId = 'all';
-    await setStorage(SELECTED_KEY, 'all');
+  if (isSmartListHidden(state.selectedListId) || (!isSmartListId(state.selectedListId) && !state.lists.find((entry) => entry.id === state.selectedListId))) {
+    state.selectedListId = getFallbackListId(state.selectedListId);
+    await setStorage(SELECTED_KEY, state.selectedListId);
   }
 
   await normalizeStoredChannels();
@@ -2491,7 +2621,10 @@ async function init() {
   state.hideShorts = (await getStorage(HIDE_SHORTS_KEY, true)) ?? true;
   state.hideArchived = (await getStorage(HIDE_ARCHIVED_KEY, true)) ?? true;
   state.hideFeedVideos = (await getStorage(HIDE_FEED_VIDEOS_KEY, false)) ?? false;
+  state.hideReaderSaved = (await getStorage(HIDE_READER_SAVED_KEY, false)) ?? false;
+  state.hideDownieSent = (await getStorage(HIDE_DOWNIE_SENT_KEY, false)) ?? false;
   state.listOrder = (await getStorage(LIST_ORDER_KEY, [])) || [];
+  state.hiddenSmartListIds = new Set(sanitizeHiddenSmartListIds(await getStorage(HIDDEN_SMART_LISTS_KEY, [])));
   state.theme = normalizeTheme(await getStorage(THEME_KEY, 'system'));
   state.readwiseApiKey = (await getStorage(READWISE_API_KEY_KEY, '')) || '';
   state.readerSavedUrls = (await getStorage(READER_SAVED_URLS_KEY, {})) || {};
@@ -2499,9 +2632,9 @@ async function init() {
   await loadDurationCacheFromStorage();
   await loadFeedCacheFromStorage();
   await loadArchivedFromStorage();
-  if (!isSmartListId(state.selectedListId) && !state.lists.find((entry) => entry.id === state.selectedListId)) {
-    state.selectedListId = 'all';
-    await setStorage(SELECTED_KEY, 'all');
+  if (isSmartListHidden(state.selectedListId) || (!isSmartListId(state.selectedListId) && !state.lists.find((entry) => entry.id === state.selectedListId))) {
+    state.selectedListId = getFallbackListId(state.selectedListId);
+    await setStorage(SELECTED_KEY, state.selectedListId);
   }
 
   syncListOrder();
@@ -2512,6 +2645,9 @@ async function init() {
   updateFeedVideosToggle();
   updateShortsToggle();
   updateArchivedToggle();
+  updateReaderSavedToggle();
+  updateDownieSentToggle();
+  updateSmartListSettingsButtons();
   setupListDrag();
   setupInfiniteScroll();
   await loadFeed();
@@ -2520,6 +2656,13 @@ async function init() {
 elements.createList.addEventListener('click', handleCreateList);
 elements.manageList.addEventListener('click', handleManageList);
 elements.refreshFeed.addEventListener('click', loadFeed);
+if (elements.sidebarSettings) {
+  elements.sidebarSettings.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleSettingsPopover(elements.sidebarSettings);
+  });
+}
 elements.toggleFeedVideos.addEventListener('click', async () => {
   state.hideFeedVideos = !state.hideFeedVideos;
   await setStorage(HIDE_FEED_VIDEOS_KEY, state.hideFeedVideos);
@@ -2538,6 +2681,24 @@ elements.toggleArchived.addEventListener('click', async () => {
   state.hideArchived = !state.hideArchived;
   await setStorage(HIDE_ARCHIVED_KEY, state.hideArchived);
   updateArchivedToggle();
+  state.visibleCount = INITIAL_COUNT;
+  state.renderedCount = 0;
+  updateHeader(getChannelsForSelection().length, getFilteredItems().length);
+  renderFeed();
+});
+elements.toggleReaderSaved.addEventListener('click', async () => {
+  state.hideReaderSaved = !state.hideReaderSaved;
+  await setStorage(HIDE_READER_SAVED_KEY, state.hideReaderSaved);
+  updateReaderSavedToggle();
+  state.visibleCount = INITIAL_COUNT;
+  state.renderedCount = 0;
+  updateHeader(getChannelsForSelection().length, getFilteredItems().length);
+  renderFeed();
+});
+elements.toggleDownieSent.addEventListener('click', async () => {
+  state.hideDownieSent = !state.hideDownieSent;
+  await setStorage(HIDE_DOWNIE_SENT_KEY, state.hideDownieSent);
+  updateDownieSentToggle();
   state.visibleCount = INITIAL_COUNT;
   state.renderedCount = 0;
   updateHeader(getChannelsForSelection().length, getFilteredItems().length);
@@ -2650,6 +2811,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
   if (changes[SELECTED_KEY]) {
     state.selectedListId = changes[SELECTED_KEY].newValue || 'all';
+    if (isSmartListHidden(state.selectedListId)) {
+      state.selectedListId = getFallbackListId(state.selectedListId);
+      setStorage(SELECTED_KEY, state.selectedListId);
+    }
     renderLists();
     shouldReload = true;
   }
@@ -2658,6 +2823,18 @@ chrome.storage.onChanged.addListener((changes, area) => {
     state.listOrder = changes[LIST_ORDER_KEY].newValue || [];
     syncListOrder();
     renderLists();
+  }
+
+  if (changes[HIDDEN_SMART_LISTS_KEY]) {
+    state.hiddenSmartListIds = new Set(sanitizeHiddenSmartListIds(changes[HIDDEN_SMART_LISTS_KEY].newValue));
+    if (isSmartListHidden(state.selectedListId)) {
+      state.selectedListId = getFallbackListId(state.selectedListId);
+      setStorage(SELECTED_KEY, state.selectedListId);
+    }
+    updateSmartListSettingsButtons();
+    renderLists({ keepSettingsPopoverOpen: isSettingsPopoverOpen() });
+    updateHeader(getChannelsForSelection().length, getFilteredItems().length);
+    renderFeed();
   }
 
   if (changes[HIDE_SHORTS_KEY]) {
@@ -2677,6 +2854,20 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (changes[HIDE_FEED_VIDEOS_KEY]) {
     state.hideFeedVideos = changes[HIDE_FEED_VIDEOS_KEY].newValue ?? false;
     updateFeedVideosToggle();
+  }
+
+  if (changes[HIDE_READER_SAVED_KEY]) {
+    state.hideReaderSaved = changes[HIDE_READER_SAVED_KEY].newValue ?? false;
+    updateReaderSavedToggle();
+    updateHeader(getChannelsForSelection().length, getFilteredItems().length);
+    renderFeed();
+  }
+
+  if (changes[HIDE_DOWNIE_SENT_KEY]) {
+    state.hideDownieSent = changes[HIDE_DOWNIE_SENT_KEY].newValue ?? false;
+    updateDownieSentToggle();
+    updateHeader(getChannelsForSelection().length, getFilteredItems().length);
+    renderFeed();
   }
 
   if (changes[THEME_KEY]) {
