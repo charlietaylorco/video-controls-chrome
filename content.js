@@ -492,6 +492,7 @@
   let dragState = null;
   let overlayPositionX = null;
   let overlayPositionY = null;
+  let activeCardBounds = null;
   const targetOverlayPositions = new WeakMap();
   const PANEL_MARGIN = 10;
   const VIEWPORT_MARGIN = 8;
@@ -588,13 +589,13 @@
     setDownieSentState(false);
     setReaderSavedState(false);
     panel.dataset.visible = "false";
-    panel.dataset.mode = "player";
     panel.setAttribute("aria-hidden", "true");
     activeVideo = null;
     activeTarget = null;
     activeAnchor = null;
     activeMetadataTarget = null;
     activeMode = "player";
+    activeCardBounds = null;
   };
 
   const loadOverlayPositionForTarget = (target) => {
@@ -914,6 +915,35 @@
 
   const getCurrentContextSource = () => activeMetadataTarget || activeTarget || activeVideo;
 
+  const getActiveCardBounds = () => {
+    if (activeMode !== "card") {
+      return null;
+    }
+
+    for (const element of [activeTarget, activeAnchor]) {
+      if (!(element instanceof Element) || !element.isConnected) {
+        continue;
+      }
+
+      const rect = element.getBoundingClientRect();
+
+      if (isRectVisible(rect)) {
+        return rect;
+      }
+    }
+
+    return activeCardBounds;
+  };
+
+  const isPointerInsideActiveCard = (clientX, clientY) => {
+    if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) {
+      return false;
+    }
+
+    const bounds = getActiveCardBounds();
+    return Boolean(bounds && isPointInsideRect(bounds, clientX, clientY));
+  };
+
   const showPanelForContext = ({ video, target, anchor, metadataTarget, mode }) => {
     if (!target) {
       return;
@@ -931,6 +961,7 @@
     activeAnchor = anchor || target || video;
     activeMetadataTarget = metadataTarget || target || video;
     activeMode = mode === "card" ? "card" : "player";
+    activeCardBounds = activeMode === "card" ? target.getBoundingClientRect() : null;
     panel.dataset.mode = resolvePanelMode(activeMode);
     updateControlsAvailability(video);
     updateIntegrationVisibility();
@@ -1013,7 +1044,8 @@
       if (
         activeTarget?.matches?.(":hover") ||
         activeAnchor?.matches?.(":hover") ||
-        activeVideo?.matches?.(":hover")
+        activeVideo?.matches?.(":hover") ||
+        isPointerInsideActiveCard(hoverPointerClientX, hoverPointerClientY)
       ) {
         return;
       }
@@ -2701,13 +2733,14 @@
       const pageUrl = getAssociatedPageUrl(source);
       const title = getAssociatedTitle(source);
       const author = getAssociatedAuthor(source);
+      const shouldOpenExisting = button.dataset.readerSaved === "true";
       if (!isYouTubeReaderSaveUrl(pageUrl)) {
         setButtonStatus(button, "error");
         showFeedback("error", "Reader is YouTube-only");
         return;
       }
       setButtonLoading(button);
-      showPendingFeedback("Saving to Reader...");
+      showPendingFeedback(shouldOpenExisting ? "Opening Reader..." : "Saving to Reader...");
       const { response, error } = await sendRuntimeMessage({
         type: "save-to-reader",
         pageUrl,
@@ -2732,6 +2765,27 @@
 
           setReaderSavedState(true);
         }
+        if (shouldOpenExisting && response?.ok && !error && response.url) {
+          const { response: openResponse, error: openError } = await sendRuntimeMessage({
+            type: "open-reader-url",
+            url: response.url
+          });
+
+          if (getCurrentContextSource() !== source) {
+            clearButtonStatus(button);
+            return;
+          }
+
+          if (openResponse?.ok && !openError) {
+            showFeedback("success", "Opened in Reader", response.url);
+            return;
+          }
+
+          setButtonStatus(button, "error");
+          showFeedback("error", "Reader open failed", response.url);
+          return;
+        }
+
         const feedbackState = getReaderFeedback(response, error);
         showFeedback(
           feedbackState.kind,
@@ -2861,6 +2915,12 @@
       hoveredPreviewRate = nextPreviewRate;
 
       if (!nextTarget) {
+        if (isPointerInsideActiveCard(event.clientX, event.clientY)) {
+          scheduleIdleHide();
+          stopPreview();
+          return;
+        }
+
         hideHoverZoneHint();
         stopPreview();
         scheduleHide();
@@ -2874,6 +2934,17 @@
           hidePanel();
         }
 
+        return;
+      }
+
+      if (activeMode === "card" && nextContext?.mode !== "card") {
+        if (isPointerInsideActiveCard(event.clientX, event.clientY)) {
+          scheduleIdleHide();
+          stopPreview();
+          return;
+        }
+
+        hidePanel();
         return;
       }
 

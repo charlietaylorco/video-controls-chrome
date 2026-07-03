@@ -10,6 +10,7 @@ const hoverBandSummary = document.getElementById("hover-band-summary");
 const showHoverSlowZoneHintInput = document.getElementById("show-hover-slow-zone-hint");
 const showDownieInput = document.getElementById("show-downie");
 const showReaderInput = document.getElementById("show-reader");
+const feedRevealDayEndInput = document.getElementById("feed-reveal-day-end");
 const readerTokenInput = document.getElementById("reader-token");
 const saveTokenButton = document.getElementById("save-token");
 const status = document.getElementById("status");
@@ -25,6 +26,8 @@ const DEFAULT_HOVER_OUTER_SPEED = 2;
 const DEFAULT_SHOW_HOVER_SLOW_ZONE_HINT = false;
 const DEFAULT_SHOW_DOWNIE = true;
 const DEFAULT_SHOW_READER = true;
+const DEFAULT_FEED_REVEAL_DAY_END_MINUTES = 2 * 60;
+const FEED_REVEAL_DAY_END_MINUTES_KEY = "ytListsFeedRevealDayEndMinutes";
 const PRECISION = 2;
 
 const roundToPrecision = (value) => {
@@ -54,6 +57,36 @@ const syncInput = (input, value) => {
 const formatDisplayValue = (value) => {
   const rounded = roundToPrecision(value);
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(PRECISION).replace(/\.?0+$/, "");
+};
+
+const normalizeMinuteOfDay = (value, fallback = DEFAULT_FEED_REVEAL_DAY_END_MINUTES) => {
+  const minutes = Math.round(Number(value));
+  if (!Number.isFinite(minutes)) {
+    return fallback;
+  }
+  return Math.min(23 * 60 + 59, Math.max(0, minutes));
+};
+
+const formatTimeInputValue = (minutes) => {
+  const normalized = normalizeMinuteOfDay(minutes);
+  const hours = Math.floor(normalized / 60);
+  const mins = normalized % 60;
+  return `${String(hours).padStart(2, "0")}:${String(mins).padStart(2, "0")}`;
+};
+
+const parseTimeInputValue = (value) => {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(value || "");
+  if (!match) {
+    return NaN;
+  }
+
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes) || hours > 23 || minutes > 59) {
+    return NaN;
+  }
+
+  return hours * 60 + minutes;
 };
 
 const numericSettings = {
@@ -173,6 +206,7 @@ chrome.storage.local.get(
     "showHoverSlowZoneHint",
     "showDownie",
     "showReader",
+    FEED_REVEAL_DAY_END_MINUTES_KEY,
     "readerToken"
   ],
   (result) => {
@@ -208,6 +242,12 @@ chrome.storage.local.get(
       typeof result.showDownie === "boolean" ? result.showDownie : DEFAULT_SHOW_DOWNIE;
     showReaderInput.checked =
       typeof result.showReader === "boolean" ? result.showReader : DEFAULT_SHOW_READER;
+    feedRevealDayEndInput.value = formatTimeInputValue(
+      normalizeMinuteOfDay(
+        result[FEED_REVEAL_DAY_END_MINUTES_KEY],
+        DEFAULT_FEED_REVEAL_DAY_END_MINUTES
+      )
+    );
     readerTokenInput.value = typeof result.readerToken === "string" ? result.readerToken : "";
     updateHoverBandSummary();
   }
@@ -272,6 +312,25 @@ showReaderInput.addEventListener("change", () => {
     "showReader",
     showReaderInput.checked,
     showReaderInput.checked ? "Reader button shown" : "Reader button hidden"
+  );
+});
+
+const saveFeedRevealDayEnd = () => {
+  const minutes = normalizeMinuteOfDay(parseTimeInputValue(feedRevealDayEndInput.value));
+
+  chrome.storage.local.set({ [FEED_REVEAL_DAY_END_MINUTES_KEY]: minutes }, () => {
+    feedRevealDayEndInput.value = formatTimeInputValue(minutes);
+    showStatus("Focus day end saved");
+  });
+};
+
+feedRevealDayEndInput.addEventListener("change", saveFeedRevealDayEnd);
+feedRevealDayEndInput.addEventListener("blur", () => {
+  feedRevealDayEndInput.value = formatTimeInputValue(
+    normalizeMinuteOfDay(
+      parseTimeInputValue(feedRevealDayEndInput.value),
+      DEFAULT_FEED_REVEAL_DAY_END_MINUTES
+    )
   );
 });
 

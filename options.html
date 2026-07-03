@@ -266,6 +266,35 @@
         align-items: center;
       }
 
+      .time-shell {
+        display: flex;
+        align-items: center;
+        min-height: 58px;
+        max-width: 220px;
+        padding: 0 18px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 18px;
+        background: rgba(6, 6, 8, 0.62);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+      }
+
+      .time-shell:focus-within {
+        border-color: rgba(240, 219, 194, 0.46);
+        box-shadow: 0 0 0 3px rgba(240, 219, 194, 0.12);
+      }
+
+      .time-input {
+        padding: 0;
+        font-size: 1.24rem;
+        text-align: left;
+        letter-spacing: 0;
+      }
+
+      .time-input::-webkit-calendar-picker-indicator {
+        filter: invert(1);
+        opacity: 0.72;
+      }
+
       .toggle-list {
         display: grid;
         gap: 12px;
@@ -537,6 +566,13 @@
               <input class="toggle-input" id="show-reader" type="checkbox">
             </label>
           </div>
+        </div>
+        <div class="group">
+          <label for="feed-reveal-day-end">Focus mode day ends at</label>
+          <div class="time-shell">
+            <input class="time-input" id="feed-reveal-day-end" type="time" step="60">
+          </div>
+          <div class="hint">Focus mode can reveal hidden YouTube feed videos 3 times per day. The reveal count resets at this time and cannot be changed.</div>
         </div>
         <div class="group">
           <label for="reader-token">Reader API token</label>

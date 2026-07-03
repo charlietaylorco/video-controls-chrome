@@ -10,6 +10,10 @@ const INLINE_CLASS = 'ytl-inline';
 const FLOATING_CLASS = 'ytl-floating';
 const FEED_REVEAL_DELAY_MS = 30000;
 const FEED_REVEAL_DELAY_SECONDS = FEED_REVEAL_DELAY_MS / 1000;
+const FEED_REVEAL_DAILY_LIMIT = 3;
+const FEED_REVEAL_DAY_END_MINUTES_KEY = 'ytListsFeedRevealDayEndMinutes';
+const FEED_REVEAL_USAGE_KEY = 'ytListsFeedRevealUsage';
+const DEFAULT_FEED_REVEAL_DAY_END_MINUTES = 2 * 60;
 const SYNC_KEYS = new Set([STORAGE_KEY, HIDE_FEED_VIDEOS_KEY]);
 const OPEN_FEED_MESSAGE = 'ytListsOpenFeed';
 
@@ -22,7 +26,10 @@ let hideFeedVideos = false;
 let temporaryFeedReveal = false;
 let feedRevealTimer = null;
 let feedRevealCountdownTimer = null;
+let feedRevealResetRefreshTimer = null;
 let feedRevealDeadline = 0;
+let feedRevealDayEndMinutes = DEFAULT_FEED_REVEAL_DAY_END_MINUTES;
+let feedRevealUsage = { dayKey: '', count: 0 };
 
 function isExtensionContextInvalidated(error) {
   const message = typeof error === 'string'
@@ -443,6 +450,11 @@ function injectStyles() {
       color: #ffffff;
       border-color: #0f0f0f;
     }
+
+    #${FEED_FOCUS_OVERLAY_ID} .focus-action[disabled] {
+      opacity: 0.52;
+      cursor: not-allowed;
+    }
   `;
   (document.head || document.documentElement).appendChild(style);
 }
@@ -465,6 +477,132 @@ function getFeedFocusMessage() {
   return normalizePath() === '/feed/subscriptions'
     ? 'Your subscriptions feed is hidden for focused browsing. Use YT Lists when you want a deliberate pass through new uploads.'
     : 'YouTube recommendations are hidden for focused browsing. Use YT Lists when you want to choose what to watch on purpose.';
+}
+
+function normalizeFeedRevealDayEndMinutes(value) {
+  const minutes = Math.round(Number(value));
+  if (!Number.isFinite(minutes)) {
+    return DEFAULT_FEED_REVEAL_DAY_END_MINUTES;
+  }
+  return Math.min(23 * 60 + 59, Math.max(0, minutes));
+}
+
+function normalizeFeedRevealUsage(value) {
+  if (!value || typeof value !== 'object') {
+    return { dayKey: '', count: 0 };
+  }
+
+  const dayKey = typeof value.dayKey === 'string' ? value.dayKey : '';
+  const count = Math.min(
+    FEED_REVEAL_DAILY_LIMIT,
+    Math.max(0, Math.floor(Number(value.count) || 0))
+  );
+
+  return { dayKey, count };
+}
+
+function padDatePart(value) {
+  return String(value).padStart(2, '0');
+}
+
+function getLocalDateKey(date) {
+  return [
+    date.getFullYear(),
+    padDatePart(date.getMonth() + 1),
+    padDatePart(date.getDate())
+  ].join('-');
+}
+
+function getFeedRevealDayKey(timestamp = Date.now(), dayEndMinutes = feedRevealDayEndMinutes) {
+  const date = new Date(timestamp);
+  const minutesNow = date.getHours() * 60 + date.getMinutes();
+
+  if (minutesNow < normalizeFeedRevealDayEndMinutes(dayEndMinutes)) {
+    date.setDate(date.getDate() - 1);
+  }
+
+  return getLocalDateKey(date);
+}
+
+function getFeedRevealUsageForCurrentDay() {
+  const dayKey = getFeedRevealDayKey();
+  const usage = normalizeFeedRevealUsage(feedRevealUsage);
+  return {
+    dayKey,
+    count: usage.dayKey === dayKey ? usage.count : 0
+  };
+}
+
+function getFeedRevealRemaining() {
+  const usage = getFeedRevealUsageForCurrentDay();
+  return Math.max(0, FEED_REVEAL_DAILY_LIMIT - usage.count);
+}
+
+function getNextFeedRevealResetTime(timestamp = Date.now()) {
+  const dayEndMinutes = normalizeFeedRevealDayEndMinutes(feedRevealDayEndMinutes);
+  const reset = new Date(timestamp);
+  reset.setHours(Math.floor(dayEndMinutes / 60), dayEndMinutes % 60, 0, 0);
+
+  if (timestamp >= reset.getTime()) {
+    reset.setDate(reset.getDate() + 1);
+  }
+
+  return reset;
+}
+
+function formatFeedRevealResetTime() {
+  return getNextFeedRevealResetTime().toLocaleTimeString([], {
+    hour: 'numeric',
+    minute: '2-digit'
+  });
+}
+
+function clearFeedRevealResetRefreshTimer() {
+  if (feedRevealResetRefreshTimer) {
+    window.clearTimeout(feedRevealResetRefreshTimer);
+    feedRevealResetRefreshTimer = null;
+  }
+}
+
+function scheduleFeedRevealResetRefresh() {
+  clearFeedRevealResetRefreshTimer();
+  const delayMs = Math.max(1000, getNextFeedRevealResetTime().getTime() - Date.now() + 1000);
+
+  feedRevealResetRefreshTimer = window.setTimeout(() => {
+    feedRevealResetRefreshTimer = null;
+    if (document.getElementById(FEED_FOCUS_OVERLAY_ID)) {
+      updateFeedFocusOverlayContent();
+    }
+  }, Math.min(delayMs, 2147483647));
+}
+
+async function refreshFeedRevealQuotaState() {
+  const [dayEndMinutes, usage] = await Promise.all([
+    getStorage(FEED_REVEAL_DAY_END_MINUTES_KEY, DEFAULT_FEED_REVEAL_DAY_END_MINUTES),
+    getStorage(FEED_REVEAL_USAGE_KEY, { dayKey: '', count: 0 })
+  ]);
+
+  feedRevealDayEndMinutes = normalizeFeedRevealDayEndMinutes(dayEndMinutes);
+  feedRevealUsage = normalizeFeedRevealUsage(usage);
+}
+
+async function consumeFeedRevealQuota() {
+  await refreshFeedRevealQuotaState();
+
+  const usage = getFeedRevealUsageForCurrentDay();
+  if (usage.count >= FEED_REVEAL_DAILY_LIMIT) {
+    feedRevealUsage = usage;
+    return false;
+  }
+
+  const nextUsage = {
+    dayKey: usage.dayKey,
+    count: usage.count + 1
+  };
+
+  feedRevealUsage = nextUsage;
+  await setStorage(FEED_REVEAL_USAGE_KEY, nextUsage);
+  return true;
 }
 
 function getFeedFocusOverlay() {
@@ -491,7 +629,15 @@ function getFeedFocusOverlay() {
       applyFeedFocusMode();
       return;
     }
-    startFeedRevealCountdown();
+
+    runAsync(async () => {
+      await refreshFeedRevealQuotaState();
+      if (getFeedRevealRemaining() <= 0) {
+        updateFeedFocusOverlayContent();
+        return;
+      }
+      startFeedRevealCountdown();
+    });
   });
   overlay.querySelector('[data-action="open-feed"]')?.addEventListener('click', () => {
     runAsync(openFeedPage);
@@ -504,6 +650,7 @@ function getFeedFocusOverlay() {
 function removeFeedFocusOverlay() {
   const overlay = document.getElementById(FEED_FOCUS_OVERLAY_ID);
   if (overlay) overlay.remove();
+  clearFeedRevealResetRefreshTimer();
 }
 
 function clearFeedRevealCountdown() {
@@ -531,20 +678,32 @@ function updateFeedFocusOverlayContent() {
   const revealButton = overlay.querySelector('[data-action="reveal"]');
   const secondsRemaining = getFeedRevealSecondsRemaining();
   const isPendingReveal = feedRevealDeadline > 0;
+  const remainingReveals = getFeedRevealRemaining();
+  const isQuotaExhausted = remainingReveals <= 0;
+  const revealLabel = `${remainingReveals} reveal${remainingReveals === 1 ? '' : 's'} left`;
 
   if (kicker) kicker.textContent = getFeedFocusLabel();
   if (copy) copy.textContent = getFeedFocusMessage();
   if (status) {
-    status.textContent = isPendingReveal
-      ? `Videos will appear in ${secondsRemaining} second${secondsRemaining === 1 ? '' : 's'} unless you close the tab or cancel.`
-      : `Showing videos takes ${FEED_REVEAL_DELAY_SECONDS} seconds, so you have a moment to change your mind.`;
+    if (isPendingReveal) {
+      status.textContent = `Videos will appear in ${secondsRemaining} second${secondsRemaining === 1 ? '' : 's'} unless you close the tab or cancel. This uses one of today's ${FEED_REVEAL_DAILY_LIMIT} reveals.`;
+    } else if (isQuotaExhausted) {
+      status.textContent = `No reveals left until ${formatFeedRevealResetTime()}.`;
+    } else {
+      status.textContent = `${revealLabel} until ${formatFeedRevealResetTime()}. Showing videos takes ${FEED_REVEAL_DELAY_SECONDS} seconds, so you have a moment to change your mind.`;
+    }
   }
   if (revealButton) {
     revealButton.textContent = isPendingReveal
       ? `Cancel reveal (${secondsRemaining}s)`
-      : 'Show videos on this page';
+      : isQuotaExhausted
+        ? 'No reveals left today'
+        : `Show videos on this page (${remainingReveals} left)`;
     revealButton.setAttribute('aria-pressed', isPendingReveal ? 'true' : 'false');
+    revealButton.disabled = isQuotaExhausted && !isPendingReveal;
   }
+
+  scheduleFeedRevealResetRefresh();
 }
 
 function startFeedRevealCountdown() {
@@ -557,9 +716,18 @@ function startFeedRevealCountdown() {
     updateFeedFocusOverlayContent();
   }, 250);
   feedRevealTimer = window.setTimeout(() => {
-    clearFeedRevealCountdown();
-    temporaryFeedReveal = true;
-    applyFeedFocusMode();
+    runAsync(async () => {
+      clearFeedRevealCountdown();
+      const canReveal = await consumeFeedRevealQuota();
+      if (!canReveal) {
+        temporaryFeedReveal = false;
+        applyFeedFocusMode();
+        return;
+      }
+
+      temporaryFeedReveal = true;
+      applyFeedFocusMode();
+    });
   }, FEED_REVEAL_DELAY_MS);
 }
 
@@ -580,7 +748,10 @@ function applyFeedFocusMode() {
 function primeFeedFocusMode() {
   injectStyles();
   if (!isFeedFocusPage()) return;
-  getStorage(HIDE_FEED_VIDEOS_KEY, false).then((value) => {
+  Promise.all([
+    getStorage(HIDE_FEED_VIDEOS_KEY, false),
+    refreshFeedRevealQuotaState()
+  ]).then(([value]) => {
     hideFeedVideos = value ?? false;
     applyFeedFocusMode();
   });
@@ -999,6 +1170,7 @@ async function togglePanel(channel, anchorRect) {
 
 async function init() {
   injectStyles();
+  await refreshFeedRevealQuotaState();
   hideFeedVideos = (await getStorage(HIDE_FEED_VIDEOS_KEY, false)) ?? false;
   applyFeedFocusMode();
 
@@ -1101,6 +1273,22 @@ chrome.storage.onChanged.addListener((changes, area) => {
       temporaryFeedReveal = false;
     }
     applyFeedFocusMode();
+  }
+
+  if (changes[FEED_REVEAL_DAY_END_MINUTES_KEY]) {
+    feedRevealDayEndMinutes = normalizeFeedRevealDayEndMinutes(
+      changes[FEED_REVEAL_DAY_END_MINUTES_KEY].newValue
+    );
+    if (document.getElementById(FEED_FOCUS_OVERLAY_ID)) {
+      updateFeedFocusOverlayContent();
+    }
+  }
+
+  if (changes[FEED_REVEAL_USAGE_KEY]) {
+    feedRevealUsage = normalizeFeedRevealUsage(changes[FEED_REVEAL_USAGE_KEY].newValue);
+    if (document.getElementById(FEED_FOCUS_OVERLAY_ID)) {
+      updateFeedFocusOverlayContent();
+    }
   }
 });
 

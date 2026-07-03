@@ -411,6 +411,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "open-reader-url") {
+    const targetUrl = normalizeTargetUrl(message?.url);
+
+    if (!isHttpUrl(targetUrl)) {
+      sendResponse({ ok: false, code: "invalid_url" });
+      return undefined;
+    }
+
+    chrome.tabs.create({ url: targetUrl }, () => {
+      sendResponse({
+        ok: !chrome.runtime.lastError,
+        error: chrome.runtime.lastError?.message
+      });
+    });
+
+    return true;
+  }
+
   if (message?.type === "open-in-downie") {
     const tabId = sender?.tab?.id;
     const targetUrl = pickTargetUrl(message, sender);
