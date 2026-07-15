@@ -520,9 +520,12 @@
 
   const setPlaybackRate = (video, rate) => {
     isApplyingRate = true;
-    video.playbackRate = rate;
-    video.defaultPlaybackRate = rate;
-    isApplyingRate = false;
+    try {
+      video.playbackRate = rate;
+      video.defaultPlaybackRate = rate;
+    } finally {
+      isApplyingRate = false;
+    }
   };
 
   const stopPreview = () => {
@@ -1968,7 +1971,10 @@
     try {
       const url = new URL(value, window.location.href);
       const isYoutubeHost = ["youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"].includes(url.hostname);
-      return isYoutubeHost && (url.pathname === "/watch" || /^\/(shorts|live|embed)\//.test(url.pathname));
+      return isYoutubeHost && (
+        (url.pathname === "/watch" && Boolean(url.searchParams.get("v"))) ||
+        /^\/(shorts|live|embed)\/[^/]+/.test(url.pathname)
+      );
     } catch {
       return false;
     }
@@ -1982,7 +1988,10 @@
     try {
       const url = new URL(value, window.location.href);
       const isYoutubeHost = ["youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"].includes(url.hostname);
-      return isYoutubeHost && (url.pathname === "/watch" || /^\/(shorts|live)\//.test(url.pathname));
+      return isYoutubeHost && (
+        (url.pathname === "/watch" && Boolean(url.searchParams.get("v"))) ||
+        /^\/(shorts|live)\/[^/]+/.test(url.pathname)
+      );
     } catch {
       return false;
     }

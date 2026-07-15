@@ -13,7 +13,7 @@
           <div class="brand-dot"></div>
           <span>YT Lists</span>
         </div>
-        <button class="primary" id="create-list">New list</button>
+        <button class="primary" id="create-list">+ New list</button>
         <div class="list-search">
           <input
             id="list-search"
@@ -43,18 +43,36 @@
         <header class="topbar">
           <div class="current-list">
             <div class="list-title" id="current-list-name">All lists</div>
-            <div class="list-subtitle" id="current-list-subtitle">0 channels - 0 videos</div>
+            <div class="list-meta">
+              <div class="list-subtitle" id="current-list-subtitle">0 channels - 0 videos</div>
+              <span class="timestamp" id="last-updated"></span>
+            </div>
             <div class="empty-note" id="empty-note" hidden></div>
           </div>
-          <div class="actions">
-            <span class="timestamp" id="last-updated"></span>
-            <button class="ghost" id="toggle-feed-videos" aria-pressed="false">Focus mode: off</button>
-            <button class="ghost" id="toggle-shorts">Show Shorts</button>
-            <button class="ghost" id="toggle-archived">Show Hidden</button>
-            <button class="ghost" id="toggle-reader-saved">Hide Reader Saved</button>
-            <button class="ghost" id="toggle-downie-sent">Hide Downie Sent</button>
-            <button class="ghost" id="manage-list" disabled>Manage</button>
-            <button class="ghost" id="refresh-feed">Refresh</button>
+          <div class="header-tools">
+            <div class="actions">
+              <button class="ghost filter-trigger" id="toggle-filters" type="button" aria-expanded="false" aria-controls="filter-panel">Filters</button>
+              <button class="ghost" id="manage-list" type="button" disabled>Manage</button>
+              <button class="primary refresh-action" id="refresh-feed" type="button">Refresh</button>
+            </div>
+            <div class="filter-panel hidden" id="filter-panel" role="dialog" aria-label="Feed filters">
+              <div class="filter-panel-header">
+                <div>
+                  <strong>Feed filters</strong>
+                  <span>Choose what appears in this view.</span>
+                </div>
+              </div>
+              <div class="filter-panel-list">
+                <button class="filter-option" id="toggle-shorts" type="button">Show Shorts</button>
+                <button class="filter-option" id="toggle-archived" type="button">Show Hidden</button>
+                <button class="filter-option" id="toggle-reader-saved" type="button">Hide Reader Saved</button>
+                <button class="filter-option" id="toggle-downie-sent" type="button">Hide Downie Sent</button>
+              </div>
+              <div class="filter-panel-footer">
+                <button class="filter-option focus-option" id="toggle-feed-videos" type="button" aria-pressed="false">Focus mode: off</button>
+                <span>Controls the Home and Subscriptions feeds on YouTube.</span>
+              </div>
+            </div>
           </div>
         </header>
 
@@ -63,21 +81,41 @@
       </main>
     </div>
 
-    <div class="modal-backdrop hidden" id="modal-backdrop" role="dialog" aria-modal="true">
-      <div class="modal">
+    <div class="modal-backdrop hidden" id="modal-backdrop">
+      <div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-describedby="modal-description" tabindex="-1">
         <div class="modal-header">
-          <h2 class="modal-title" id="modal-title"></h2>
-          <button class="icon-button" id="modal-close" aria-label="Close">x</button>
+          <div class="modal-heading">
+            <h2 class="modal-title" id="modal-title"></h2>
+            <p class="modal-description" id="modal-description" hidden></p>
+          </div>
+          <button class="icon-button modal-close" id="modal-close" type="button" aria-label="Close">×</button>
         </div>
         <div class="modal-body" id="modal-body"></div>
         <div class="modal-actions" id="modal-actions"></div>
       </div>
     </div>
 
-    <div class="toast hidden" id="archive-toast" role="status" aria-live="polite">
-      <span id="archive-toast-text"></span>
-      <button class="toast-button" id="archive-undo" type="button">Undo</button>
+    <div class="drawer-backdrop hidden" id="list-drawer-backdrop">
+      <aside class="list-drawer" id="list-drawer" role="dialog" aria-modal="true" aria-labelledby="list-drawer-title" tabindex="-1">
+        <header class="list-drawer-header">
+          <div class="list-drawer-heading">
+            <div class="drawer-kicker">Manage list</div>
+            <div class="drawer-title-row">
+              <h2 class="drawer-title" id="list-drawer-title" contenteditable="false"></h2>
+              <button class="drawer-title-edit" id="list-drawer-title-edit" type="button" aria-label="Edit list name" aria-pressed="false">✎</button>
+            </div>
+            <p class="drawer-subtitle" id="list-drawer-subtitle"></p>
+          </div>
+          <button class="icon-button drawer-close" id="list-drawer-close" type="button" aria-label="Close list manager">×</button>
+        </header>
+        <div class="list-drawer-body" id="list-drawer-body"></div>
+        <footer class="list-drawer-footer">
+          <button class="primary" id="list-drawer-done" type="button">Done</button>
+        </footer>
+      </aside>
     </div>
+
+    <div class="toast-stack" id="toast-stack" aria-live="polite" aria-label="Recent actions"></div>
 
     <input type="file" id="import-file" accept="application/json" hidden />
 

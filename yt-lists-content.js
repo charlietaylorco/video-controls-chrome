@@ -374,17 +374,18 @@ function injectStyles() {
 
     #${FEED_FOCUS_OVERLAY_ID} {
       position: fixed;
-      top: 96px;
+      top: 50%;
       left: 50%;
-      transform: translateX(-50%);
+      transform: translate(-50%, -44%);
       z-index: 2000;
       width: min(520px, calc(100vw - 32px));
-      border-radius: 18px;
+      box-sizing: border-box;
+      border-radius: 20px;
       border: 1px solid rgba(0, 0, 0, 0.12);
-      background: rgba(255, 255, 255, 0.96);
+      background: rgba(255, 255, 255, 0.98);
       color: #0f0f0f;
-      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.18);
-      padding: 18px 20px;
+      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.2);
+      padding: 26px;
       font-family: Roboto, Arial, sans-serif;
       backdrop-filter: blur(12px);
     }
@@ -393,34 +394,47 @@ function injectStyles() {
       display: none !important;
     }
 
+    #${FEED_FOCUS_OVERLAY_ID} .focus-icon {
+      display: grid;
+      place-items: center;
+      width: 40px;
+      height: 40px;
+      margin-bottom: 18px;
+      border-radius: 12px;
+      background: rgba(255, 0, 51, 0.1);
+      color: #d9002b;
+      font-size: 18px;
+      font-weight: 800;
+    }
+
     #${FEED_FOCUS_OVERLAY_ID} .focus-kicker {
       font-size: 11px;
       text-transform: uppercase;
       letter-spacing: 0.08em;
       color: #606060;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
       font-weight: 700;
     }
 
     #${FEED_FOCUS_OVERLAY_ID} .focus-title {
-      font-size: 22px;
+      font-size: 24px;
       font-weight: 700;
       line-height: 1.2;
-      margin-bottom: 6px;
+      margin: 0 0 8px;
     }
 
     #${FEED_FOCUS_OVERLAY_ID} .focus-copy {
       font-size: 14px;
       line-height: 1.5;
       color: #303030;
-      margin-bottom: 14px;
+      margin-bottom: 16px;
     }
 
     #${FEED_FOCUS_OVERLAY_ID} .focus-status {
       font-size: 12px;
       line-height: 1.5;
       color: #606060;
-      margin-bottom: 14px;
+      margin-bottom: 16px;
     }
 
     #${FEED_FOCUS_OVERLAY_ID} .focus-actions {
@@ -446,14 +460,72 @@ function injectStyles() {
     }
 
     #${FEED_FOCUS_OVERLAY_ID} .focus-action.primary {
-      background: #0f0f0f;
+      background: #ff0033;
       color: #ffffff;
-      border-color: #0f0f0f;
+      border-color: #ff0033;
+    }
+
+    #${FEED_FOCUS_OVERLAY_ID} .focus-action:hover:not([disabled]) {
+      border-color: #b8b8b8;
+      background: #f2f2f2;
+    }
+
+    #${FEED_FOCUS_OVERLAY_ID} .focus-action.primary:hover:not([disabled]) {
+      border-color: #d9002b;
+      background: #d9002b;
+    }
+
+    #${FEED_FOCUS_OVERLAY_ID} .focus-action:focus-visible {
+      outline: 2px solid #065fd4;
+      outline-offset: 3px;
     }
 
     #${FEED_FOCUS_OVERLAY_ID} .focus-action[disabled] {
       opacity: 0.52;
       cursor: not-allowed;
+    }
+
+    html[dark] #${FEED_FOCUS_OVERLAY_ID},
+    [dark] #${FEED_FOCUS_OVERLAY_ID} {
+      border-color: rgba(255, 255, 255, 0.14);
+      background: rgba(33, 33, 33, 0.98);
+      color: #f1f1f1;
+      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.48);
+    }
+
+    html[dark] #${FEED_FOCUS_OVERLAY_ID} .focus-kicker,
+    html[dark] #${FEED_FOCUS_OVERLAY_ID} .focus-status,
+    [dark] #${FEED_FOCUS_OVERLAY_ID} .focus-kicker,
+    [dark] #${FEED_FOCUS_OVERLAY_ID} .focus-status {
+      color: #aaaaaa;
+    }
+
+    html[dark] #${FEED_FOCUS_OVERLAY_ID} .focus-copy,
+    [dark] #${FEED_FOCUS_OVERLAY_ID} .focus-copy {
+      color: #d6d6d6;
+    }
+
+    html[dark] #${FEED_FOCUS_OVERLAY_ID} .focus-action:not(.primary),
+    [dark] #${FEED_FOCUS_OVERLAY_ID} .focus-action:not(.primary) {
+      border-color: rgba(255, 255, 255, 0.18);
+      background: #2a2a2a;
+      color: #f1f1f1;
+    }
+
+    @media (max-width: 560px) {
+      #${FEED_FOCUS_OVERLAY_ID} {
+        top: 88px;
+        transform: translateX(-50%);
+        padding: 22px;
+      }
+
+      #${FEED_FOCUS_OVERLAY_ID} .focus-actions {
+        flex-direction: column;
+      }
+
+      #${FEED_FOCUS_OVERLAY_ID} .focus-action {
+        width: 100%;
+      }
     }
   `;
   (document.head || document.documentElement).appendChild(style);
@@ -612,14 +684,18 @@ function getFeedFocusOverlay() {
   overlay = document.createElement('div');
   overlay.id = FEED_FOCUS_OVERLAY_ID;
   overlay.hidden = true;
+  overlay.setAttribute('role', 'region');
+  overlay.setAttribute('aria-labelledby', `${FEED_FOCUS_OVERLAY_ID}-title`);
+  overlay.setAttribute('aria-describedby', `${FEED_FOCUS_OVERLAY_ID}-copy ${FEED_FOCUS_OVERLAY_ID}-status`);
   overlay.innerHTML = `
+    <div class="focus-icon" aria-hidden="true">✓</div>
     <div class="focus-kicker"></div>
-    <div class="focus-title">Focus mode is on</div>
-    <div class="focus-copy"></div>
-    <div class="focus-status"></div>
+    <h2 class="focus-title" id="${FEED_FOCUS_OVERLAY_ID}-title">Your feed is paused.</h2>
+    <div class="focus-copy" id="${FEED_FOCUS_OVERLAY_ID}-copy"></div>
+    <div class="focus-status" id="${FEED_FOCUS_OVERLAY_ID}-status"></div>
     <div class="focus-actions">
-      <button type="button" class="focus-action primary" data-action="reveal">Show videos on this page</button>
-      <button type="button" class="focus-action" data-action="open-feed">Open YT Lists</button>
+      <button type="button" class="focus-action primary" data-action="open-feed">Open YT Lists</button>
+      <button type="button" class="focus-action" data-action="reveal">Reveal YouTube feed</button>
     </div>
   `;
 
@@ -686,11 +762,11 @@ function updateFeedFocusOverlayContent() {
   if (copy) copy.textContent = getFeedFocusMessage();
   if (status) {
     if (isPendingReveal) {
-      status.textContent = `Videos will appear in ${secondsRemaining} second${secondsRemaining === 1 ? '' : 's'} unless you close the tab or cancel. This uses one of today's ${FEED_REVEAL_DAILY_LIMIT} reveals.`;
+      status.textContent = `Revealing in ${secondsRemaining} second${secondsRemaining === 1 ? '' : 's'}. This uses one of today's ${FEED_REVEAL_DAILY_LIMIT} reveals.`;
     } else if (isQuotaExhausted) {
       status.textContent = `No reveals left until ${formatFeedRevealResetTime()}.`;
     } else {
-      status.textContent = `${revealLabel} until ${formatFeedRevealResetTime()}. Showing videos takes ${FEED_REVEAL_DELAY_SECONDS} seconds, so you have a moment to change your mind.`;
+      status.textContent = `${revealLabel} · resets at ${formatFeedRevealResetTime()}. Revealing takes ${FEED_REVEAL_DELAY_SECONDS} seconds.`;
     }
   }
   if (revealButton) {
@@ -698,7 +774,7 @@ function updateFeedFocusOverlayContent() {
       ? `Cancel reveal (${secondsRemaining}s)`
       : isQuotaExhausted
         ? 'No reveals left today'
-        : `Show videos on this page (${remainingReveals} left)`;
+        : `Reveal YouTube feed (${remainingReveals} left)`;
     revealButton.setAttribute('aria-pressed', isPendingReveal ? 'true' : 'false');
     revealButton.disabled = isQuotaExhausted && !isPendingReveal;
   }

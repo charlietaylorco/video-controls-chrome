@@ -7,12 +7,14 @@
     <style>
       :root {
         color-scheme: dark;
-        --bg: #0f0f10;
-        --panel: rgba(255, 255, 255, 0.06);
-        --panel-border: rgba(255, 255, 255, 0.12);
-        --text: #f4f0e8;
-        --muted: rgba(244, 240, 232, 0.68);
-        --accent: #f0dbc2;
+        --bg: #111214;
+        --surface: #191b1f;
+        --surface-hover: #22252b;
+        --border: #30343b;
+        --text: #f2f3f5;
+        --muted: #9ba1aa;
+        --accent: #9cc5ff;
+        --focus: rgba(156, 197, 255, 0.28);
       }
 
       * {
@@ -22,568 +24,635 @@
       body {
         margin: 0;
         min-height: 100vh;
-        padding: 32px;
-        background:
-          radial-gradient(circle at top left, rgba(240, 219, 194, 0.12), transparent 36%),
-          linear-gradient(180deg, #141414, var(--bg));
+        background: var(--bg);
         color: var(--text);
-        font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
+        font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      button,
+      input[type="checkbox"] {
+        cursor: pointer;
       }
 
       main {
-        max-width: 620px;
+        width: min(760px, calc(100% - 40px));
+        margin: 0 auto;
+        padding: 32px 0 40px;
+      }
+
+      .page-header {
+        margin-bottom: 22px;
       }
 
       h1 {
-        margin: 0 0 10px;
-        font-size: clamp(2rem, 4vw, 3rem);
-        font-weight: 400;
+        margin: 0;
+        font-size: clamp(1.65rem, 4vw, 2.1rem);
+        font-weight: 650;
         letter-spacing: -0.04em;
       }
 
-      p {
-        margin: 0 0 24px;
-        max-width: 48ch;
+      .page-intro {
+        margin: 6px 0 0;
         color: var(--muted);
-        font-size: 1rem;
-        line-height: 1.55;
+        font-size: 0.9rem;
+        line-height: 1.45;
       }
 
-      .card {
-        padding: 26px;
-        border: 1px solid var(--panel-border);
-        border-radius: 26px;
-        background:
-          linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.04));
-        backdrop-filter: blur(18px);
-        -webkit-backdrop-filter: blur(18px);
-        box-shadow: 0 18px 40px rgba(0, 0, 0, 0.26);
+      .settings-section {
+        padding: 20px 0;
       }
 
-      label {
-        display: block;
+      .settings-section + .settings-section {
+        border-top: 1px solid var(--border);
+      }
+
+      .section-heading {
         margin-bottom: 12px;
-        font-size: 0.82rem;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        color: var(--muted);
       }
 
-      input {
-        width: 100%;
-        min-width: 0;
-        padding: 0 4px;
-        border: 0;
-        background: transparent;
-        color: var(--text);
-        font: inherit;
-        font-size: 1.5rem;
-        text-align: center;
-        letter-spacing: -0.03em;
-        outline: none;
-      }
-
-      input::-webkit-outer-spin-button,
-      input::-webkit-inner-spin-button {
+      .section-heading h2 {
         margin: 0;
-        -webkit-appearance: none;
+        font-size: 0.76rem;
+        font-weight: 700;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
       }
 
-      .control-shell:focus-within {
-        border-color: rgba(240, 219, 194, 0.46);
-        box-shadow: 0 0 0 3px rgba(240, 219, 194, 0.12);
+      .section-heading p,
+      .setting-hint,
+      .band-hint,
+      .hint {
+        color: var(--muted);
+        font-size: 0.78rem;
+        line-height: 1.42;
       }
 
-      .control-row {
-        display: flex;
-        align-items: center;
+      .section-heading p {
+        margin: 4px 0 0;
       }
 
-      .group + .group {
-        margin-top: 24px;
-        padding-top: 24px;
-        border-top: 1px solid rgba(255, 255, 255, 0.08);
-      }
-
-      .control-shell {
+      .settings-rows {
         display: grid;
-        grid-template-columns: 88px minmax(0, 1fr) 52px 88px;
+        gap: 10px;
+      }
+
+      .setting-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
         align-items: center;
-        min-height: 74px;
-        padding: 6px;
-        border: 1px solid rgba(255, 255, 255, 0.14);
-        border-radius: 22px;
-        background: rgba(6, 6, 8, 0.62);
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+        gap: 20px;
+        min-height: 42px;
+      }
+
+      .setting-copy label,
+      .setting-title,
+      .band-field label {
+        display: block;
+        color: var(--text);
+        font-size: 0.88rem;
+        font-weight: 600;
+      }
+
+      .setting-hint,
+      .band-hint {
+        display: block;
+        margin-top: 2px;
+      }
+
+      .stepper-control {
+        display: grid;
+        grid-template-columns: 36px 76px 28px 36px;
+        align-items: stretch;
+        height: 36px;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--surface);
+      }
+
+      .stepper-control:focus-within,
+      .time-input:focus,
+      .token-input:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--focus);
       }
 
       .stepper {
-        width: 100%;
-        height: 60px;
         border: 0;
-        border-radius: 16px;
-        background: rgba(255, 255, 255, 0.05);
-        color: var(--text);
-        font: inherit;
-        font-size: 1.05rem;
-        letter-spacing: -0.03em;
-        cursor: pointer;
-        transition:
-          background-color 120ms ease,
-          transform 120ms ease;
+        background: transparent;
+        color: var(--muted);
+        font-size: 1rem;
+        line-height: 1;
+      }
+
+      .stepper:first-child {
+        border-right: 1px solid var(--border);
+      }
+
+      .stepper:last-child {
+        border-left: 1px solid var(--border);
       }
 
       .stepper:hover {
-        background: rgba(255, 255, 255, 0.1);
-        transform: translateY(-1px);
+        background: var(--surface-hover);
+        color: var(--text);
       }
 
-      .stepper:focus {
-        outline: none;
-        background: rgba(255, 255, 255, 0.1);
+      .stepper:focus-visible,
+      .save-button:focus-visible,
+      .toggle-input:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: -2px;
       }
 
       .value-wrap {
         display: flex;
-        align-items: center;
-        justify-content: center;
         min-width: 0;
-        padding: 0 18px;
+      }
+
+      .value-wrap input {
+        width: 100%;
+        min-width: 0;
+        padding: 0 6px;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: var(--text);
+        font-size: 0.84rem;
+        text-align: right;
+      }
+
+      input[type="number"]::-webkit-inner-spin-button,
+      input[type="number"]::-webkit-outer-spin-button {
+        margin: 0;
+        -webkit-appearance: none;
       }
 
       .suffix {
-        font-size: 1.1rem;
-        color: rgba(244, 240, 232, 0.54);
-        text-align: center;
-      }
-
-      .hint,
-      .status {
-        margin-top: 14px;
-        font-size: 0.95rem;
-      }
-
-      .hint {
+        display: grid;
+        place-items: center start;
         color: var(--muted);
-        max-width: 50ch;
-        line-height: 1.5;
+        font-size: 0.76rem;
+      }
+
+      .hover-band-summary {
+        margin: 0 0 14px;
+        color: var(--muted);
+        font-size: 0.78rem;
+        line-height: 1.4;
+      }
+
+      .hover-band-summary-title {
+        color: var(--text);
+        font-weight: 600;
+      }
+
+      .hover-band-summary-value {
+        display: inline;
+        margin: 0 0 0 4px;
       }
 
       .hover-band-list {
         display: grid;
-        gap: 16px;
-      }
-
-      .hover-band-summary {
-        margin: 0 0 16px;
-        padding: 14px 16px;
-        border: 1px solid rgba(240, 219, 194, 0.16);
-        border-radius: 18px;
-        background:
-          linear-gradient(180deg, rgba(240, 219, 194, 0.08), rgba(240, 219, 194, 0.03));
-        color: var(--text);
-        line-height: 1.5;
-      }
-
-      .hover-band-summary-title {
-        display: block;
-        margin-bottom: 6px;
-        font-size: 0.74rem;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        color: var(--muted);
-      }
-
-      .hover-band-summary-value {
-        margin: 0;
-        font-size: 0.98rem;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
       }
 
       .hover-band {
-        padding: 18px;
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        border-radius: 20px;
-        background: rgba(6, 6, 8, 0.42);
+        min-width: 0;
+        padding: 0 14px;
+      }
+
+      .hover-band:first-child {
+        padding-left: 0;
+      }
+
+      .hover-band:last-child {
+        padding-right: 0;
+      }
+
+      .hover-band + .hover-band {
+        border-left: 1px solid var(--border);
       }
 
       .hover-band-title {
-        margin: 0;
-        font-size: 1rem;
-        color: var(--text);
-        letter-spacing: -0.02em;
+        margin: 0 0 2px;
+        font-size: 0.9rem;
+        font-weight: 650;
       }
 
       .hover-band-copy {
-        margin: 8px 0 14px;
+        min-height: 2.2em;
+        margin: 0 0 10px;
         color: var(--muted);
-        font-size: 0.95rem;
-        line-height: 1.45;
+        font-size: 0.7rem;
+        line-height: 1.35;
       }
 
       .hover-band-controls {
         display: grid;
-        gap: 12px;
+        gap: 9px;
       }
 
-      .band-control label {
-        margin-bottom: 8px;
-        font-size: 0.72rem;
+      .band-field label {
+        margin-bottom: 5px;
+        color: var(--muted);
+        font-size: 0.69rem;
+        font-weight: 500;
       }
 
-      .control-shell.compact {
-        grid-template-columns: 64px minmax(0, 1fr) 44px 64px;
-        min-height: 62px;
+      .stepper-control.compact {
+        width: 100%;
+        grid-template-columns: 30px minmax(42px, 1fr) 24px 30px;
+        height: 32px;
       }
 
-      .control-shell.compact .stepper {
-        height: 50px;
-        border-radius: 14px;
-        font-size: 0.95rem;
+      .stepper-control.compact .stepper {
+        font-size: 0.88rem;
       }
 
-      .control-shell.compact input {
-        font-size: 1.22rem;
-      }
-
-      .hint a {
-        color: var(--accent);
-        text-decoration: none;
-      }
-
-      .hint a:hover {
-        text-decoration: underline;
-      }
-
-      .status {
-        min-height: 1.2em;
-        color: var(--accent);
-      }
-
-      .token-row {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
-        gap: 10px;
-        align-items: center;
-      }
-
-      .time-shell {
-        display: flex;
-        align-items: center;
-        min-height: 58px;
-        max-width: 220px;
-        padding: 0 18px;
-        border: 1px solid rgba(255, 255, 255, 0.14);
-        border-radius: 18px;
-        background: rgba(6, 6, 8, 0.62);
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-      }
-
-      .time-shell:focus-within {
-        border-color: rgba(240, 219, 194, 0.46);
-        box-shadow: 0 0 0 3px rgba(240, 219, 194, 0.12);
-      }
-
-      .time-input {
-        padding: 0;
-        font-size: 1.24rem;
-        text-align: left;
-        letter-spacing: 0;
-      }
-
-      .time-input::-webkit-calendar-picker-indicator {
-        filter: invert(1);
-        opacity: 0.72;
+      .stepper-control.compact .value-wrap input {
+        font-size: 0.78rem;
       }
 
       .toggle-list {
         display: grid;
-        gap: 12px;
+        gap: 6px;
       }
 
       .toggle-item {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 16px;
-        min-height: 58px;
-        padding: 0 18px;
-        border: 1px solid rgba(255, 255, 255, 0.14);
-        border-radius: 18px;
-        background: rgba(6, 6, 8, 0.62);
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-      }
-
-      .toggle-copy {
         display: grid;
-        gap: 4px;
-      }
-
-      .toggle-title {
-        margin: 0;
-        font-size: 1rem;
-        color: var(--text);
-      }
-
-      .toggle-hint {
-        margin: 0;
-        font-size: 0.9rem;
-        color: var(--muted);
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 16px;
+        min-height: 42px;
       }
 
       .toggle-input {
-        width: 52px;
-        height: 32px;
+        position: relative;
+        width: 34px;
+        height: 20px;
         margin: 0;
-        accent-color: var(--accent);
-        cursor: pointer;
+        border: 0;
+        border-radius: 999px;
+        appearance: none;
+        background: #3b414a;
+        transition: background-color 120ms ease;
+      }
+
+      .toggle-input::before {
+        content: "";
+        position: absolute;
+        top: 3px;
+        left: 3px;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: #d7dbe1;
+        transition: transform 120ms ease;
+      }
+
+      .toggle-input:checked {
+        background: var(--accent);
+      }
+
+      .toggle-input:checked::before {
+        background: #10223b;
+        transform: translateX(14px);
+      }
+
+      .time-input,
+      .token-input {
+        height: 36px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        outline: 0;
+        background: var(--surface);
+        color: var(--text);
+        font-size: 0.82rem;
+      }
+
+      .time-input {
+        width: 112px;
+        padding: 0 10px;
+      }
+
+      .time-input::-webkit-calendar-picker-indicator {
+        filter: invert(1);
+        opacity: 0.65;
+      }
+
+      .token-row {
+        display: grid;
+        grid-template-columns: minmax(180px, 320px) auto;
+        gap: 8px;
       }
 
       .token-input {
-        min-height: 58px;
-        padding: 0 18px;
-        border: 1px solid rgba(255, 255, 255, 0.14);
-        border-radius: 18px;
-        background: rgba(6, 6, 8, 0.62);
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-        font-size: 1rem;
-        text-align: left;
-        letter-spacing: 0;
-      }
-
-      .token-input:focus {
-        border-color: rgba(240, 219, 194, 0.46);
-        box-shadow: 0 0 0 3px rgba(240, 219, 194, 0.12);
+        width: 100%;
+        min-width: 0;
+        padding: 0 11px;
       }
 
       .save-button {
-        min-width: 92px;
-        height: 58px;
-        border: 0;
-        border-radius: 18px;
-        background: rgba(255, 255, 255, 0.08);
+        height: 36px;
+        padding: 0 14px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--surface);
         color: var(--text);
-        font: inherit;
-        font-size: 0.98rem;
-        cursor: pointer;
-        transition:
-          background-color 120ms ease,
-          transform 120ms ease;
+        font-size: 0.8rem;
+        font-weight: 600;
       }
 
       .save-button:hover {
-        background: rgba(255, 255, 255, 0.14);
-        transform: translateY(-1px);
+        background: var(--surface-hover);
       }
 
-      .save-button:focus {
-        outline: none;
-        box-shadow: 0 0 0 3px rgba(240, 219, 194, 0.12);
+      .hint {
+        margin-top: 8px;
       }
 
-      @media (max-width: 720px) {
-        body {
-          padding: 20px;
+      .hint a {
+        color: var(--accent);
+      }
+
+      .status {
+        min-height: 20px;
+        margin-top: 4px;
+        color: var(--accent);
+        font-size: 0.78rem;
+      }
+
+      @media (max-width: 640px) {
+        main {
+          width: min(100% - 28px, 760px);
+          padding-top: 24px;
         }
 
-        .card {
-          padding: 20px;
+        .setting-row {
+          grid-template-columns: 1fr;
+          gap: 7px;
         }
 
-        .control-shell {
-          grid-template-columns: 72px minmax(0, 1fr) 40px 72px;
-          min-height: 66px;
-          border-radius: 18px;
+        .setting-row > :last-child {
+          justify-self: start;
         }
 
-        .stepper {
-          height: 54px;
-          border-radius: 14px;
-          font-size: 0.96rem;
+        .hover-band-list {
+          grid-template-columns: 1fr;
         }
 
-        .control-shell.compact {
-          grid-template-columns: 56px minmax(0, 1fr) 38px 56px;
+        .hover-band,
+        .hover-band:first-child,
+        .hover-band:last-child {
+          padding: 12px 0;
         }
 
-        .control-shell.compact .stepper {
-          height: 46px;
-          font-size: 0.9rem;
+        .hover-band:first-child {
+          padding-top: 0;
         }
 
-        input {
-          font-size: 1.28rem;
+        .hover-band + .hover-band {
+          border-top: 1px solid var(--border);
+          border-left: 0;
+        }
+
+        .hover-band-copy {
+          min-height: 0;
+        }
+
+        .hover-band-controls {
+          grid-template-columns: 1fr 1fr;
+        }
+
+        .token-row {
+          width: 100%;
+          grid-template-columns: minmax(0, 1fr) auto;
+        }
+      }
+
+      @media (max-width: 380px) {
+        .hover-band-controls {
+          grid-template-columns: 1fr;
         }
       }
     </style>
   </head>
   <body>
     <main>
-      <h1>Playback Settings</h1>
-      <p>
-        Tune how much the overlay buttons move playback speed, and optionally slow videos while they are hovered.
-      </p>
-      <section class="card">
-        <div class="group">
-          <label for="adjustment-step">Overlay step change</label>
-          <div class="control-shell">
-            <button class="stepper" data-setting="adjustmentStep" data-delta="-0.25" type="button" aria-label="Decrease overlay step by 0.25">-0.25</button>
-            <div class="value-wrap">
-              <input id="adjustment-step" type="number" min="0.01" max="16" step="0.01" inputmode="decimal">
+      <header class="page-header">
+        <h1>Playback settings</h1>
+        <p class="page-intro">Video overlay, hover preview, and YouTube focus controls.</p>
+      </header>
+
+      <section class="settings-section" aria-labelledby="playback-heading">
+        <div class="section-heading">
+          <h2 id="playback-heading">Playback</h2>
+          <p>Adjust the overlay’s speed controls and idle behaviour.</p>
+        </div>
+        <div class="settings-rows">
+          <div class="setting-row">
+            <div class="setting-copy">
+              <label for="adjustment-step">Speed step</label>
+              <span class="setting-hint">Change made by each overlay minus or plus tap.</span>
             </div>
-            <div class="suffix">x</div>
-            <button class="stepper" data-setting="adjustmentStep" data-delta="0.25" type="button" aria-label="Increase overlay step by 0.25">+0.25</button>
-          </div>
-          <div class="hint">Each tap of the in-video minus and plus buttons changes speed by this amount.</div>
-        </div>
-        <div class="group">
-          <label>Hover preview bands</label>
-          <div class="hover-band-summary" aria-live="polite">
-            <span class="hover-band-summary-title">Effective layout</span>
-            <p class="hover-band-summary-value" id="hover-band-summary"></p>
-          </div>
-          <div class="hover-band-list">
-            <article class="hover-band">
-              <h2 class="hover-band-title">Center band</h2>
-              <div class="hover-band-copy">The middle of the video. Default: 20% total width at 1x.</div>
-              <div class="hover-band-controls">
-                <div class="band-control">
-                  <label for="hover-center-width">Total width</label>
-                  <div class="control-shell compact">
-                    <button class="stepper" data-setting="hoverCenterWidthPercent" data-delta="-1" type="button" aria-label="Decrease center hover width by 1 percent">-1</button>
-                    <div class="value-wrap">
-                      <input id="hover-center-width" type="number" min="0" max="100" step="0.01" inputmode="decimal">
-                    </div>
-                    <div class="suffix">%</div>
-                    <button class="stepper" data-setting="hoverCenterWidthPercent" data-delta="1" type="button" aria-label="Increase center hover width by 1 percent">+1</button>
-                  </div>
-                </div>
-                <div class="band-control">
-                  <label for="hover-center-speed">Speed</label>
-                  <div class="control-shell compact">
-                    <button class="stepper" data-setting="hoverCenterSpeed" data-delta="-0.25" type="button" aria-label="Decrease center hover speed by 0.25">-0.25</button>
-                    <div class="value-wrap">
-                      <input id="hover-center-speed" type="number" min="0" max="16" step="0.01" inputmode="decimal">
-                    </div>
-                    <div class="suffix">x</div>
-                    <button class="stepper" data-setting="hoverCenterSpeed" data-delta="0.25" type="button" aria-label="Increase center hover speed by 0.25">+0.25</button>
-                  </div>
-                </div>
+            <div class="stepper-control">
+              <button class="stepper" data-setting="adjustmentStep" data-delta="-0.25" type="button" aria-label="Decrease overlay step by 0.25">−</button>
+              <div class="value-wrap">
+                <input id="adjustment-step" type="number" min="0.01" max="16" step="0.01" inputmode="decimal">
               </div>
-            </article>
-            <article class="hover-band">
-              <h2 class="hover-band-title">Middle band</h2>
-              <div class="hover-band-copy">Extends equally on both sides of the center band. Default: 10% per side at 1.5x.</div>
-              <div class="hover-band-controls">
-                <div class="band-control">
-                  <label for="hover-middle-width">Width per side</label>
-                  <div class="control-shell compact">
-                    <button class="stepper" data-setting="hoverMiddleWidthPercent" data-delta="-1" type="button" aria-label="Decrease middle hover width by 1 percent">-1</button>
-                    <div class="value-wrap">
-                      <input id="hover-middle-width" type="number" min="0" max="100" step="0.01" inputmode="decimal">
-                    </div>
-                    <div class="suffix">%</div>
-                    <button class="stepper" data-setting="hoverMiddleWidthPercent" data-delta="1" type="button" aria-label="Increase middle hover width by 1 percent">+1</button>
-                  </div>
-                </div>
-                <div class="band-control">
-                  <label for="hover-middle-speed">Speed</label>
-                  <div class="control-shell compact">
-                    <button class="stepper" data-setting="hoverMiddleSpeed" data-delta="-0.25" type="button" aria-label="Decrease middle hover speed by 0.25">-0.25</button>
-                    <div class="value-wrap">
-                      <input id="hover-middle-speed" type="number" min="0" max="16" step="0.01" inputmode="decimal">
-                    </div>
-                    <div class="suffix">x</div>
-                    <button class="stepper" data-setting="hoverMiddleSpeed" data-delta="0.25" type="button" aria-label="Increase middle hover speed by 0.25">+0.25</button>
-                  </div>
-                </div>
-              </div>
-            </article>
-            <article class="hover-band">
-              <h2 class="hover-band-title">Outer band</h2>
-              <div class="hover-band-copy">Extends equally on both sides of the middle band. Default: 10% per side at 2x.</div>
-              <div class="hover-band-controls">
-                <div class="band-control">
-                  <label for="hover-outer-width">Width per side</label>
-                  <div class="control-shell compact">
-                    <button class="stepper" data-setting="hoverOuterWidthPercent" data-delta="-1" type="button" aria-label="Decrease outer hover width by 1 percent">-1</button>
-                    <div class="value-wrap">
-                      <input id="hover-outer-width" type="number" min="0" max="100" step="0.01" inputmode="decimal">
-                    </div>
-                    <div class="suffix">%</div>
-                    <button class="stepper" data-setting="hoverOuterWidthPercent" data-delta="1" type="button" aria-label="Increase outer hover width by 1 percent">+1</button>
-                  </div>
-                </div>
-                <div class="band-control">
-                  <label for="hover-outer-speed">Speed</label>
-                  <div class="control-shell compact">
-                    <button class="stepper" data-setting="hoverOuterSpeed" data-delta="-0.25" type="button" aria-label="Decrease outer hover speed by 0.25">-0.25</button>
-                    <div class="value-wrap">
-                      <input id="hover-outer-speed" type="number" min="0" max="16" step="0.01" inputmode="decimal">
-                    </div>
-                    <div class="suffix">x</div>
-                    <button class="stepper" data-setting="hoverOuterSpeed" data-delta="0.25" type="button" aria-label="Increase outer hover speed by 0.25">+0.25</button>
-                  </div>
-                </div>
-              </div>
-            </article>
-          </div>
-          <div class="hint">The center width is the full middle band. The middle and outer widths are added on each side of the previous band. Set a width or speed to 0 to disable that band. Hovering outside these bands uses the video’s normal saved speed.</div>
-        </div>
-        <div class="group">
-          <label for="overlay-idle-hide-delay">Hide overlay after idle</label>
-          <div class="control-shell">
-            <button class="stepper" data-setting="overlayIdleHideDelay" data-delta="-0.25" type="button" aria-label="Decrease overlay idle hide delay by 0.25 seconds">-0.25</button>
-            <div class="value-wrap">
-              <input id="overlay-idle-hide-delay" type="number" min="0" max="60" step="0.01" inputmode="decimal">
+              <span class="suffix">×</span>
+              <button class="stepper" data-setting="adjustmentStep" data-delta="0.25" type="button" aria-label="Increase overlay step by 0.25">+</button>
             </div>
-            <div class="suffix">s</div>
-            <button class="stepper" data-setting="overlayIdleHideDelay" data-delta="0.25" type="button" aria-label="Increase overlay idle hide delay by 0.25 seconds">+0.25</button>
           </div>
-          <div class="hint">Hides the overlay after this many seconds without mouse movement over a video. Move the mouse to show it again. Set it to 0 to keep it visible.</div>
-        </div>
-        <div class="group">
-          <label>Overlay extras</label>
-          <div class="toggle-list">
-            <label class="toggle-item" for="show-hover-slow-zone-hint">
-              <span class="toggle-copy">
-                <span class="toggle-title">Show slow-hover hint</span>
-                <span class="toggle-hint">Shows faint hover bands while the controls are visible so the preview zones stay discoverable.</span>
-              </span>
-              <input class="toggle-input" id="show-hover-slow-zone-hint" type="checkbox">
-            </label>
-            <label class="toggle-item" for="show-downie">
-              <span class="toggle-copy">
-                <span class="toggle-title">Show Downie button</span>
-                <span class="toggle-hint">Keeps the download-to-Downie icon in the overlay.</span>
-              </span>
-              <input class="toggle-input" id="show-downie" type="checkbox">
-            </label>
-            <label class="toggle-item" for="show-reader">
-              <span class="toggle-copy">
-                <span class="toggle-title">Show Reader button</span>
-                <span class="toggle-hint">Keeps the save-to-Reader icon in the overlay.</span>
-              </span>
-              <input class="toggle-input" id="show-reader" type="checkbox">
-            </label>
+
+          <div class="setting-row">
+            <div class="setting-copy">
+              <label for="overlay-idle-hide-delay">Hide after idle</label>
+              <span class="setting-hint">Seconds without mouse movement. Set to 0 to keep the overlay visible.</span>
+            </div>
+            <div class="stepper-control">
+              <button class="stepper" data-setting="overlayIdleHideDelay" data-delta="-0.25" type="button" aria-label="Decrease overlay idle hide delay by 0.25 seconds">−</button>
+              <div class="value-wrap">
+                <input id="overlay-idle-hide-delay" type="number" min="0" max="60" step="0.01" inputmode="decimal">
+              </div>
+              <span class="suffix">s</span>
+              <button class="stepper" data-setting="overlayIdleHideDelay" data-delta="0.25" type="button" aria-label="Increase overlay idle hide delay by 0.25 seconds">+</button>
+            </div>
           </div>
         </div>
-        <div class="group">
-          <label for="feed-reveal-day-end">Focus mode day ends at</label>
-          <div class="time-shell">
-            <input class="time-input" id="feed-reveal-day-end" type="time" step="60">
-          </div>
-          <div class="hint">Focus mode can reveal hidden YouTube feed videos 3 times per day. The reveal count resets at this time and cannot be changed.</div>
+      </section>
+
+      <section class="settings-section" aria-labelledby="hover-heading">
+        <div class="section-heading">
+          <h2 id="hover-heading">Hover preview</h2>
+          <p>Set the width and playback speed for each horizontal video band.</p>
         </div>
-        <div class="group">
-          <label for="reader-token">Reader API token</label>
+
+        <div class="hover-band-summary" aria-live="polite">
+          <span class="hover-band-summary-title">Effective layout:</span>
+          <p class="hover-band-summary-value" id="hover-band-summary"></p>
+        </div>
+
+        <div class="hover-band-list">
+          <article class="hover-band">
+            <h3 class="hover-band-title">Center</h3>
+            <p class="hover-band-copy">Total width through the middle of the video.</p>
+            <div class="hover-band-controls">
+              <div class="band-field">
+                <label for="hover-center-width">Width</label>
+                <div class="stepper-control compact">
+                  <button class="stepper" data-setting="hoverCenterWidthPercent" data-delta="-1" type="button" aria-label="Decrease center hover width by 1 percent">−</button>
+                  <div class="value-wrap">
+                    <input id="hover-center-width" type="number" min="0" max="100" step="0.01" inputmode="decimal">
+                  </div>
+                  <span class="suffix">%</span>
+                  <button class="stepper" data-setting="hoverCenterWidthPercent" data-delta="1" type="button" aria-label="Increase center hover width by 1 percent">+</button>
+                </div>
+              </div>
+              <div class="band-field">
+                <label for="hover-center-speed">Speed</label>
+                <div class="stepper-control compact">
+                  <button class="stepper" data-setting="hoverCenterSpeed" data-delta="-0.25" type="button" aria-label="Decrease center hover speed by 0.25">−</button>
+                  <div class="value-wrap">
+                    <input id="hover-center-speed" type="number" min="0" max="16" step="0.01" inputmode="decimal">
+                  </div>
+                  <span class="suffix">×</span>
+                  <button class="stepper" data-setting="hoverCenterSpeed" data-delta="0.25" type="button" aria-label="Increase center hover speed by 0.25">+</button>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article class="hover-band">
+            <h3 class="hover-band-title">Middle</h3>
+            <p class="hover-band-copy">Added equally to both sides of the center band.</p>
+            <div class="hover-band-controls">
+              <div class="band-field">
+                <label for="hover-middle-width">Width per side</label>
+                <div class="stepper-control compact">
+                  <button class="stepper" data-setting="hoverMiddleWidthPercent" data-delta="-1" type="button" aria-label="Decrease middle hover width by 1 percent">−</button>
+                  <div class="value-wrap">
+                    <input id="hover-middle-width" type="number" min="0" max="100" step="0.01" inputmode="decimal">
+                  </div>
+                  <span class="suffix">%</span>
+                  <button class="stepper" data-setting="hoverMiddleWidthPercent" data-delta="1" type="button" aria-label="Increase middle hover width by 1 percent">+</button>
+                </div>
+              </div>
+              <div class="band-field">
+                <label for="hover-middle-speed">Speed</label>
+                <div class="stepper-control compact">
+                  <button class="stepper" data-setting="hoverMiddleSpeed" data-delta="-0.25" type="button" aria-label="Decrease middle hover speed by 0.25">−</button>
+                  <div class="value-wrap">
+                    <input id="hover-middle-speed" type="number" min="0" max="16" step="0.01" inputmode="decimal">
+                  </div>
+                  <span class="suffix">×</span>
+                  <button class="stepper" data-setting="hoverMiddleSpeed" data-delta="0.25" type="button" aria-label="Increase middle hover speed by 0.25">+</button>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article class="hover-band">
+            <h3 class="hover-band-title">Outer</h3>
+            <p class="hover-band-copy">Added equally to both sides of the middle band.</p>
+            <div class="hover-band-controls">
+              <div class="band-field">
+                <label for="hover-outer-width">Width per side</label>
+                <div class="stepper-control compact">
+                  <button class="stepper" data-setting="hoverOuterWidthPercent" data-delta="-1" type="button" aria-label="Decrease outer hover width by 1 percent">−</button>
+                  <div class="value-wrap">
+                    <input id="hover-outer-width" type="number" min="0" max="100" step="0.01" inputmode="decimal">
+                  </div>
+                  <span class="suffix">%</span>
+                  <button class="stepper" data-setting="hoverOuterWidthPercent" data-delta="1" type="button" aria-label="Increase outer hover width by 1 percent">+</button>
+                </div>
+              </div>
+              <div class="band-field">
+                <label for="hover-outer-speed">Speed</label>
+                <div class="stepper-control compact">
+                  <button class="stepper" data-setting="hoverOuterSpeed" data-delta="-0.25" type="button" aria-label="Decrease outer hover speed by 0.25">−</button>
+                  <div class="value-wrap">
+                    <input id="hover-outer-speed" type="number" min="0" max="16" step="0.01" inputmode="decimal">
+                  </div>
+                  <span class="suffix">×</span>
+                  <button class="stepper" data-setting="hoverOuterSpeed" data-delta="0.25" type="button" aria-label="Increase outer hover speed by 0.25">+</button>
+                </div>
+              </div>
+            </div>
+          </article>
+        </div>
+        <div class="hint">Set a width or speed to 0 to disable that band. Outside the bands, videos use their normal saved speed.</div>
+      </section>
+
+      <section class="settings-section" aria-labelledby="overlay-heading">
+        <div class="section-heading">
+          <h2 id="overlay-heading">Overlay</h2>
+          <p>Choose which hints and actions appear over videos.</p>
+        </div>
+        <div class="toggle-list">
+          <label class="toggle-item" for="show-hover-slow-zone-hint">
+            <span class="setting-copy">
+              <span class="setting-title">Show hover bands</span>
+              <span class="setting-hint">Keep the preview zones visible while the controls are shown.</span>
+            </span>
+            <input class="toggle-input" id="show-hover-slow-zone-hint" type="checkbox">
+          </label>
+          <label class="toggle-item" for="show-downie">
+            <span class="setting-copy">
+              <span class="setting-title">Downie button</span>
+              <span class="setting-hint">Show the download action in the video overlay.</span>
+            </span>
+            <input class="toggle-input" id="show-downie" type="checkbox">
+          </label>
+          <label class="toggle-item" for="show-reader">
+            <span class="setting-copy">
+              <span class="setting-title">Reader button</span>
+              <span class="setting-hint">Show the save-to-Reader action in the video overlay.</span>
+            </span>
+            <input class="toggle-input" id="show-reader" type="checkbox">
+          </label>
+        </div>
+      </section>
+
+      <section class="settings-section" aria-labelledby="focus-heading">
+        <div class="section-heading">
+          <h2 id="focus-heading">Focus mode</h2>
+          <p>Set when the daily YouTube feed reveal allowance resets.</p>
+        </div>
+        <div class="setting-row">
+          <div class="setting-copy">
+            <label for="feed-reveal-day-end">Day ends at</label>
+            <span class="setting-hint">The daily YouTube feed reveal count resets at this time.</span>
+          </div>
+          <input class="time-input" id="feed-reveal-day-end" type="time" step="60">
+        </div>
+      </section>
+
+      <section class="settings-section" aria-labelledby="reader-heading">
+        <div class="section-heading">
+          <h2 id="reader-heading">Reader</h2>
+          <p>Connect Readwise Reader to save pages from the overlay.</p>
+        </div>
+        <div class="setting-row">
+          <div class="setting-copy">
+            <label for="reader-token">API token</label>
+            <span class="setting-hint">Used to save the current page from the video overlay.</span>
+          </div>
           <div class="token-row">
             <input class="token-input" id="reader-token" type="password" spellcheck="false" autocomplete="off">
             <button class="save-button" id="save-token" type="button">Save</button>
           </div>
-          <div class="hint">Used by the Reader icon in the video overlay to save the current page URL. Get your token from <a href="https://readwise.io/access_token" target="_blank" rel="noreferrer">readwise.io/access_token</a>.</div>
         </div>
-        <div class="status" id="status" aria-live="polite"></div>
+        <div class="hint">Get your token from <a href="https://readwise.io/access_token" target="_blank" rel="noreferrer">Readwise</a>.</div>
       </section>
+
+      <div class="status" id="status" aria-live="polite"></div>
     </main>
     <script src="options.js"></script>
   </body>

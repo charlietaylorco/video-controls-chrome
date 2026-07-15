@@ -70,19 +70,24 @@ const durationCache = new Map();
 let durationPersistTimer = null;
 let feedPersistTimer = null;
 let archivePersistTimer = null;
-let toastTimer = null;
-let toastUndo = null;
-let settingsPopover = null;
-let settingsPopoverExport = null;
-let settingsPopoverImport = null;
+let feedLoadGeneration = 0;
 let settingsPopoverReader = null;
-let settingsPopoverAnchor = null;
 const settingsSmartListButtons = new Map();
 const settingsThemeButtons = new Map();
 const readerButtonResetTimers = new WeakMap();
+const toastTimers = new Map();
+const channelRemovalToasts = new WeakMap();
 const durationQueue = [];
 let durationActive = 0;
 const DURATION_CONCURRENCY = 4;
+const TOAST_DURATION = 10000;
+let activeModalReturnFocus = null;
+let activeDrawerReturnFocus = null;
+let activeModalOnClose = null;
+let modalClosesOnBackdrop = true;
+let drawerListId = null;
+let drawerRenameOriginal = '';
+let drawerIsRenaming = false;
 
 function isLikelyChannelId(id) {
   return typeof id === 'string' && id.startsWith('UC');
@@ -134,9 +139,9 @@ async function resolveChannelIdFromUrl(url) {
   }
 }
 
-async function normalizeStoredChannels() {
+async function normalizeStoredChannels(lists = state.lists, shouldPersist = () => true) {
   let updated = false;
-  for (const list of state.lists) {
+  for (const list of lists) {
     if (!list.channels) continue;
     for (const channel of list.channels) {
       if (!channel || !channel.id || isLikelyChannelId(channel.id)) continue;
@@ -151,8 +156,8 @@ async function normalizeStoredChannels() {
       }
     }
   }
-  if (updated) {
-    await setStorage(STORAGE_KEY, state.lists);
+  if (updated && shouldPersist()) {
+    await setStorage(STORAGE_KEY, lists);
   }
 }
 
@@ -172,14 +177,24 @@ const elements = {
   toggleArchived: document.getElementById('toggle-archived'),
   toggleReaderSaved: document.getElementById('toggle-reader-saved'),
   toggleDownieSent: document.getElementById('toggle-downie-sent'),
+  toggleFilters: document.getElementById('toggle-filters'),
+  filterPanel: document.getElementById('filter-panel'),
   modalBackdrop: document.getElementById('modal-backdrop'),
+  modal: document.getElementById('modal'),
   modalTitle: document.getElementById('modal-title'),
+  modalDescription: document.getElementById('modal-description'),
   modalBody: document.getElementById('modal-body'),
   modalActions: document.getElementById('modal-actions'),
   modalClose: document.getElementById('modal-close'),
-  archiveToast: document.getElementById('archive-toast'),
-  archiveToastText: document.getElementById('archive-toast-text'),
-  archiveUndo: document.getElementById('archive-undo'),
+  listDrawerBackdrop: document.getElementById('list-drawer-backdrop'),
+  listDrawer: document.getElementById('list-drawer'),
+  listDrawerTitle: document.getElementById('list-drawer-title'),
+  listDrawerTitleEdit: document.getElementById('list-drawer-title-edit'),
+  listDrawerSubtitle: document.getElementById('list-drawer-subtitle'),
+  listDrawerBody: document.getElementById('list-drawer-body'),
+  listDrawerClose: document.getElementById('list-drawer-close'),
+  listDrawerDone: document.getElementById('list-drawer-done'),
+  toastStack: document.getElementById('toast-stack'),
   importFile: document.getElementById('import-file'),
   sidebarSettings: document.getElementById('sidebar-settings'),
   listSearch: document.getElementById('list-search'),
@@ -518,46 +533,67 @@ function updateArchiveState(videoId, shouldArchive) {
   renderFeed();
 }
 
-function hideToast() {
-  if (toastTimer) {
-    clearTimeout(toastTimer);
-    toastTimer = null;
+function removeToast(toast) {
+  if (!toast) return;
+  const timer = toastTimers.get(toast);
+  if (timer?.timeout) {
+    clearTimeout(timer.timeout);
   }
-  toastUndo = null;
-  if (elements.archiveUndo) {
-    elements.archiveUndo.hidden = true;
-    elements.archiveUndo.textContent = 'Undo';
-  }
-  if (elements.archiveToast) {
-    elements.archiveToast.classList.add('hidden');
-  }
+  toastTimers.delete(toast);
+  toast.remove();
 }
 
-function showToast(message, { actionLabel = '', onAction = null, duration = 4000 } = {}) {
-  if (!elements.archiveToast || !elements.archiveToastText) return;
-  elements.archiveToastText.textContent = message;
-  elements.archiveToast.classList.remove('hidden');
-  toastUndo = typeof onAction === 'function' ? onAction : null;
+function scheduleToastRemoval(toast, duration) {
+  if (!toast?.isConnected) return;
+  const timeoutDuration = Math.max(250, Number(duration) || TOAST_DURATION);
+  const timer = toastTimers.get(toast) || {};
+  if (timer.timeout) {
+    clearTimeout(timer.timeout);
+  }
+  timer.remaining = timeoutDuration;
+  timer.expiresAt = Date.now() + timeoutDuration;
+  timer.timeout = window.setTimeout(() => removeToast(toast), timeoutDuration);
+  toastTimers.set(toast, timer);
+}
 
-  if (elements.archiveUndo) {
-    const hasAction = !!(toastUndo && actionLabel);
-    elements.archiveUndo.hidden = !hasAction;
-    elements.archiveUndo.textContent = hasAction ? actionLabel : 'Undo';
+function showToast(message, { actionLabel = '', onAction = null, duration = TOAST_DURATION } = {}) {
+  if (!elements.toastStack) return null;
+
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.setAttribute('role', 'status');
+
+  const copy = document.createElement('span');
+  copy.className = 'toast-message';
+  copy.textContent = message;
+  toast.appendChild(copy);
+
+  if (actionLabel && typeof onAction === 'function') {
+    const action = document.createElement('button');
+    action.className = 'toast-button';
+    action.type = 'button';
+    action.textContent = actionLabel;
+    action.addEventListener('click', async () => {
+      action.disabled = true;
+      try {
+        await onAction();
+      } finally {
+        removeToast(toast);
+      }
+    });
+    toast.appendChild(action);
   }
 
-  if (toastTimer) {
-    clearTimeout(toastTimer);
-  }
-  toastTimer = window.setTimeout(() => {
-    hideToast();
-  }, duration);
+  elements.toastStack.appendChild(toast);
+  scheduleToastRemoval(toast, duration);
+  return toast;
 }
 
 function showArchiveToast(message, onUndo) {
-  showToast(message, { actionLabel: 'Undo', onAction: onUndo });
+  return showToast(message, { actionLabel: 'Undo', onAction: onUndo });
 }
 
-function archiveAllVisibleItems(list) {
+async function archiveAllVisibleItems(list) {
   if (!list) return;
   const channelIds = new Set((list.channels || []).map((channel) => channel?.id).filter(Boolean));
   const items = (state.items || []).filter((item) => !channelIds.size || channelIds.has(item.channelId));
@@ -567,7 +603,11 @@ function archiveAllVisibleItems(list) {
     return;
   }
 
-  const confirmed = window.confirm(`Hide ${toArchive.length} video${toArchive.length === 1 ? '' : 's'} from "${list.name}"?`);
+  const confirmed = await confirmAction({
+    title: 'Hide all visible videos?',
+    description: `This hides ${toArchive.length} video${toArchive.length === 1 ? '' : 's'} from "${list.name}". You can restore them using Show Hidden.`,
+    confirmLabel: `Hide ${toArchive.length} video${toArchive.length === 1 ? '' : 's'}`,
+  });
   if (!confirmed) return;
 
   const archivedIds = new Set();
@@ -892,6 +932,9 @@ function openReadwiseSettingsModal() {
 
   openModal({
     title: 'Reader settings',
+    description: 'Connect Readwise to save videos directly from YT Lists.',
+    variant: 'standard',
+    returnFocus: elements.sidebarSettings,
     bodyBuilder: () => {
       const wrapper = document.createElement('div');
       wrapper.className = 'reader-settings-panel';
@@ -1039,196 +1082,230 @@ async function handleImportFileChange(event) {
   try {
     payload = JSON.parse(text);
   } catch (error) {
-    window.alert('Invalid JSON file.');
+    showToast('That file is not valid JSON.');
     return;
   }
 
   if (!payload || !Array.isArray(payload.lists)) {
-    window.alert('Invalid backup file.');
+    showToast('That file is not a valid YT Lists backup.');
     return;
   }
 
-  const confirmed = window.confirm('Import will replace your current lists and settings. Continue?');
+  const confirmed = await confirmAction({
+    title: 'Replace your YT Lists data?',
+    description: 'Importing this backup replaces your current lists and preferences. Export your current data first if you may need it later.',
+    confirmLabel: 'Import and replace',
+    tone: 'danger',
+  });
   if (!confirmed) return;
 
   await applyImport(payload);
+  showToast('YT Lists backup imported.');
 }
 
-function ensureSettingsPopover() {
-  if (settingsPopover) return;
+function openSettingsModal(initialSection = 'reader') {
+  settingsPopoverReader = null;
+  settingsSmartListButtons.clear();
+  settingsThemeButtons.clear();
 
-  const popover = document.createElement('div');
-  popover.className = 'settings-popover hidden';
-  popover.id = 'settings-popover';
-  popover.setAttribute('role', 'menu');
-  popover.setAttribute('aria-label', 'List tools');
+  openModal({
+    title: 'Settings',
+    description: 'Manage integrations, smart views, appearance, backups, and help.',
+    variant: 'wide',
+    returnFocus: elements.sidebarSettings,
+    bodyBuilder: () => {
+      const layout = document.createElement('div');
+      layout.className = 'settings-dialog';
 
-  const title = document.createElement('div');
-  title.className = 'settings-popover-title';
-  title.textContent = 'List tools';
+      const nav = document.createElement('div');
+      nav.className = 'settings-dialog-nav';
+      nav.setAttribute('role', 'tablist');
+      nav.setAttribute('aria-label', 'Settings sections');
 
-  const helpBtn = document.createElement('button');
-  helpBtn.type = 'button';
-  helpBtn.className = 'settings-popover-item';
-  helpBtn.textContent = 'How it works';
-  helpBtn.setAttribute('role', 'menuitem');
-  helpBtn.addEventListener('click', () => {
-    openHelpModal();
-    closeSettingsPopover();
+      const pane = document.createElement('div');
+      pane.className = 'settings-dialog-pane';
+
+      const sections = [
+        { id: 'reader', label: 'Reader' },
+        { id: 'smart-views', label: 'Smart views' },
+        { id: 'appearance', label: 'Appearance' },
+        { id: 'data-help', label: 'Data & help' },
+      ];
+      const navButtons = new Map();
+
+      const addSectionHeading = (title, description) => {
+        const heading = document.createElement('div');
+        heading.className = 'settings-section-heading';
+        const titleEl = document.createElement('h3');
+        titleEl.textContent = title;
+        const copy = document.createElement('p');
+        copy.textContent = description;
+        heading.append(titleEl, copy);
+        pane.appendChild(heading);
+      };
+
+      const renderSection = (sectionId) => {
+        pane.innerHTML = '';
+        navButtons.forEach((button, id) => {
+          const selected = id === sectionId;
+          button.classList.toggle('active', selected);
+          button.setAttribute('aria-selected', selected ? 'true' : 'false');
+        });
+
+        if (sectionId === 'reader') {
+          addSectionHeading('Reader integration', 'Save videos from YT Lists directly to your Reader library.');
+          const status = document.createElement('div');
+          status.className = 'settings-status';
+          const chip = document.createElement('span');
+          chip.className = `status-chip${hasReadwiseApiKey() ? ' connected' : ''}`;
+          chip.textContent = hasReadwiseApiKey() ? 'Connected' : 'Not connected';
+          const copy = document.createElement('span');
+          copy.textContent = hasReadwiseApiKey()
+            ? 'Reader is ready in this browser profile.'
+            : 'Add a Readwise token before saving videos.';
+          status.append(chip, copy);
+
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'settings-action primary';
+          button.addEventListener('click', openReadwiseSettingsModal);
+          settingsPopoverReader = button;
+          pane.append(status, button);
+          updateReaderSettingsButton();
+          return;
+        }
+
+        if (sectionId === 'smart-views') {
+          addSectionHeading('Smart views', 'Choose which generated views appear in the list sidebar.');
+          const group = document.createElement('div');
+          group.className = 'settings-row-list';
+          SMART_LISTS.filter((list) => isSmartListHideable(list.id)).forEach((list) => {
+            const row = document.createElement('div');
+            row.className = 'settings-row';
+            const copy = document.createElement('div');
+            const name = document.createElement('strong');
+            name.textContent = list.name;
+            const detail = document.createElement('span');
+            detail.textContent = list.id === 'all'
+              ? 'Channels across every list.'
+              : list.id === SMART_READER_SAVED_ID
+                ? 'Videos saved to Reader.'
+                : 'Videos sent to Downie.';
+            copy.append(name, detail);
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'settings-row-action';
+            button.addEventListener('click', async () => {
+              await setSmartListHidden(list.id, !isSmartListHidden(list.id));
+              updateSmartListSettingsButtons();
+            });
+            settingsSmartListButtons.set(list.id, button);
+            row.append(copy, button);
+            group.appendChild(row);
+          });
+          pane.appendChild(group);
+          updateSmartListSettingsButtons();
+          return;
+        }
+
+        if (sectionId === 'appearance') {
+          addSectionHeading('Appearance', 'Choose how YT Lists follows your browser theme.');
+          const themeGroup = document.createElement('div');
+          themeGroup.className = 'settings-theme-group';
+          [
+            { id: 'system', label: 'System' },
+            { id: 'light', label: 'Light' },
+            { id: 'dark', label: 'Dark' },
+          ].forEach(({ id, label }) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'settings-theme-option';
+            button.textContent = label;
+            button.setAttribute('aria-pressed', 'false');
+            button.addEventListener('click', () => setTheme(id));
+            settingsThemeButtons.set(id, button);
+            themeGroup.appendChild(button);
+          });
+          pane.appendChild(themeGroup);
+          updateThemeButtons();
+          return;
+        }
+
+        addSectionHeading('Data & help', 'Back up your lists or revisit how the extension works.');
+        const actions = document.createElement('div');
+        actions.className = 'settings-row-list';
+        [
+          {
+            title: 'Export backup',
+            detail: 'Download lists, order, archive state, and preferences.',
+            label: 'Export',
+            action: () => {
+              triggerExport();
+              showToast('YT Lists backup exported.');
+            },
+          },
+          {
+            title: 'Import backup',
+            detail: 'Replace current data from a YT Lists backup file.',
+            label: 'Import',
+            action: () => {
+              closeModal();
+              triggerImportSelect();
+            },
+          },
+          {
+            title: 'How YT Lists works',
+            detail: 'Read the short guide to lists, feeds, hiding, and backups.',
+            label: 'Open guide',
+            action: openHelpModal,
+          },
+        ].forEach((item) => {
+          const row = document.createElement('div');
+          row.className = 'settings-row';
+          const copy = document.createElement('div');
+          const title = document.createElement('strong');
+          title.textContent = item.title;
+          const detail = document.createElement('span');
+          detail.textContent = item.detail;
+          copy.append(title, detail);
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'settings-row-action';
+          button.textContent = item.label;
+          button.addEventListener('click', item.action);
+          row.append(copy, button);
+          actions.appendChild(row);
+        });
+        pane.appendChild(actions);
+      };
+
+      sections.forEach((section) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'settings-dialog-tab';
+        button.setAttribute('role', 'tab');
+        button.textContent = section.label;
+        button.addEventListener('click', () => renderSection(section.id));
+        navButtons.set(section.id, button);
+        nav.appendChild(button);
+      });
+
+      layout.append(nav, pane);
+      window.setTimeout(() => renderSection(initialSection), 0);
+      return layout;
+    },
+    actionsBuilder: () => {
+      const close = document.createElement('button');
+      close.className = 'primary';
+      close.type = 'button';
+      close.textContent = 'Done';
+      close.addEventListener('click', closeModal);
+      return close;
+    },
   });
-
-  const exportBtn = document.createElement('button');
-  exportBtn.type = 'button';
-  exportBtn.className = 'settings-popover-item';
-  exportBtn.textContent = 'Export lists';
-  exportBtn.setAttribute('role', 'menuitem');
-  exportBtn.addEventListener('click', () => {
-    triggerExport();
-    closeSettingsPopover();
-  });
-
-  const importBtn = document.createElement('button');
-  importBtn.type = 'button';
-  importBtn.className = 'settings-popover-item';
-  importBtn.textContent = 'Import lists';
-  importBtn.setAttribute('role', 'menuitem');
-  importBtn.addEventListener('click', () => {
-    triggerImportSelect();
-    closeSettingsPopover();
-  });
-
-  const readerTitle = document.createElement('div');
-  readerTitle.className = 'settings-popover-title';
-  readerTitle.textContent = 'Reader';
-
-  const readerBtn = document.createElement('button');
-  readerBtn.type = 'button';
-  readerBtn.className = 'settings-popover-item';
-  readerBtn.setAttribute('role', 'menuitem');
-  readerBtn.addEventListener('click', () => {
-    openReadwiseSettingsModal();
-    closeSettingsPopover();
-  });
-
-  const smartTitle = document.createElement('div');
-  smartTitle.className = 'settings-popover-title';
-  smartTitle.textContent = 'Smart lists';
-
-  const smartGroup = document.createElement('div');
-  smartGroup.className = 'settings-popover-list';
-  smartGroup.setAttribute('role', 'group');
-
-  SMART_LISTS.filter((list) => isSmartListHideable(list.id)).forEach((list) => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'settings-popover-item';
-    button.setAttribute('role', 'menuitemcheckbox');
-    button.addEventListener('click', async () => {
-      await setSmartListHidden(list.id, !isSmartListHidden(list.id));
-      updateSmartListSettingsButtons();
-    });
-    smartGroup.appendChild(button);
-    settingsSmartListButtons.set(list.id, button);
-  });
-
-  const appearanceTitle = document.createElement('div');
-  appearanceTitle.className = 'settings-popover-title';
-  appearanceTitle.textContent = 'Appearance';
-
-  const themeGroup = document.createElement('div');
-  themeGroup.className = 'settings-popover-group';
-  themeGroup.setAttribute('role', 'group');
-
-  const themes = [
-    { id: 'system', label: 'System' },
-    { id: 'light', label: 'Light' },
-    { id: 'dark', label: 'Dark' },
-  ];
-
-  themes.forEach(({ id, label }) => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'settings-theme-option';
-    button.dataset.theme = id;
-    button.textContent = label;
-    button.setAttribute('aria-pressed', 'false');
-    button.addEventListener('click', () => {
-      setTheme(id);
-    });
-    themeGroup.appendChild(button);
-    settingsThemeButtons.set(id, button);
-  });
-
-  popover.append(title, helpBtn, exportBtn, importBtn, readerTitle, readerBtn, smartTitle, smartGroup, appearanceTitle, themeGroup);
-  popover.addEventListener('click', (event) => event.stopPropagation());
-
-  document.body.appendChild(popover);
-  settingsPopover = popover;
-  settingsPopoverExport = exportBtn;
-  settingsPopoverImport = importBtn;
-  settingsPopoverReader = readerBtn;
-  updateReaderSettingsButton();
-  updateSmartListSettingsButtons();
-  updateThemeButtons();
-}
-
-function positionSettingsPopover(anchor) {
-  if (!settingsPopover || !anchor) return;
-  const rect = anchor.getBoundingClientRect();
-  const popoverRect = settingsPopover.getBoundingClientRect();
-  const padding = 12;
-  const gap = 8;
-  let left = rect.right - popoverRect.width;
-  let top = rect.bottom + gap;
-
-  if (left < padding) left = padding;
-  if (left + popoverRect.width > window.innerWidth - padding) {
-    left = window.innerWidth - padding - popoverRect.width;
-  }
-
-  if (top + popoverRect.height > window.innerHeight - padding) {
-    top = rect.top - popoverRect.height - gap;
-  }
-
-  if (top < padding) top = padding;
-
-  settingsPopover.style.left = `${left + window.scrollX}px`;
-  settingsPopover.style.top = `${top + window.scrollY}px`;
-}
-
-function openSettingsPopover(anchor) {
-  if (!anchor) return;
-  ensureSettingsPopover();
-  settingsPopoverAnchor = anchor;
-  settingsPopover.classList.remove('hidden');
-  anchor.setAttribute('aria-expanded', 'true');
-  updateThemeButtons();
-  positionSettingsPopover(anchor);
-}
-
-function closeSettingsPopover() {
-  if (!settingsPopover || settingsPopover.classList.contains('hidden')) return;
-  settingsPopover.classList.add('hidden');
-  if (settingsPopoverAnchor) {
-    settingsPopoverAnchor.setAttribute('aria-expanded', 'false');
-  }
-  settingsPopoverAnchor = null;
-}
-
-function isSettingsPopoverOpen() {
-  return !!settingsPopover && !settingsPopover.classList.contains('hidden');
-}
-
-function toggleSettingsPopover(anchor) {
-  if (settingsPopoverAnchor === anchor && settingsPopover && !settingsPopover.classList.contains('hidden')) {
-    closeSettingsPopover();
-    return;
-  }
-  openSettingsPopover(anchor);
 }
 
 function getFilteredItems() {
-  const query = state.searchQuery.trim().toLowerCase();
   return state.items.filter((item) => {
     if (state.selectedListId === SMART_READER_SAVED_ID && !isItemSavedToReader(item)) return false;
     if (state.selectedListId === SMART_DOWNIE_SENT_ID && !isItemSentToDownie(item)) return false;
@@ -1238,13 +1315,6 @@ function getFilteredItems() {
     }
     if (state.hideShorts && item.isShort) return false;
     if (state.hideArchived && isItemArchived(item)) return false;
-    if (query) {
-      const title = (item.title || '').toLowerCase();
-      const channel = (item.channelTitle || '').toLowerCase();
-      if (!title.includes(query) && !channel.includes(query)) {
-        return false;
-      }
-    }
     return true;
   });
 }
@@ -1294,26 +1364,57 @@ function updateListSearchEmpty(hasMatches) {
   elements.listSearchEmpty.hidden = !hasQuery || hasMatches;
 }
 
+function updateFilterSummary() {
+  if (!elements.toggleFilters) return;
+  const activeCount = [
+    state.hideShorts,
+    state.hideArchived,
+    state.hideReaderSaved,
+    state.hideDownieSent,
+  ].filter(Boolean).length;
+  elements.toggleFilters.textContent = activeCount ? `Filters · ${activeCount}` : 'Filters';
+  elements.toggleFilters.classList.toggle('active', activeCount > 0);
+}
+
+function closeFilterPanel() {
+  if (!elements.filterPanel || elements.filterPanel.classList.contains('hidden')) return;
+  elements.filterPanel.classList.add('hidden');
+  elements.toggleFilters?.setAttribute('aria-expanded', 'false');
+}
+
+function toggleFilterPanel() {
+  if (!elements.filterPanel) return;
+  const willOpen = elements.filterPanel.classList.contains('hidden');
+  elements.filterPanel.classList.toggle('hidden', !willOpen);
+  elements.toggleFilters?.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+}
+
 function updateShortsToggle() {
   if (!elements.toggleShorts) return;
   elements.toggleShorts.textContent = state.hideShorts ? 'Show Shorts' : 'Hide Shorts';
+  elements.toggleShorts.setAttribute('aria-pressed', state.hideShorts ? 'true' : 'false');
+  updateFilterSummary();
 }
 
 function updateArchivedToggle() {
   if (!elements.toggleArchived) return;
   elements.toggleArchived.textContent = state.hideArchived ? 'Show Hidden' : 'Hide Hidden';
+  elements.toggleArchived.setAttribute('aria-pressed', state.hideArchived ? 'true' : 'false');
+  updateFilterSummary();
 }
 
 function updateReaderSavedToggle() {
   if (!elements.toggleReaderSaved) return;
   elements.toggleReaderSaved.textContent = state.hideReaderSaved ? 'Show Reader Saved' : 'Hide Reader Saved';
   elements.toggleReaderSaved.setAttribute('aria-pressed', state.hideReaderSaved ? 'true' : 'false');
+  updateFilterSummary();
 }
 
 function updateDownieSentToggle() {
   if (!elements.toggleDownieSent) return;
   elements.toggleDownieSent.textContent = state.hideDownieSent ? 'Show Downie Sent' : 'Hide Downie Sent';
   elements.toggleDownieSent.setAttribute('aria-pressed', state.hideDownieSent ? 'true' : 'false');
+  updateFilterSummary();
 }
 
 function updateFeedVideosToggle() {
@@ -1386,10 +1487,29 @@ function removeListOrder(id) {
   setStorage(LIST_ORDER_KEY, state.listOrder);
 }
 
-function renderLists({ keepSettingsPopoverOpen = false } = {}) {
-  if (!keepSettingsPopoverOpen) {
-    closeSettingsPopover();
-  }
+function mergeVisibleListOrder(previousOrder, visibleOrder) {
+  const visibleIds = Array.from(new Set((visibleOrder || []).filter(Boolean)));
+  const visibleSet = new Set(visibleIds);
+  let visibleIndex = 0;
+  const merged = [];
+
+  (previousOrder || []).forEach((id) => {
+    const nextId = visibleSet.has(id) ? visibleIds[visibleIndex++] : id;
+    if (nextId && !merged.includes(nextId)) {
+      merged.push(nextId);
+    }
+  });
+
+  visibleIds.slice(visibleIndex).forEach((id) => {
+    if (!merged.includes(id)) {
+      merged.push(id);
+    }
+  });
+
+  return merged;
+}
+
+function renderLists() {
   elements.listItems.innerHTML = '';
 
   const listMap = new Map(state.lists.map((list) => [list.id, list]));
@@ -1597,18 +1717,16 @@ function setupListDrag() {
     const orderedIds = Array.from(elements.listItems.querySelectorAll('.list-item'))
       .map((item) => item.dataset.listId)
       .filter((id) => id);
-    const hiddenOrderedIds = state.listOrder.filter((id) => isSmartListHidden(id) && !orderedIds.includes(id));
-
-    state.listOrder = [...orderedIds, ...hiddenOrderedIds];
+    state.listOrder = mergeVisibleListOrder(state.listOrder, orderedIds);
 
     const map = new Map(state.lists.map((list) => [list.id, list]));
-    state.lists = orderedIds
+    state.lists = state.listOrder
       .map((id) => map.get(id))
       .filter(Boolean);
 
     await setStorage(STORAGE_KEY, state.lists);
     await setStorage(LIST_ORDER_KEY, state.listOrder);
-    renderLists({ keepSettingsPopoverOpen: isSettingsPopoverOpen() });
+    renderLists();
   });
 }
 
@@ -1699,6 +1817,7 @@ async function fetchChannelFeed(channel) {
 
 async function loadFeed(options = {}) {
   const { clearBefore = true } = options;
+  const loadGeneration = ++feedLoadGeneration;
   state.isLoading = true;
   state.renderedCount = 0;
   state.visibleCount = INITIAL_COUNT;
@@ -1713,13 +1832,19 @@ async function loadFeed(options = {}) {
     elements.feedFooter.textContent = 'Loading latest videos...';
   }
 
-  state.lists = (await getStorage(STORAGE_KEY, [])) || [];
+  const storedLists = (await getStorage(STORAGE_KEY, [])) || [];
+  if (loadGeneration !== feedLoadGeneration) return;
+  state.lists = storedLists;
+
   if (isSmartListHidden(state.selectedListId) || (!isSmartListId(state.selectedListId) && !state.lists.find((entry) => entry.id === state.selectedListId))) {
     state.selectedListId = getFallbackListId(state.selectedListId);
     await setStorage(SELECTED_KEY, state.selectedListId);
+    if (loadGeneration !== feedLoadGeneration) return;
   }
 
-  await normalizeStoredChannels();
+  await normalizeStoredChannels(storedLists, () => loadGeneration === feedLoadGeneration);
+  if (loadGeneration !== feedLoadGeneration) return;
+
   const channels = getChannelsForSelection();
   elements.manageList.disabled = isSmartListId(state.selectedListId);
   updateHeader(channels.length, 0);
@@ -1756,6 +1881,8 @@ async function loadFeed(options = {}) {
       return merged;
     }
   }));
+
+  if (loadGeneration !== feedLoadGeneration) return;
 
   const items = results.flat();
   items.sort((a, b) => b.published.getTime() - a.published.getTime());
@@ -1862,6 +1989,23 @@ function scheduleReaderButtonReset(button) {
   readerButtonResetTimers.set(button, timer);
 }
 
+function setDownieButtonState(button, stateName = 'idle', saved = false) {
+  if (!button) return;
+
+  const labels = {
+    sending: 'Sending to Downie',
+    saved: 'Sent to Downie',
+    error: 'Try sending to Downie again',
+  };
+  const effectiveState = stateName === 'idle' && saved ? 'saved' : stateName;
+  const label = labels[effectiveState] || 'Send to Downie';
+
+  button.dataset.state = effectiveState;
+  button.setAttribute('aria-label', label);
+  button.title = label;
+  button.disabled = effectiveState === 'sending';
+}
+
 async function parseReadwiseError(response) {
   const fallback = `Readwise returned ${response.status}.`;
   try {
@@ -1927,7 +2071,6 @@ async function handleSaveToReadwise(item, button) {
     showToast('Add your Reader token before saving videos.', {
       actionLabel: 'Open settings',
       onAction: () => {
-        hideToast();
         openReadwiseSettingsModal();
       },
       duration: 7000,
@@ -1944,7 +2087,6 @@ async function handleSaveToReadwise(item, button) {
       showToast('Add your Reader token in extension options first.', {
         actionLabel: 'Open options',
         onAction: () => {
-          hideToast();
           chrome.runtime.openOptionsPage();
         },
         duration: 7000,
@@ -1979,7 +2121,6 @@ async function handleSaveToReadwise(item, button) {
       showToast('Readwise rejected that API key. Update it in All Lists settings.', {
         actionLabel: 'Open settings',
         onAction: () => {
-          hideToast();
           openReadwiseSettingsModal();
         },
         duration: 7000,
@@ -2000,7 +2141,7 @@ async function handleSaveToReadwise(item, button) {
 
 async function handleSendToDownie(item, button) {
   if (!button || !item?.link) return;
-  setReaderButtonState(button, 'saving');
+  setDownieButtonState(button, 'sending');
 
   const { response, error } = await sendRuntimeMessage({
     type: 'open-in-downie',
@@ -2011,21 +2152,16 @@ async function handleSendToDownie(item, button) {
     markLocalUrlState(DOWNIE_SENT_URLS_KEY, item.link);
     markLocalUrlState(DOWNIE_SENT_URLS_KEY, response.url);
     item.isSentToDownie = true;
-    button.dataset.state = 'saved';
-    button.setAttribute('aria-label', 'Sent to Downie');
-    button.title = 'Sent to Downie';
+    setDownieButtonState(button, 'saved');
     showToast(`Sent "${item.title}" to Downie.`);
     renderLists();
-    window.setTimeout(() => {
-      button.dataset.state = isItemSentToDownie(item) ? 'saved' : 'idle';
-    }, 1400);
     return;
   }
 
-  button.dataset.state = 'error';
+  setDownieButtonState(button, 'error');
   showToast('Downie failed.');
   window.setTimeout(() => {
-    button.dataset.state = isItemSentToDownie(item) ? 'saved' : 'idle';
+    setDownieButtonState(button, 'idle', isItemSentToDownie(item));
   }, 1400);
 }
 
@@ -2099,9 +2235,7 @@ function buildVideoCard(item) {
   const downieAction = document.createElement('button');
   downieAction.className = 'thumb-icon-action downie-action';
   downieAction.type = 'button';
-  downieAction.title = isItemSentToDownie(item) ? 'Sent to Downie' : 'Send to Downie';
-  downieAction.setAttribute('aria-label', downieAction.title);
-  downieAction.dataset.state = isItemSentToDownie(item) ? 'saved' : 'idle';
+  setDownieButtonState(downieAction, 'idle', isItemSentToDownie(item));
   downieAction.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v9"></path><path d="m8.5 10.5 3.5 3.5 3.5-3.5"></path><path d="M5 18h14"></path></svg>';
   downieAction.addEventListener('click', async (event) => {
     event.preventDefault();
@@ -2178,10 +2312,77 @@ function setupInfiniteScroll() {
   observer.observe(elements.feedFooter);
 }
 
-function openModal({ title, bodyBuilder, actionsBuilder }) {
+function isModalOpen() {
+  return !!elements.modalBackdrop && !elements.modalBackdrop.classList.contains('hidden');
+}
+
+function isListDrawerOpen() {
+  return !!elements.listDrawerBackdrop && !elements.listDrawerBackdrop.classList.contains('hidden');
+}
+
+function syncOverlayOpenState() {
+  const modalOpen = isModalOpen();
+  const drawerOpen = isListDrawerOpen();
+  const open = modalOpen || drawerOpen;
+  document.documentElement.classList.toggle('modal-open', open);
+  document.body.classList.toggle('modal-open', open);
+  const app = document.querySelector('.app');
+  if (app) app.inert = open;
+  if (elements.listDrawer) elements.listDrawer.inert = modalOpen;
+}
+
+function getFocusableElements(container) {
+  if (!container) return [];
+  return Array.from(container.querySelectorAll(
+    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]), [contenteditable="true"]'
+  )).filter((element) => !element.hidden && element.getClientRects().length > 0);
+}
+
+function trapFocus(event, container) {
+  if (event.key !== 'Tab') return;
+  const focusable = getFocusableElements(container);
+  if (!focusable.length) {
+    event.preventDefault();
+    container?.focus();
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+function openModal({
+  title,
+  description = '',
+  variant = 'standard',
+  tone = 'default',
+  bodyBuilder,
+  actionsBuilder,
+  closeOnBackdrop = true,
+  returnFocus = null,
+  onClose = null,
+}) {
+  const wasOpen = isModalOpen();
   elements.modalTitle.textContent = title;
+  elements.modalDescription.textContent = description;
+  elements.modalDescription.hidden = !description;
   elements.modalBody.innerHTML = '';
   elements.modalActions.innerHTML = '';
+  elements.modal.dataset.variant = variant;
+  elements.modal.dataset.tone = tone;
+  modalClosesOnBackdrop = closeOnBackdrop;
+  activeModalOnClose = typeof onClose === 'function' ? onClose : null;
+  if (!wasOpen) {
+    activeModalReturnFocus = returnFocus || document.activeElement;
+  } else if (returnFocus) {
+    activeModalReturnFocus = returnFocus;
+  }
 
   if (bodyBuilder) {
     elements.modalBody.appendChild(bodyBuilder());
@@ -2191,15 +2392,72 @@ function openModal({ title, bodyBuilder, actionsBuilder }) {
     elements.modalActions.appendChild(actionsBuilder());
   }
 
-  document.documentElement.classList.add('modal-open');
-  document.body.classList.add('modal-open');
   elements.modalBackdrop.classList.remove('hidden');
+  syncOverlayOpenState();
+  window.setTimeout(() => {
+    const focusable = getFocusableElements(elements.modal);
+    (focusable[0] || elements.modal)?.focus();
+  }, 0);
 }
 
 function closeModal() {
-  document.documentElement.classList.remove('modal-open');
-  document.body.classList.remove('modal-open');
+  if (!isModalOpen()) return;
+  const onClose = activeModalOnClose;
+  activeModalOnClose = null;
   elements.modalBackdrop.classList.add('hidden');
+  syncOverlayOpenState();
+  const returnFocus = activeModalReturnFocus;
+  activeModalReturnFocus = null;
+  if (returnFocus?.isConnected) {
+    returnFocus.focus();
+  } else if (isListDrawerOpen()) {
+    elements.listDrawer?.focus();
+  }
+  if (onClose) {
+    onClose();
+  }
+}
+
+function confirmAction({ title, description, confirmLabel = 'Continue', tone = 'default' }) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      activeModalOnClose = null;
+      closeModal();
+      resolve(value);
+    };
+
+    openModal({
+      title,
+      description,
+      variant: 'compact',
+      tone,
+      closeOnBackdrop: true,
+      onClose: () => {
+        if (!settled) {
+          settled = true;
+          resolve(false);
+        }
+      },
+      actionsBuilder: () => {
+        const actions = document.createElement('div');
+        const cancel = document.createElement('button');
+        cancel.className = 'ghost';
+        cancel.type = 'button';
+        cancel.textContent = 'Cancel';
+        cancel.addEventListener('click', () => finish(false));
+        const confirm = document.createElement('button');
+        confirm.className = tone === 'danger' ? 'danger solid' : 'primary';
+        confirm.type = 'button';
+        confirm.textContent = confirmLabel;
+        confirm.addEventListener('click', () => finish(true));
+        actions.append(cancel, confirm);
+        return actions;
+      },
+    });
+  });
 }
 
 function openRenameListModal(listId, { returnToManage = false } = {}) {
@@ -2210,6 +2468,8 @@ function openRenameListModal(listId, { returnToManage = false } = {}) {
 
   openModal({
     title: `Rename ${list.name}`,
+    description: 'Choose a clear name you will recognize in the sidebar.',
+    variant: 'compact',
     bodyBuilder: () => {
       const wrapper = document.createElement('div');
       const label = document.createElement('label');
@@ -2280,6 +2540,8 @@ function openRenameListModal(listId, { returnToManage = false } = {}) {
 function openHelpModal() {
   openModal({
     title: 'How YT Lists works',
+    description: 'A short guide to deliberate feeds, list management, and backups.',
+    variant: 'wide',
     bodyBuilder: () => {
       const wrapper = document.createElement('div');
       wrapper.className = 'help-panel';
@@ -2374,6 +2636,8 @@ async function handleCreateList() {
 
   openModal({
     title: 'Create a new list',
+    description: 'Group channels into a feed you can browse deliberately.',
+    variant: 'compact',
     bodyBuilder: () => {
       const wrapper = document.createElement('div');
       const label = document.createElement('label');
@@ -2432,187 +2696,242 @@ async function handleCreateList() {
   });
 }
 
-async function handleManageList() {
-  const list = state.lists.find((entry) => entry.id === state.selectedListId);
+function updateListDrawerHeader(list) {
+  if (!list || drawerIsRenaming) return;
+  elements.listDrawerTitle.textContent = list.name;
+  const channelCount = (list.channels || []).length;
+  elements.listDrawerSubtitle.textContent = `${channelCount} channel${channelCount === 1 ? '' : 's'} · changes save automatically`;
+  const channelCountBadge = elements.listDrawerBody.querySelector('.drawer-count');
+  if (channelCountBadge) channelCountBadge.textContent = `${channelCount} total`;
+}
+
+function setDrawerRenaming(open) {
+  const list = state.lists.find((entry) => entry.id === drawerListId);
   if (!list) return;
+  if (open) {
+    drawerRenameOriginal = list.name;
+    drawerIsRenaming = true;
+    elements.listDrawerTitle.contentEditable = 'true';
+    elements.listDrawerTitle.classList.add('editing');
+    elements.listDrawerTitleEdit.classList.add('editing');
+    elements.listDrawerTitleEdit.textContent = '✓';
+    elements.listDrawerTitleEdit.setAttribute('aria-label', 'Save list name');
+    elements.listDrawerTitleEdit.setAttribute('aria-pressed', 'true');
+    elements.listDrawerTitle.focus();
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(elements.listDrawerTitle);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return;
+  }
+  drawerIsRenaming = false;
+  elements.listDrawerTitle.contentEditable = 'false';
+  elements.listDrawerTitle.classList.remove('editing');
+  elements.listDrawerTitleEdit.classList.remove('editing');
+  elements.listDrawerTitleEdit.textContent = '✎';
+  elements.listDrawerTitleEdit.setAttribute('aria-label', 'Edit list name');
+  elements.listDrawerTitleEdit.setAttribute('aria-pressed', 'false');
+}
 
-  const renderManageContent = () => {
-    elements.modalTitle.textContent = `Manage ${list.name}`;
-    elements.modalBody.innerHTML = '';
-    elements.modalActions.innerHTML = '';
+async function saveDrawerListName() {
+  const list = state.lists.find((entry) => entry.id === drawerListId);
+  if (!list) return;
+  const nextName = elements.listDrawerTitle.textContent.replace(/\s+/g, ' ').trim();
+  list.name = nextName || drawerRenameOriginal;
+  elements.listDrawerTitle.textContent = list.name;
+  setDrawerRenaming(false);
+  await setStorage(STORAGE_KEY, state.lists);
+  renderLists();
+  updateHeader((list.channels || []).length, getFilteredItems().length);
+  updateListDrawerHeader(list);
+  const deleteButton = elements.listDrawerBody.querySelector('[data-drawer-delete]');
+  if (deleteButton) deleteButton.textContent = `Delete ${list.name}`;
+}
 
-    const wrapper = document.createElement('div');
+function buildDrawerChannelRow(list, channel, originalIndex) {
+  const snapshot = { ...channel };
+  const row = document.createElement('div');
+  row.className = 'drawer-channel-row';
+  const link = document.createElement('a');
+  link.className = 'channel-link';
+  link.href = buildChannelUrl(channel);
+  link.target = '_blank';
+  link.rel = 'noreferrer';
+  const avatar = document.createElement('div');
+  avatar.className = 'avatar drawer-avatar';
+  if (channel.avatarUrl) {
+    const img = document.createElement('img');
+    img.src = channel.avatarUrl;
+    img.alt = channel.name;
+    avatar.appendChild(img);
+  } else {
+    avatar.textContent = (channel.name || '?').slice(0, 1).toUpperCase();
+  }
+  const copy = document.createElement('div');
+  const name = document.createElement('div');
+  name.className = 'channel-name';
+  name.textContent = channel.name;
+  copy.appendChild(name);
+  const handle = extractChannelHandle(link.href);
+  if (handle) {
+    const handleElement = document.createElement('div');
+    handleElement.className = 'channel-handle';
+    handleElement.textContent = handle;
+    copy.appendChild(handleElement);
+  }
+  link.append(avatar, copy);
 
-    const rename = document.createElement('button');
-    rename.className = 'ghost';
-    rename.textContent = 'Rename list';
-    rename.type = 'button';
-    rename.addEventListener('click', () => {
-      openRenameListModal(list.id, { returnToManage: true });
-    });
+  const action = document.createElement('button');
+  action.className = 'drawer-channel-action';
+  action.type = 'button';
+  action.textContent = 'Remove';
+  let removed = false;
+  let removalToast = null;
+  const matches = (entry) => entry.id === snapshot.id
+    || (entry.url && snapshot.url && entry.url === snapshot.url);
 
-    const removeList = document.createElement('button');
-    removeList.className = 'danger';
-    removeList.textContent = 'Delete list';
-    removeList.type = 'button';
-    removeList.addEventListener('click', async () => {
-      const confirmed = window.confirm(`Delete "${list.name}"?`);
-      if (!confirmed) return;
-      state.lists = state.lists.filter((entry) => entry.id !== list.id);
+  const restore = async () => {
+    const liveList = state.lists.find((entry) => entry.id === list.id);
+    if (!liveList) return;
+    liveList.channels = liveList.channels || [];
+    if (!liveList.channels.some(matches)) {
+      liveList.channels.splice(Math.min(originalIndex, liveList.channels.length), 0, snapshot);
       await setStorage(STORAGE_KEY, state.lists);
-      removeListOrder(list.id);
-      await selectList('all');
-      closeModal();
-    });
-
-    const topRow = document.createElement('div');
-    topRow.className = 'manage-header-row';
-    topRow.append(rename, removeList);
-
-    const archiveRow = document.createElement('div');
-    archiveRow.className = 'manage-archive-row';
-
-    const archiveAll = document.createElement('button');
-    archiveAll.className = 'ghost';
-    archiveAll.type = 'button';
-    archiveAll.textContent = 'Hide all videos';
-    archiveAll.addEventListener('click', () => {
-      archiveAllVisibleItems(list);
-    });
-
-    const archiveHint = document.createElement('div');
-    archiveHint.className = 'manage-hint';
-    archiveHint.textContent = 'This hides all videos in the list. You can undo from the toast or show hidden later.';
-
-    archiveRow.append(archiveAll, archiveHint);
-
-    wrapper.append(topRow, archiveRow);
-
-    const channelTitle = document.createElement('div');
-    channelTitle.className = 'section-title';
-    channelTitle.textContent = `Channels in this list (${(list.channels || []).length})`;
-    wrapper.appendChild(channelTitle);
-
-    if (!list.channels || list.channels.length === 0) {
-      const empty = document.createElement('div');
-      empty.textContent = 'No channels yet. Add some from YouTube.';
-      empty.style.color = 'var(--text-muted)';
-      wrapper.appendChild(empty);
-    } else {
-      list.channels.forEach((channel) => {
-        const row = document.createElement('div');
-        row.className = 'channel-row';
-
-        const info = document.createElement('div');
-        info.className = 'channel-info';
-
-        const channelUrl = buildChannelUrl(channel);
-        const handle = extractChannelHandle(channelUrl);
-
-        const link = document.createElement('a');
-        link.className = 'channel-link';
-        link.href = channelUrl;
-        link.target = '_blank';
-        link.rel = 'noreferrer';
-
-        const avatar = document.createElement('div');
-        avatar.className = 'avatar';
-        if (channel.avatarUrl) {
-          const img = document.createElement('img');
-          img.src = channel.avatarUrl;
-          img.alt = channel.name;
-          avatar.appendChild(img);
-        } else {
-          avatar.textContent = channel.name.slice(0, 1).toUpperCase();
-        }
-
-        const textWrap = document.createElement('div');
-        const name = document.createElement('div');
-        name.className = 'channel-name';
-        name.textContent = channel.name;
-        textWrap.appendChild(name);
-
-        if (handle) {
-          const handleEl = document.createElement('div');
-          handleEl.className = 'channel-handle';
-          handleEl.textContent = handle;
-          textWrap.appendChild(handleEl);
-        }
-
-        link.append(avatar, textWrap);
-        info.appendChild(link);
-
-        const channelSnapshot = { ...channel };
-        let isRemoved = false;
-
-        const remove = document.createElement('button');
-        remove.className = 'ghost';
-        remove.type = 'button';
-        remove.textContent = 'Remove';
-
-        const updateRemoveButton = () => {
-          remove.textContent = isRemoved ? 'Removed' : 'Remove';
-        };
-
-        remove.addEventListener('mouseenter', () => {
-          if (isRemoved) {
-            remove.textContent = 'Re-add';
-          }
-        });
-
-        remove.addEventListener('mouseleave', () => {
-          updateRemoveButton();
-        });
-
-        remove.addEventListener('click', async () => {
-          const liveList = state.lists.find((entry) => entry.id === list.id);
-          if (!liveList) return;
-
-          const matchesChannel = (entry) => (
-            entry.id === channelSnapshot.id
-              || (entry.url && channelSnapshot.url && entry.url === channelSnapshot.url)
-          );
-
-          if (!isRemoved) {
-            liveList.channels = (liveList.channels || []).filter((entry) => !matchesChannel(entry));
-            await setStorage(STORAGE_KEY, state.lists);
-            renderLists();
-            await loadFeed();
-            isRemoved = true;
-            updateRemoveButton();
-            return;
-          }
-
-          if (!(liveList.channels || []).some((entry) => matchesChannel(entry))) {
-            liveList.channels = liveList.channels || [];
-            liveList.channels.push(channelSnapshot);
-            await setStorage(STORAGE_KEY, state.lists);
-            renderLists();
-            await loadFeed();
-          }
-          isRemoved = false;
-          updateRemoveButton();
-        });
-
-        row.append(info, remove);
-        wrapper.appendChild(row);
-      });
+      renderLists();
+      await loadFeed({ clearBefore: false });
     }
-
-    elements.modalBody.appendChild(wrapper);
-
-    const actions = document.createElement('div');
-    const close = document.createElement('button');
-    close.className = 'ghost';
-    close.textContent = 'Close';
-    close.type = 'button';
-    close.addEventListener('click', closeModal);
-    actions.appendChild(close);
-    elements.modalActions.appendChild(actions);
+    removed = false;
+    row.classList.remove('removed');
+    action.textContent = 'Remove';
+    channelRemovalToasts.delete(row);
+    updateListDrawerHeader(liveList);
   };
 
-  renderManageContent();
-  elements.modalBackdrop.classList.remove('hidden');
+  action.addEventListener('click', async () => {
+    action.disabled = true;
+    try {
+      if (removed) {
+        if (removalToast) removeToast(removalToast);
+        await restore();
+        return;
+      }
+      const liveList = state.lists.find((entry) => entry.id === list.id);
+      if (!liveList) return;
+      liveList.channels = (liveList.channels || []).filter((entry) => !matches(entry));
+      await setStorage(STORAGE_KEY, state.lists);
+      renderLists();
+      await loadFeed({ clearBefore: false });
+      removed = true;
+      row.classList.add('removed');
+      action.textContent = 'Undo';
+      updateListDrawerHeader(liveList);
+      removalToast = showToast(`${channel.name} removed from ${liveList.name}.`, {
+        actionLabel: 'Undo',
+        onAction: restore,
+      });
+      channelRemovalToasts.set(row, removalToast);
+    } finally {
+      action.disabled = false;
+    }
+  });
+  row.append(link, action);
+  return row;
+}
+
+function renderListDrawerBody(list) {
+  elements.listDrawerBody.innerHTML = `
+    <section class="drawer-section">
+      <div class="drawer-section-heading">
+        <h3>Feed maintenance</h3>
+        <p>Clear the current backlog without changing the channels in this list.</p>
+      </div>
+      <div class="drawer-callout">
+        <div><strong>Hide every visible video</strong><span data-drawer-visible-count></span></div>
+        <button class="ghost" type="button" data-drawer-hide-all>Hide all</button>
+      </div>
+    </section>
+    <section class="drawer-section">
+      <div class="drawer-section-heading split">
+        <div><h3>Channels</h3><p>Removing a channel only affects this list.</p></div>
+        <span class="drawer-count">${(list.channels || []).length} total</span>
+      </div>
+      <div data-drawer-channels></div>
+    </section>
+    <section class="drawer-section drawer-danger-zone">
+      <h3>Delete list</h3>
+      <p>Channels remain subscribed on YouTube and stay in any other YT Lists.</p>
+      <button class="danger" type="button" data-drawer-delete></button>
+    </section>
+  `;
+  const visibleCount = (state.items || []).filter((item) => !isItemArchived(item)).length;
+  elements.listDrawerBody.querySelector('[data-drawer-visible-count]').textContent =
+    `${visibleCount} video${visibleCount === 1 ? '' : 's'} can be restored later.`;
+  elements.listDrawerBody.querySelector('[data-drawer-hide-all]').addEventListener('click', () => {
+    const liveList = state.lists.find((entry) => entry.id === list.id);
+    if (liveList) archiveAllVisibleItems(liveList);
+  });
+  const channels = elements.listDrawerBody.querySelector('[data-drawer-channels]');
+  if (!(list.channels || []).length) {
+    const empty = document.createElement('div');
+    empty.className = 'drawer-empty';
+    empty.textContent = 'No channels yet. Add channels from their YouTube pages.';
+    channels.appendChild(empty);
+  } else {
+    list.channels.forEach((channel, index) => channels.appendChild(buildDrawerChannelRow(list, channel, index)));
+  }
+  const deleteButton = elements.listDrawerBody.querySelector('[data-drawer-delete]');
+  deleteButton.textContent = `Delete ${list.name}`;
+  deleteButton.addEventListener('click', async () => {
+    const liveList = state.lists.find((entry) => entry.id === list.id);
+    if (!liveList) return;
+    const confirmed = await confirmAction({
+      title: `Delete ${liveList.name}?`,
+      description: 'This removes the list, but never unsubscribes from its channels or removes them from other lists.',
+      confirmLabel: 'Delete list',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
+    state.lists = state.lists.filter((entry) => entry.id !== liveList.id);
+    await setStorage(STORAGE_KEY, state.lists);
+    removeListOrder(liveList.id);
+    closeListDrawer();
+    await selectList(getFallbackListId(liveList.id));
+    showToast(`${liveList.name} deleted.`);
+  });
+}
+
+function openListDrawer(list, returnFocus = null) {
+  if (!list) return;
+  closeFilterPanel();
+  drawerListId = list.id;
+  drawerIsRenaming = false;
+  activeDrawerReturnFocus = returnFocus || document.activeElement;
+  updateListDrawerHeader(list);
+  renderListDrawerBody(list);
+  elements.listDrawerBackdrop.classList.remove('hidden');
+  syncOverlayOpenState();
+  window.setTimeout(() => elements.listDrawer.focus(), 0);
+}
+
+function closeListDrawer() {
+  if (!isListDrawerOpen()) return;
+  const list = state.lists.find((entry) => entry.id === drawerListId);
+  if (drawerIsRenaming && list) {
+    elements.listDrawerTitle.textContent = list.name;
+    setDrawerRenaming(false);
+  }
+  elements.listDrawerBackdrop.classList.add('hidden');
+  drawerListId = null;
+  syncOverlayOpenState();
+  const returnFocus = activeDrawerReturnFocus;
+  activeDrawerReturnFocus = null;
+  if (returnFocus?.isConnected) returnFocus.focus();
+}
+
+async function handleManageList() {
+  const list = state.lists.find((entry) => entry.id === state.selectedListId);
+  if (list) openListDrawer(list, elements.manageList);
 }
 
 async function init() {
@@ -2659,10 +2978,14 @@ elements.refreshFeed.addEventListener('click', loadFeed);
 if (elements.sidebarSettings) {
   elements.sidebarSettings.addEventListener('click', (event) => {
     event.preventDefault();
-    event.stopPropagation();
-    toggleSettingsPopover(elements.sidebarSettings);
+    openSettingsModal();
   });
 }
+elements.toggleFilters?.addEventListener('click', (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  toggleFilterPanel();
+});
 elements.toggleFeedVideos.addEventListener('click', async () => {
   state.hideFeedVideos = !state.hideFeedVideos;
   await setStorage(HIDE_FEED_VIDEOS_KEY, state.hideFeedVideos);
@@ -2706,9 +3029,33 @@ elements.toggleDownieSent.addEventListener('click', async () => {
 });
 elements.modalClose.addEventListener('click', closeModal);
 elements.modalBackdrop.addEventListener('click', (event) => {
-  if (event.target === elements.modalBackdrop) {
+  if (event.target === elements.modalBackdrop && modalClosesOnBackdrop) {
     closeModal();
   }
+});
+
+elements.listDrawerTitleEdit?.addEventListener('click', () => {
+  if (drawerIsRenaming) {
+    saveDrawerListName();
+  } else {
+    setDrawerRenaming(true);
+  }
+});
+elements.listDrawerTitle?.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    saveDrawerListName();
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    const list = state.lists.find((entry) => entry.id === drawerListId);
+    if (list) elements.listDrawerTitle.textContent = list.name;
+    setDrawerRenaming(false);
+  }
+});
+elements.listDrawerClose?.addEventListener('click', closeListDrawer);
+elements.listDrawerDone?.addEventListener('click', closeListDrawer);
+elements.listDrawerBackdrop?.addEventListener('click', (event) => {
+  if (event.target === elements.listDrawerBackdrop) closeListDrawer();
 });
 
 if (elements.listSearch) {
@@ -2716,10 +3063,6 @@ if (elements.listSearch) {
     state.searchQuery = event.target.value || '';
     updateSearchUi();
     renderLists();
-    state.visibleCount = INITIAL_COUNT;
-    state.renderedCount = 0;
-    updateHeader(getChannelsForSelection().length, getFilteredItems().length);
-    renderFeed();
   });
 }
 
@@ -2730,21 +3073,8 @@ if (elements.listSearchClear) {
       state.searchQuery = '';
       updateSearchUi();
       renderLists();
-      state.visibleCount = INITIAL_COUNT;
-      state.renderedCount = 0;
-      updateHeader(getChannelsForSelection().length, getFilteredItems().length);
-      renderFeed();
       elements.listSearch.focus();
     }
-  });
-}
-
-if (elements.archiveUndo) {
-  elements.archiveUndo.addEventListener('click', () => {
-    if (typeof toastUndo === 'function') {
-      toastUndo();
-    }
-    hideToast();
   });
 }
 
@@ -2753,25 +3083,54 @@ if (elements.importFile) {
 }
 
 document.addEventListener('click', (event) => {
-  if (!settingsPopover || settingsPopover.classList.contains('hidden')) return;
-  if (settingsPopover.contains(event.target)) return;
-  if (settingsPopoverAnchor && settingsPopoverAnchor.contains(event.target)) return;
-  closeSettingsPopover();
+  if (elements.filterPanel?.classList.contains('hidden')) return;
+  if (elements.filterPanel.contains(event.target) || elements.toggleFilters?.contains(event.target)) return;
+  closeFilterPanel();
 });
 
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') {
-    closeSettingsPopover();
-    if (!elements.modalBackdrop.classList.contains('hidden')) {
+  if (isModalOpen()) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
       closeModal();
+      return;
     }
+    trapFocus(event, elements.modal);
+    return;
+  }
+
+  if (isListDrawerOpen()) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      if (drawerIsRenaming) {
+        const list = state.lists.find((entry) => entry.id === drawerListId);
+        if (list) elements.listDrawerTitle.textContent = list.name;
+        setDrawerRenaming(false);
+      } else {
+        closeListDrawer();
+      }
+      return;
+    }
+    trapFocus(event, elements.listDrawer);
+    return;
+  }
+
+  if (event.key === 'Escape') {
+    closeFilterPanel();
   }
 });
 
-window.addEventListener('resize', () => {
-  if (settingsPopoverAnchor && settingsPopover && !settingsPopover.classList.contains('hidden')) {
-    positionSettingsPopover(settingsPopoverAnchor);
-  }
+elements.toastStack?.addEventListener('pointerenter', () => {
+  toastTimers.forEach((timer) => {
+    clearTimeout(timer.timeout);
+    timer.remaining = Math.max(0, timer.expiresAt - Date.now());
+  });
+});
+
+elements.toastStack?.addEventListener('pointerleave', () => {
+  toastTimers.forEach((timer, toast) => {
+    scheduleToastRemoval(toast, Math.max(250, timer.remaining));
+  });
 });
 
 let reloadTimer = null;
@@ -2779,9 +3138,7 @@ function scheduleFeedReload(options = {}) {
   if (reloadTimer) clearTimeout(reloadTimer);
   reloadTimer = window.setTimeout(() => {
     reloadTimer = null;
-    if (!state.isLoading) {
-      loadFeed({ clearBefore: false, ...options });
-    }
+    loadFeed({ clearBefore: false, ...options });
   }, 250);
 }
 
@@ -2832,7 +3189,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
       setStorage(SELECTED_KEY, state.selectedListId);
     }
     updateSmartListSettingsButtons();
-    renderLists({ keepSettingsPopoverOpen: isSettingsPopoverOpen() });
+    renderLists();
     updateHeader(getChannelsForSelection().length, getFilteredItems().length);
     renderFeed();
   }
