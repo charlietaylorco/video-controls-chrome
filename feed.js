@@ -78,6 +78,7 @@ const readerButtonResetTimers = new WeakMap();
 const toastTimers = new Map();
 const channelRemovalToasts = new WeakMap();
 const durationQueue = [];
+const durationPending = new Map();
 let durationActive = 0;
 const DURATION_CONCURRENCY = 4;
 const TOAST_DURATION = 10000;
@@ -96,7 +97,10 @@ function isLikelyChannelId(id) {
 function toAbsoluteUrl(url) {
   if (!url) return '';
   try {
-    return new URL(url, 'https://www.youtube.com').toString();
+    const parsed = new URL(url, 'https://www.youtube.com');
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.port
+      || !['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com'].includes(parsed.hostname)) return '';
+    return parsed.toString();
   } catch (error) {
     return '';
   }
@@ -107,21 +111,22 @@ function buildChannelUrl(channel) {
     const absolute = toAbsoluteUrl(channel.url);
     if (absolute) return absolute;
   }
-  if (!channel.id) return '';
+  if (typeof channel.id !== 'string' || !channel.id) return '';
   if (channel.id.startsWith('UC')) {
-    return `https://www.youtube.com/channel/${channel.id}`;
+    return `https://www.youtube.com/channel/${encodeURIComponent(channel.id)}`;
   }
   if (channel.id.startsWith('@')) {
-    return `https://www.youtube.com/${channel.id}`;
+    return `https://www.youtube.com/@${encodeURIComponent(channel.id.slice(1))}`;
   }
-  return `https://www.youtube.com/@${channel.id}`;
+  return `https://www.youtube.com/@${encodeURIComponent(channel.id)}`;
 }
 
 async function resolveChannelIdFromUrl(url) {
+  url = toAbsoluteUrl(url);
   if (!url) return null;
   if (resolvedIdCache.has(url)) return resolvedIdCache.get(url);
   try {
-    const response = await fetch(url, { credentials: 'include' });
+    const response = await fetch(url, { credentials: 'include', signal: AbortSignal.timeout(15000), redirect: 'error' });
     if (!response.ok) {
       resolvedIdCache.set(url, null);
       return null;
@@ -679,7 +684,7 @@ function updateDurationBadge(element, seconds) {
 async function fetchDurationFromWatch(videoId) {
   if (!videoId) return null;
   try {
-    const response = await fetch(`https://www.youtube.com/watch?v=${videoId}`, { credentials: 'include' });
+    const response = await fetch(`https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`, { credentials: 'include', signal: AbortSignal.timeout(15000), redirect: 'error' });
     if (!response.ok) return null;
     const text = await response.text();
     const match = text.match(/\"lengthSeconds\":\"(\d+)\"/);
@@ -716,10 +721,13 @@ function ensureDuration(videoId) {
   if (durationCache.has(videoId)) {
     return Promise.resolve(durationCache.get(videoId));
   }
-  return new Promise((resolve) => {
+  if (durationPending.has(videoId)) return durationPending.get(videoId);
+  const pending = new Promise((resolve) => {
     durationQueue.push({ videoId, resolve });
-    processDurationQueue();
-  });
+  }).finally(() => durationPending.delete(videoId));
+  durationPending.set(videoId, pending);
+  processDurationQueue();
+  return pending;
 }
 
 function updateHeader(channelCount, itemCount) {
@@ -786,7 +794,14 @@ function sanitizeImportedLists(raw) {
     .map((list) => ({
       id: list.id,
       name: list.name,
-      channels: Array.isArray(list.channels) ? list.channels : [],
+      channels: Array.isArray(list.channels) ? list.channels
+        .filter((channel) => channel && typeof channel.id === 'string' && channel.id.trim())
+        .map((channel) => ({
+          id: channel.id,
+          name: typeof channel.name === 'string' ? channel.name : channel.id,
+          url: toAbsoluteUrl(channel.url),
+          avatarUrl: typeof channel.avatarUrl === 'string' && channel.avatarUrl.startsWith('https://') ? channel.avatarUrl : '',
+        })) : [],
     }));
 }
 
@@ -899,6 +914,8 @@ async function validateReadwiseApiKey(apiKey) {
   try {
     const response = await fetch(READWISE_AUTH_ENDPOINT, {
       method: 'GET',
+      signal: AbortSignal.timeout(15000),
+      redirect: 'error',
       headers: {
         Authorization: `Token ${apiKey}`,
       },
@@ -1738,8 +1755,8 @@ async function selectList(id) {
 }
 
 async function fetchChannelFeed(channel) {
-  const url = `https://www.youtube.com/feeds/videos.xml?channel_id=${channel.id}`;
-  const response = await fetch(url);
+  const url = `https://www.youtube.com/feeds/videos.xml?channel_id=${encodeURIComponent(channel.id)}`;
+  const response = await fetch(url, { signal: AbortSignal.timeout(15000), redirect: 'error' });
   if (!response.ok) {
     throw new Error(`Failed to load feed for ${channel.id}`);
   }
@@ -1815,6 +1832,18 @@ async function fetchChannelFeed(channel) {
   return items;
 }
 
+async function mapConcurrent(items, limit, mapper) {
+  const results = new Array(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await mapper(items[index]);
+    }
+  }));
+  return results;
+}
+
 async function loadFeed(options = {}) {
   const { clearBefore = true } = options;
   const loadGeneration = ++feedLoadGeneration;
@@ -1860,13 +1889,15 @@ async function loadFeed(options = {}) {
     return;
   }
 
-  const results = await Promise.all(channels.map(async (channel) => {
+  const results = await mapConcurrent(channels, 4, async (channel) => {
+    if (loadGeneration !== feedLoadGeneration) return [];
     const cached = state.feedCache[channel.id]?.items
       ? hydrateFeedItems(state.feedCache[channel.id].items)
       : [];
     try {
       const freshItems = await fetchChannelFeed(channel);
       const merged = mergeChannelItems(channel, freshItems, cached);
+      if (loadGeneration !== feedLoadGeneration) return [];
       state.feedCache[channel.id] = {
         items: serializeFeedItems(merged),
         updatedAt: Date.now(),
@@ -1874,13 +1905,14 @@ async function loadFeed(options = {}) {
       return merged;
     } catch (error) {
       const merged = mergeChannelItems(channel, [], cached);
+      if (loadGeneration !== feedLoadGeneration) return [];
       state.feedCache[channel.id] = {
         items: serializeFeedItems(merged),
         updatedAt: Date.now(),
       };
       return merged;
     }
-  }));
+  });
 
   if (loadGeneration !== feedLoadGeneration) return;
 
@@ -2173,7 +2205,7 @@ function buildVideoCard(item) {
   }
 
   const thumbLink = document.createElement('a');
-  thumbLink.href = item.link;
+  thumbLink.href = toAbsoluteUrl(item.link) || 'https://www.youtube.com/';
   thumbLink.target = '_blank';
   thumbLink.rel = 'noreferrer';
 
@@ -2183,6 +2215,8 @@ function buildVideoCard(item) {
   const thumbImg = document.createElement('img');
   thumbImg.src = item.thumbnail || '';
   thumbImg.alt = item.title;
+  thumbImg.loading = 'lazy';
+  thumbImg.decoding = 'async';
   thumb.appendChild(thumbImg);
 
   const duration = document.createElement('div');
@@ -2273,7 +2307,7 @@ function buildVideoCard(item) {
 
   const titleLink = document.createElement('a');
   titleLink.className = 'title';
-  titleLink.href = item.link;
+  titleLink.href = toAbsoluteUrl(item.link) || 'https://www.youtube.com/';
   titleLink.target = '_blank';
   titleLink.rel = 'noreferrer';
   titleLink.textContent = item.title;

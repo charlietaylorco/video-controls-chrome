@@ -7,14 +7,24 @@ const DOWNIE_SENT_URLS_KEY = "downieSentUrls";
 const MAX_DOWNIE_SENT_URLS = 2000;
 const FEED_URL = chrome.runtime.getURL("feed.html");
 
-const isHttpUrl = (value) => /^https?:\/\//i.test(value || "");
+const isHttpUrl = (value) => {
+  if (typeof value !== "string") return false;
+  try {
+    const url = new URL(value);
+    return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password;
+  } catch {
+    return false;
+  }
+};
 const YOUTUBE_HOSTS = ["youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"];
+const isYouTubeHost = (url) =>
+  url.protocol === "https:" && !url.port && YOUTUBE_HOSTS.includes(url.hostname);
 const isYouTubeWatchUrl = (url) =>
-  YOUTUBE_HOSTS.includes(url.hostname) &&
+  isYouTubeHost(url) &&
   url.pathname === "/watch" &&
   Boolean(url.searchParams.get("v"));
 const isYouTubeEmbedUrl = (url) =>
-  YOUTUBE_HOSTS.includes(url.hostname) && /^\/embed\/[^/]+/.test(url.pathname);
+  isYouTubeHost(url) && /^\/embed\/[^/]+/.test(url.pathname);
 const isYouTubeChannelPageUrl = (value) => {
   if (!isHttpUrl(value)) {
     return false;
@@ -23,7 +33,7 @@ const isYouTubeChannelPageUrl = (value) => {
   try {
     const url = new URL(value);
 
-    if (!YOUTUBE_HOSTS.includes(url.hostname)) {
+    if (!isYouTubeHost(url)) {
       return false;
     }
 
@@ -42,7 +52,7 @@ const isYouTubeVideoPageUrl = (value) => {
     return (
       isYouTubeWatchUrl(url) ||
       isYouTubeEmbedUrl(url) ||
-      /^\/(shorts|live)\/[^/]+/.test(url.pathname)
+      (isYouTubeHost(url) && /^\/(shorts|live)\/[^/]+/.test(url.pathname))
     );
   } catch {
     return false;
@@ -63,7 +73,7 @@ const isPreferredVideoPageUrl = (value) => {
     return (
       ["youtu.be", "www.youtu.be"].includes(url.hostname) ||
       isYouTubeEmbedUrl(url) ||
-      /^\/(shorts|live)\/[^/]+/.test(url.pathname)
+      (isYouTubeHost(url) && /^\/(shorts|live)\/[^/]+/.test(url.pathname))
     );
   } catch {
     return false;
@@ -174,6 +184,8 @@ const extractYouTubeChannelAuthor = (html) => {
 
 const fetchHtml = async (url) => {
   const response = await fetch(url, {
+    signal: AbortSignal.timeout(15000),
+    redirect: "error",
     headers: {
       Accept: "text/html,application/xhtml+xml"
     }
@@ -515,6 +527,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       const response = await fetch(READER_SAVE_URL, {
         method: "POST",
+        signal: AbortSignal.timeout(15000),
+        redirect: "error",
         headers: {
           Authorization: `Token ${readerToken}`,
           "Content-Type": "application/json"

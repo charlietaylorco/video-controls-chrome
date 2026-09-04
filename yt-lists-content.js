@@ -927,7 +927,7 @@ function extractAvatarFromDoc(doc) {
 
 async function resolveChannelFromUrl(url, fallbackName, fallbackAvatar) {
   try {
-    const response = await fetch(url, { credentials: 'include' });
+    const response = await fetch(url, { credentials: 'include', signal: AbortSignal.timeout(15000), redirect: 'error' });
     if (!response.ok) return null;
     const html = await response.text();
     const doc = new DOMParser().parseFromString(html, 'text/html');
@@ -1058,7 +1058,13 @@ function getButtonWrapper() {
   return document.getElementById(BUTTON_WRAPPER_ID);
 }
 
+let panelOutsideHandler = null;
+
 function removePanel() {
+  if (panelOutsideHandler) {
+    document.removeEventListener('click', panelOutsideHandler, true);
+    panelOutsideHandler = null;
+  }
   const panel = document.getElementById(PANEL_ID);
   if (panel) panel.remove();
 }
@@ -1132,7 +1138,7 @@ function mountButton(channel) {
 async function togglePanel(channel, anchorRect) {
   const existing = document.getElementById(PANEL_ID);
   if (existing) {
-    existing.remove();
+    removePanel();
     return;
   }
 
@@ -1235,12 +1241,12 @@ async function togglePanel(channel, anchorRect) {
 
   const handleOutside = (event) => {
     const button = getButton();
-    if (!panel.contains(event.target) && !button.contains(event.target)) {
+    if (!panel.contains(event.target) && !button?.contains(event.target)) {
       removePanel();
-      document.removeEventListener('click', handleOutside, true);
     }
   };
 
+  panelOutsideHandler = handleOutside;
   document.addEventListener('click', handleOutside, true);
 }
 
