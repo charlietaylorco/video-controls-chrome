@@ -11,6 +11,7 @@ function loadBackgroundHelpers(overrides = {}) {
   const context = {
     URL,
     AbortSignal,
+    importScripts() {},
     ...overrides,
     chrome: {
       action: { onClicked: { addListener() {} } },

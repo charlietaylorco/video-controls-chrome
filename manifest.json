@@ -8,12 +8,14 @@
   },
   "permissions": [
     "storage",
-    "tabs"
+    "tabs",
+    "downloads"
   ],
   "background": {
     "service_worker": "background.js"
   },
   "host_permissions": [
+    "https://video.twimg.com/*",
     "https://readwise.io/*",
     "https://www.youtube.com/*",
     "https://youtube.com/*",
@@ -25,6 +27,18 @@
     "open_in_tab": true
   },
   "content_scripts": [
+    {
+      "matches": [
+        "https://x.com/*",
+        "https://www.x.com/*",
+        "https://twitter.com/*",
+        "https://www.twitter.com/*",
+        "https://mobile.twitter.com/*"
+      ],
+      "js": ["x-video-page.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
     {
       "matches": [
         "https://www.youtube.com/*",

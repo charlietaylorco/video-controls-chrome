@@ -11,7 +11,16 @@ Minimal Chrome extension that injects a compact hover-only speed controller into
 - `+` increases playback speed by the configured overlay step for that specific video
 - The picture-in-picture button toggles PiP for that specific video when the site allows it
 - The speed readout shows the current saved speed for that video
-- The download icon opens the current video or page in Downie when possible
+- The Downie icon opens the current video or page in Downie when possible
+- On X/Twitter, the separate download-to-tray icon saves the highest-resolution complete MP4 exposed by that player, using bitrate to break ties. It verifies both audio and video tracks before downloading and never silently falls back to a lower quality
+
+## X/Twitter downloads
+
+After updating the extension, reload it in `chrome://extensions` (also in Arc), then reload any open X tabs. While signed in, open/play a video and hover over it to use **Download highest-quality X video with audio**. The file is saved through the browser's normal downloads flow as `x-video-<media-id>-<width>x<height>.mp4`; check the browser's Downloads list for progress, completion, or an interrupted transfer.
+
+The extension reads only that player's available rendition metadata when clicked. It does not send posts to a downloader service, copy login credentials, or keep private video URLs in extension storage. The browser uses the current profile's session for media requests. This adds the `downloads` permission and access to `https://video.twimg.com/*`; [Chrome's downloads API](https://developer.chrome.com/docs/extensions/reference/api/downloads) handles saving the original file without re-encoding.
+
+"Highest quality" means the largest complete MP4 rendition X supplies to the current player, not the original uploaded file or a potentially higher streaming-only rendition. The downloaded MP4 must contain both audio and video tracks. Silent GIFs, live streams, DRM media, HLS-only videos, unavailable/expired media, or files whose tracks cannot be verified produce an error instead of a misleading download. Access still depends on your signed-in account being able to view the post. X's internal player metadata can change; if detection stops working, reload the tab first.
 
 ## Settings
 

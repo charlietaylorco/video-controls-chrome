@@ -1,3 +1,5 @@
+importScripts("x-video-download.js");
+
 const DOWNIE_PREFIX = "downie://XUOpenLink?url=";
 const READER_SAVE_URL = "https://readwise.io/api/v3/save/";
 const READER_SOURCE = "minimal-video-speed";
@@ -423,6 +425,20 @@ const pickTargetUrl = (message, sender) => {
 };
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "download-x-video") {
+    if (sender.id !== chrome.runtime.id || !Number.isInteger(sender.tab?.id) ||
+        !XVideoDownload.isXPage(sender.url)) {
+      sendResponse({ ok: false, code: "invalid_sender" });
+      return undefined;
+    }
+    XVideoDownload.start(message.variants).then(sendResponse, (error) => {
+      const codes = ["no_mp4", "ambiguous_video", "invalid_mp4", "fragmented_mp4", "encrypted_mp4",
+        "no_video", "no_audio", "access_denied", "range_failed", "changed_file", "metadata_too_large"];
+      sendResponse({ ok: false, code: codes.includes(error?.message) ? error.message : "download_failed" });
+    });
+    return true;
+  }
+
   if (message?.type === "open-yt-lists" || message?.type === "ytListsOpenFeed") {
     chrome.tabs.create({ url: FEED_URL }, () => {
       sendResponse({ ok: !chrome.runtime.lastError });

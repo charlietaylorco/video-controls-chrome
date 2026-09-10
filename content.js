@@ -46,6 +46,48 @@
   const RATE_PRECISION = 2;
   const RATE_EPSILON = 0.005;
   const HOST_Z_INDEX = "1000";
+  const isXDownloadPage = window.top === window && window.location.protocol === "https:" &&
+    ["x.com", "www.x.com", "twitter.com", "www.twitter.com", "mobile.twitter.com"].includes(window.location.hostname);
+  const pendingXDownloads = new WeakSet();
+
+  const requestXVariants = (video) => new Promise((resolve, reject) => {
+    const requestId = crypto.randomUUID();
+    const cleanup = () => {
+      window.clearTimeout(timer);
+      video.removeEventListener("mvs-x-video-response", onResponse);
+      video.removeAttribute("data-mvs-x-request");
+    };
+    const onResponse = (event) => {
+      if (event.target !== video || typeof event.detail !== "string" || event.detail.length > 150000) return;
+      try {
+        const payload = JSON.parse(event.detail);
+        if (payload.requestId !== requestId || !Array.isArray(payload.variants)) return;
+        cleanup();
+        resolve(payload.variants);
+      } catch {
+        // Ignore malformed page messages; the bounded timeout still applies.
+      }
+    };
+    const timer = window.setTimeout(() => {
+      cleanup();
+      reject(new Error("Reload this X tab, then try again"));
+    }, 2000);
+    video.addEventListener("mvs-x-video-response", onResponse);
+    video.setAttribute("data-mvs-x-request", requestId);
+    video.dispatchEvent(new CustomEvent("mvs-x-video-request", { bubbles: true }));
+  });
+
+  const xDownloadError = (code) => ({
+    no_mp4: "No complete MP4 available. Play the video, then try again.",
+    ambiguous_video: "Could not identify this video. Reload the X tab.",
+    no_audio: "This rendition has no audio track; nothing downloaded.",
+    no_video: "No video track found; nothing downloaded.",
+    fragmented_mp4: "Only a streaming fragment was found; nothing downloaded.",
+    encrypted_mp4: "This video is encrypted; nothing downloaded.",
+    access_denied: "X denied access. Reload the post while signed in.",
+    range_failed: "Could not verify the file. Reload the post and try again.",
+    invalid_sender: "Reload this X tab, then try again."
+  }[code] || "Download failed. Reload the post and try again.");
 
   const roundRate = (value) => {
     const factor = 10 ** RATE_PRECISION;
@@ -422,7 +464,8 @@
       }
 
       .panel[data-mode="card"] .speed-control,
-      .panel[data-mode="card"] [data-action="pip"] {
+      .panel[data-mode="card"] [data-action="pip"],
+      .panel[data-mode="card"] [data-action="download-x"] {
         display: none;
       }
 
@@ -449,6 +492,12 @@
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <rect x="3.5" y="5.5" width="17" height="13" rx="2"></rect>
             <path d="M12.5 12.5h5v4h-5z"></path>
+          </svg>
+        </button>
+        <button class="icon-button" data-action="download-x" type="button" aria-label="Download highest-quality X video with audio" title="Download highest-quality X video with audio" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 3v11m-4-4 4 4 4-4"></path>
+            <path d="M4 15v5h16v-5"></path>
           </svg>
         </button>
         <button class="icon-button" data-action="downie" type="button" aria-label="Open in Downie" title="Open in Downie">
@@ -479,6 +528,7 @@
   const feedbackLink = shadowRoot.querySelector(".feedback-link");
   const dragHandle = shadowRoot.querySelector(".drag-handle");
   const pipButton = shadowRoot.querySelector('[data-action="pip"]');
+  const xDownloadButton = shadowRoot.querySelector('[data-action="download-x"]');
   const downieButton = shadowRoot.querySelector('[data-action="downie"]');
   const readerButton = shadowRoot.querySelector('[data-action="reader"]');
   let buttonStatusTimer = 0;
@@ -571,7 +621,7 @@
     window.clearTimeout(buttonStatusTimer);
     buttonStatusTarget = null;
 
-    for (const button of [pipButton, downieButton, readerButton]) {
+    for (const button of [pipButton, downieButton, readerButton, xDownloadButton]) {
       delete button.dataset.status;
     }
   };
@@ -776,6 +826,7 @@
     }
 
     pipButton.disabled = !canTogglePictureInPicture(video);
+    xDownloadButton.disabled = !video || pendingXDownloads.has(video);
   };
 
   const updatePictureInPictureVisibility = () => {
@@ -788,6 +839,7 @@
   };
 
   const updateIntegrationVisibility = () => {
+    xDownloadButton.hidden = !isXDownloadPage || !activeVideo || activeMode === "card";
     downieButton.hidden = !settings.showDownie;
     const pageUrl = getAssociatedPageUrl(getCurrentContextSource());
     readerButton.hidden = !settings.showReader || !isYouTubeReaderSaveUrl(pageUrl);
@@ -2033,6 +2085,9 @@
   };
 
   const getMessageTimeout = (message) => {
+    if (message?.type === "download-x-video") {
+      return 30000;
+    }
     if (message?.type === "save-to-reader") {
       return 12000;
     }
@@ -2677,6 +2732,41 @@
       }
 
       applyRate(activeVideo, getBaseRate(activeVideo) + settings.adjustmentStep);
+      return;
+    }
+
+    if (action === "download-x") {
+      // The page can send bridge responses but cannot initiate a download by
+      // dispatching a synthetic click into our open shadow root.
+      if (!event.isTrusted || !isXDownloadPage || !activeVideo || pendingXDownloads.has(activeVideo)) return;
+      const video = activeVideo;
+      const videoSrc = video.currentSrc;
+      const poster = video.poster;
+      const isSameVideo = () => video.isConnected && video.currentSrc === videoSrc && video.poster === poster;
+      pendingXDownloads.add(video);
+      button.disabled = true;
+      setButtonLoading(button);
+      showPendingFeedback("Checking highest quality and audio...");
+      try {
+        const variants = await requestXVariants(video);
+        if (!isSameVideo()) throw new Error("Video changed. Try again on the current video.");
+        const { response, error } = await sendRuntimeMessage({ type: "download-x-video", variants });
+        if (error || !response?.ok) throw new Error(xDownloadError(response?.code));
+        if (activeVideo === video && isSameVideo()) {
+          setButtonStatus(button, "success");
+          showFeedback("success", `Download started: ${response.width}×${response.height} with audio`);
+        }
+      } catch (error) {
+        if (activeVideo === video) {
+          setButtonStatus(button, "error");
+          showFeedback("error", isInvalidatedContextError(error) ? "Reload this X tab, then try again." : error.message);
+          window.clearTimeout(feedbackTimer);
+          feedbackTimer = window.setTimeout(clearFeedback, 6000);
+        }
+      } finally {
+        pendingXDownloads.delete(video);
+        updateControlsAvailability(activeVideo);
+      }
       return;
     }
 
