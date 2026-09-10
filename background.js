@@ -431,7 +431,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ok: false, code: "invalid_sender" });
       return undefined;
     }
-    XVideoDownload.start(message.variants).then(sendResponse, (error) => {
+    XVideoDownload.start(message.variants, message.metadata).then(sendResponse, (error) => {
       const codes = ["no_mp4", "ambiguous_video", "invalid_mp4", "fragmented_mp4", "encrypted_mp4",
         "no_video", "no_audio", "access_denied", "range_failed", "changed_file", "metadata_too_large"];
       sendResponse({ ok: false, code: codes.includes(error?.message) ? error.message : "download_failed" });

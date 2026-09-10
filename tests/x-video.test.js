@@ -11,7 +11,7 @@ const variant = (width, height, bitrate = 1000, id = '123456789') => ({
   type: 'video/mp4', bitrate
 });
 function load(overrides = {}) {
-  const context = { URL, Uint8Array, DataView, AbortSignal, ...overrides };
+  const context = { URL, Uint8Array, DataView, AbortSignal, TextEncoder, ...overrides };
   vm.runInNewContext(`${source}\nglobalThis.api = XVideoDownload;`, context);
   return context.api;
 }
@@ -156,11 +156,13 @@ test('downloads the verified best MP4 with an informative safe filename and neve
     fetch: rangeFetch(Buffer.concat([ftyp, movie('vide', 'soun'), mdat]), requests),
     chrome: { downloads: { async download(options) { downloads.push(options); return 42; } } }
   });
-  const result = await api.start([variant(640, 360), variant(1920, 1080)]);
+  const result = await api.start([variant(640, 360), variant(1920, 1080)], {
+    handle: 'example', tweetId: '1234567890123456789', displayName: 'Example Person', text: 'A good day'
+  });
   assert.equal(result.downloadId, 42);
   assert.equal(result.width, 1920);
   assert.equal(downloads[0].url, variant(1920, 1080).url);
-  assert.equal(downloads[0].filename, 'x-video-123456789-1920x1080.mp4');
+  assert.equal(downloads[0].filename, '@example 1234567890123456789 Example Person A good day.mp4');
   assert.equal(downloads[0].conflictAction, 'uniquify');
   assert.ok(requests.every((request) => request.url === downloads[0].url));
 
@@ -175,6 +177,43 @@ test('missing audio prevents the native download', async () => {
   const api = load({ fetch: rangeFetch(Buffer.concat([ftyp, movie('vide'), mdat])),
     chrome: { downloads: { download() { assert.fail('silent file must not download'); } } } });
   await assert.rejects(api.start([variant(1280, 720)]), /no_audio/);
+});
+
+test('filenames keep author, tweet ID, display name and truncated text in the requested order', () => {
+  const api = load();
+  const best = api.selectBest([variant(1280, 720)]);
+  const metadata = { handle: '@example', tweetId: '1234567890123456789', displayName: 'Example Person', text: 'x'.repeat(81) };
+  assert.equal(api.makeFilename(metadata, best), `@example 1234567890123456789 Example Person ${'x'.repeat(79)}….mp4`);
+  assert.equal(api.makeFilename({ ...metadata, text: 'x'.repeat(80) }, best), `@example 1234567890123456789 Example Person ${'x'.repeat(80)}.mp4`);
+  assert.equal(api.makeFilename({ ...metadata, text: '' }, best), '@example 1234567890123456789 Example Person.mp4');
+  assert.equal(api.makeFilename(undefined, best), 'x-video media-123456789.mp4');
+  assert.equal(api.makeFilename({ ...metadata, tweetId: undefined, text: '' }, best), '@example media-123456789 Example Person.mp4');
+});
+
+test('filenames normalize unsafe characters and whitespace without allowing path traversal', () => {
+  const api = load();
+  const best = api.selectBest([variant(1280, 720)]);
+  const filename = api.makeFilename({
+    handle: '../bad', tweetId: '../123', displayName: 'Name / \\ : * ? " < > | [ ]\u202e',
+    text: '  Hello\n\tworld\u0000\u202e  ... '
+  }, best);
+  assert.equal(filename, 'x-video media-123456789 Name Hello world.mp4');
+});
+
+test('filenames keep whole emoji and fit filesystem byte limits with long Unicode text', () => {
+  const api = load();
+  const best = api.selectBest([variant(1280, 720)]);
+  const emoji = '👨‍👩‍👧‍👦';
+  const filename = api.makeFilename({
+    handle: 'long_handle_123', tweetId: '1234567890123456789012345',
+    displayName: emoji.repeat(50), text: emoji.repeat(100)
+  }, best);
+  assert.ok(Buffer.byteLength(filename) <= 230);
+  assert.ok(filename.startsWith('@long_handle_123 1234567890123456789012345'));
+  assert.ok(!filename.replaceAll(emoji, '').includes('\u200d'), 'no split emoji sequences');
+  assert.ok(filename.endsWith('….mp4'));
+  const normalized = api.makeFilename({ handle: 'example', tweetId: '123', displayName: 'Cafe\u0301', text: '😀 Smile' }, best);
+  assert.equal(normalized, '@example 123 Café 😀 Smile.mp4');
 });
 
 test('page bridge resolves the requested player only, including reused video nodes', () => {
@@ -208,6 +247,102 @@ test('page bridge resolves the requested player only, including reused video nod
   b.isConnected = false;
   listeners['mvs-x-video-request']({ target: b });
   assert.equal(responses.length, 3);
+});
+
+test('page bridge associates metadata with matching media, including quotes, reposts and empty text', () => {
+  let request;
+  let response;
+  class Video {
+    isConnected = true;
+    getAttribute() { return '12345678-1234-1234-1234-123456789abc'; }
+    dispatchEvent(event) { response = JSON.parse(event.detail); }
+  }
+  vm.runInNewContext(fs.readFileSync(path.join(root, 'x-video-page.js'), 'utf8'), {
+    window: {}, HTMLVideoElement: Video,
+    CustomEvent: class { constructor(type, options) { this.detail = options.detail; } },
+    document: { addEventListener(type, listener) { request = listener; } }
+  });
+  const tweet = (id, media, user, text) => ({
+    rest_id: id, core: { user_results: { result: { core: { screen_name: user, name: `${user} display` } } } },
+    legacy: { full_text: text, extended_entities: { media: [{ video_info: { variants: [{ url: media }] } }] } }
+  });
+  const selectedUrl = variant(1280, 720).url;
+  const selected = tweet('1111111111111111111', selectedUrl, 'videoAuthor', 'Original tweet text');
+  const enclosing = tweet('2222222222222222222', variant(640, 360, 1000, '999').url, 'quoteAuthor', 'Quote commentary');
+  enclosing.quoted_status_result = { result: selected };
+  const parent = { memoizedProps: { tweet: enclosing } };
+  const player = { memoizedProps: { variants: [{ src: selectedUrl, type: 'video/mp4', bitrate: 1000 }] }, return: parent };
+  const video = new Video();
+  video.parentElement = { __reactFiber$test: { return: player } };
+  request({ target: video });
+  assert.equal(response.metadata.handle, 'videoAuthor');
+  assert.equal(response.metadata.displayName, 'videoAuthor display');
+  assert.equal(response.metadata.tweetId, '1111111111111111111');
+  assert.equal(response.metadata.text, 'Original tweet text');
+
+  selected.legacy.full_text = '';
+  request({ target: video });
+  assert.equal(response.metadata.text, undefined);
+  assert.equal(response.metadata.tweetId, '1111111111111111111');
+
+  parent.memoizedProps.tweet = { retweeted_status_result: { result: selected } };
+  selected.note_tweet = { note_tweet_results: { result: { text: 'Long post text' } } };
+  request({ target: video });
+  assert.equal(response.metadata.text, 'Long post text');
+
+  parent.memoizedProps.tweet = { id_str: '3333333333333333333', full_text: 'Legacy text',
+    user: { screen_name: 'legacyUser', name: 'Legacy User' }, extended_entities: selected.legacy.extended_entities };
+  request({ target: video });
+  assert.equal(response.metadata.handle, 'legacyUser');
+  assert.equal(response.metadata.tweetId, '3333333333333333333');
+
+  parent.memoizedProps.tweet = tweet('999', variant(640, 360, 1000, '999').url, 'unrelated', 'Wrong text');
+  request({ target: video });
+  assert.deepEqual(response.metadata, {});
+  assert.equal(response.variants[0].url, selectedUrl);
+});
+
+test('page bridge reaches tweet metadata beyond the deeply nested current X player', () => {
+  let request;
+  let response;
+  class Video {
+    isConnected = true;
+    getAttribute() { return '12345678-1234-1234-1234-123456789abc'; }
+    dispatchEvent(event) { response = JSON.parse(event.detail); }
+  }
+  vm.runInNewContext(fs.readFileSync(path.join(root, 'x-video-page.js'), 'utf8'), {
+    window: {}, HTMLVideoElement: Video,
+    CustomEvent: class { constructor(type, options) { this.detail = options.detail; } },
+    document: { addEventListener(type, listener) { request = listener; } }
+  });
+  const mediaUrl = variant(1280, 720).url;
+  // Observed in Arc: first player variants at depth 2; normalized tweet at 97.
+  const tweet = { id_str: '1234567890123456789', user: { screen_name: 'example', name: 'Example Person' }, full_text: 'Post text' };
+  Object.defineProperty(tweet, 'extended_entities', { get: () => ({
+    media: [{ video_info: { variants: [{ url: mediaUrl }] } }]
+  }) });
+  const parent = { memoizedProps: { tweet } };
+  let chain = parent;
+  for (let depth = 96; depth >= 0; depth--) {
+    chain = {
+      memoizedProps: depth === 2 ? { variants: [{ src: mediaUrl, type: 'video/mp4' }] } : {},
+      return: chain
+    };
+  }
+  const video = new Video();
+  video.parentElement = { __reactFiber$test: chain };
+  request({ target: video });
+  assert.equal(response.metadata.handle, 'example');
+  assert.equal(response.metadata.tweetId, '1234567890123456789');
+  assert.equal(response.metadata.displayName, 'Example Person');
+  assert.equal(response.metadata.text, 'Post text');
+
+  // A malformed parent cycle must still terminate and retain the video URL.
+  parent.memoizedProps = {};
+  parent.return = chain;
+  request({ target: video });
+  assert.equal(response.variants[0].url, mediaUrl);
+  assert.deepEqual(response.metadata, {});
 });
 
 test('background refuses non-X senders before any network or download action', () => {

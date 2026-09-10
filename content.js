@@ -50,7 +50,7 @@
     ["x.com", "www.x.com", "twitter.com", "www.twitter.com", "mobile.twitter.com"].includes(window.location.hostname);
   const pendingXDownloads = new WeakSet();
 
-  const requestXVariants = (video) => new Promise((resolve, reject) => {
+  const requestXVideoDetails = (video) => new Promise((resolve, reject) => {
     const requestId = crypto.randomUUID();
     const cleanup = () => {
       window.clearTimeout(timer);
@@ -63,7 +63,7 @@
         const payload = JSON.parse(event.detail);
         if (payload.requestId !== requestId || !Array.isArray(payload.variants)) return;
         cleanup();
-        resolve(payload.variants);
+        resolve({ variants: payload.variants, metadata: payload.metadata });
       } catch {
         // Ignore malformed page messages; the bounded timeout still applies.
       }
@@ -2748,9 +2748,9 @@
       setButtonLoading(button);
       showPendingFeedback("Checking highest quality and audio...");
       try {
-        const variants = await requestXVariants(video);
+        const { variants, metadata } = await requestXVideoDetails(video);
         if (!isSameVideo()) throw new Error("Video changed. Try again on the current video.");
-        const { response, error } = await sendRuntimeMessage({ type: "download-x-video", variants });
+        const { response, error } = await sendRuntimeMessage({ type: "download-x-video", variants, metadata });
         if (error || !response?.ok) throw new Error(xDownloadError(response?.code));
         if (activeVideo === video && isSameVideo()) {
           setButtonStatus(button, "success");

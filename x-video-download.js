@@ -18,7 +18,7 @@ const XVideoDownload = (() => {
           url.port || url.username || url.password || url.hash) return null;
       // Only complete, progressive renditions. In particular /vid/avc1/0/0/...
       // is an HLS initialization fragment and /aud/... is audio alone.
-      const match = url.pathname.match(/^\/(ext_tw_video|amplify_video)\/(\d+)\/(?:pu\/)?vid\/(?:avc1\/)?(\d+)x(\d+)\/([\w-]+)\.mp4$/);
+      const match = url.pathname.match(/^\/(ext_tw_video|amplify_video)\/(\d{1,25})\/(?:pu\/)?vid\/(?:avc1\/)?(\d+)x(\d+)\/([\w-]+)\.mp4$/);
       if (!match) return null;
       const width = Number(match[3]);
       const height = Number(match[4]);
@@ -37,6 +37,43 @@ const XVideoDownload = (() => {
     if (new Set(candidates.map((variant) => variant.mediaId)).size !== 1) fail("ambiguous_video");
     candidates.sort((a, b) => b.width * b.height - a.width * a.height || b.bitrate - a.bitrate);
     return candidates[0];
+  };
+
+  const cleanFilenameText = (value) => typeof value === "string"
+    ? value.slice(0, 10000).normalize("NFC")
+      .replace(/[<>:"/\\|?*\[\]\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, " ")
+      .replace(/\s+/g, " ").trim().replace(/[. ]+$/, "")
+    : "";
+  const graphemes = (value) => Array.from(new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(value), (item) => item.segment);
+  const truncate = (value, maxCharacters, maxBytes = Infinity) => {
+    const parts = graphemes(value);
+    const kept = [];
+    let bytes = 0;
+    for (const part of parts) {
+      const size = new TextEncoder().encode(part).length;
+      if (kept.length >= maxCharacters || bytes + size > maxBytes) break;
+      kept.push(part);
+      bytes += size;
+    }
+    if (kept.length === parts.length) return value;
+    // Keep the ellipsis within both limits, without splitting emoji or accents.
+    while (kept.length && (kept.length >= maxCharacters || bytes + 3 > maxBytes)) {
+      bytes -= new TextEncoder().encode(kept.pop()).length;
+    }
+    return kept.join("").trimEnd() + (maxBytes >= 3 ? "…" : "");
+  };
+
+  const makeFilename = (metadata, best) => {
+    const handle = typeof metadata?.handle === "string" ? metadata.handle.replace(/^@/, "") : "";
+    const tweetId = typeof metadata?.tweetId === "string" && /^\d{1,25}$/.test(metadata.tweetId)
+      ? metadata.tweetId : `media-${best.mediaId}`;
+    const author = /^[A-Za-z0-9_]{1,15}$/.test(handle) ? `@${handle}` : "x-video";
+    const name = truncate(cleanFilenameText(metadata?.displayName), 50, 80);
+    const prefix = `${author} ${tweetId}${name ? ` ${name}` : ""}`;
+    // Leave space for the separator, extension, and Chrome's duplicate-file suffix.
+    const textBytes = 230 - new TextEncoder().encode(`${prefix} .mp4`).length;
+    const text = truncate(cleanFilenameText(metadata?.text), 80, textBytes);
+    return `${prefix}${text ? ` ${text}` : ""}.mp4`;
   };
 
   const boxType = (bytes, offset) => String.fromCharCode(...bytes.subarray(offset, offset + 4));
@@ -155,17 +192,17 @@ const XVideoDownload = (() => {
     fail("invalid_mp4");
   };
 
-  const start = async (variants) => {
+  const start = async (variants, metadata) => {
     const best = selectBest(variants);
     // No silent quality fallback: failure of the best rendition is reported.
     await verifyAudioVideo(best.url, AbortSignal.timeout(20000));
     const downloadId = await chrome.downloads.download({
       url: best.url,
-      filename: `x-video-${best.mediaId}-${best.width}x${best.height}.mp4`,
+      filename: makeFilename(metadata, best),
       conflictAction: "uniquify"
     });
     return { ok: true, downloadId, width: best.width, height: best.height };
   };
 
-  return { isXPage, selectBest, inspectMovie, verifyAudioVideo, start };
+  return { isXPage, selectBest, makeFilename, inspectMovie, verifyAudioVideo, start };
 })();
