@@ -11,6 +11,8 @@ const showHoverSlowZoneHintInput = document.getElementById("show-hover-slow-zone
 const showDownieInput = document.getElementById("show-downie");
 const showReaderInput = document.getElementById("show-reader");
 const feedRevealDayEndInput = document.getElementById("feed-reveal-day-end");
+const hideFeedVideosInput = document.getElementById("hide-feed-videos");
+const feedRevealDailyLimitInput = document.getElementById("feed-reveal-daily-limit");
 const readerTokenInput = document.getElementById("reader-token");
 const saveTokenButton = document.getElementById("save-token");
 const status = document.getElementById("status");
@@ -28,6 +30,16 @@ const DEFAULT_SHOW_DOWNIE = true;
 const DEFAULT_SHOW_READER = true;
 const DEFAULT_FEED_REVEAL_DAY_END_MINUTES = 2 * 60;
 const FEED_REVEAL_DAY_END_MINUTES_KEY = "ytListsFeedRevealDayEndMinutes";
+const HIDE_FEED_VIDEOS_KEY = "ytListsHideFeedVideos";
+const FEED_REVEAL_DAILY_LIMIT_KEY = "ytListsFeedRevealDailyLimit";
+const DEFAULT_FEED_REVEAL_DAILY_LIMIT = 3;
+
+const normalizeFeedRevealDailyLimit = (value) => {
+  if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_FEED_REVEAL_DAILY_LIMIT;
+  return Math.min(100, Math.max(0, Math.floor(value)));
+};
+
+const readFeedRevealDailyLimitInput = () => normalizeFeedRevealDailyLimit(feedRevealDailyLimitInput.valueAsNumber);
 const PRECISION = 2;
 
 const roundToPrecision = (value) => {
@@ -207,6 +219,8 @@ chrome.storage.local.get(
     "showDownie",
     "showReader",
     FEED_REVEAL_DAY_END_MINUTES_KEY,
+    HIDE_FEED_VIDEOS_KEY,
+    FEED_REVEAL_DAILY_LIMIT_KEY,
     "readerToken"
   ],
   (result) => {
@@ -249,6 +263,15 @@ chrome.storage.local.get(
       )
     );
     readerTokenInput.value = typeof result.readerToken === "string" ? result.readerToken : "";
+    feedRevealDailyLimitInput.value = String(normalizeFeedRevealDailyLimit(result[FEED_REVEAL_DAILY_LIMIT_KEY]));
+    if (typeof result[HIDE_FEED_VIDEOS_KEY] === "boolean") {
+      hideFeedVideosInput.checked = result[HIDE_FEED_VIDEOS_KEY];
+    } else {
+      // Match YT Lists' fallback for settings saved before the move to local storage.
+      chrome.storage.sync.get([HIDE_FEED_VIDEOS_KEY], (legacy) => {
+        hideFeedVideosInput.checked = legacy[HIDE_FEED_VIDEOS_KEY] === true;
+      });
+    }
     updateHoverBandSummary();
   }
 );
@@ -323,6 +346,50 @@ const saveFeedRevealDayEnd = () => {
     showStatus("Focus day end saved");
   });
 };
+
+hideFeedVideosInput.addEventListener("change", () => {
+  const enabled = hideFeedVideosInput.checked;
+  chrome.storage.local.set({ [HIDE_FEED_VIDEOS_KEY]: enabled }, () => {
+    if (chrome.runtime.lastError) {
+      showStatus("Could not save focus mode");
+      return;
+    }
+    chrome.storage.sync.set({ [HIDE_FEED_VIDEOS_KEY]: enabled });
+    showStatus(enabled ? "Focus mode on" : "Focus mode off");
+  });
+});
+
+const saveFeedRevealDailyLimit = (value) => {
+  const limit = normalizeFeedRevealDailyLimit(value);
+  chrome.storage.local.set({ [FEED_REVEAL_DAILY_LIMIT_KEY]: limit }, () => {
+    if (chrome.runtime.lastError) {
+      showStatus("Could not save daily unblocks");
+      return;
+    }
+    feedRevealDailyLimitInput.value = String(limit);
+    showStatus("Daily unblocks saved");
+  });
+};
+
+feedRevealDailyLimitInput.addEventListener("change", () => saveFeedRevealDailyLimit(readFeedRevealDailyLimitInput()));
+feedRevealDailyLimitInput.addEventListener("blur", () => {
+  feedRevealDailyLimitInput.value = String(readFeedRevealDailyLimitInput());
+});
+document.querySelectorAll("[data-feed-reveal-delta]").forEach((button) => {
+  button.addEventListener("click", () => {
+    saveFeedRevealDailyLimit(readFeedRevealDailyLimitInput() + Number(button.dataset.feedRevealDelta));
+  });
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local") return;
+  if (changes[HIDE_FEED_VIDEOS_KEY]) {
+    hideFeedVideosInput.checked = changes[HIDE_FEED_VIDEOS_KEY].newValue === true;
+  }
+  if (changes[FEED_REVEAL_DAILY_LIMIT_KEY]) {
+    feedRevealDailyLimitInput.value = String(normalizeFeedRevealDailyLimit(changes[FEED_REVEAL_DAILY_LIMIT_KEY].newValue));
+  }
+});
 
 feedRevealDayEndInput.addEventListener("change", saveFeedRevealDayEnd);
 feedRevealDayEndInput.addEventListener("blur", () => {

@@ -33,6 +33,9 @@ The extension reads only that player's available renditions and matching post me
 - Each hover band speed can be set from `0` to `16`
 - The options page supports direct number input plus `-0.25` and `+0.25` adjustments
 - Reader saving requires a Readwise access token in **Extension options**
+- **Focus mode** hides YouTube Home and Subscriptions feeds; toggle it on/off in **Extension options** or YT Lists' filters
+- **Daily unblocks** defaults to `3` and can be set from `0` to `100`; `0` disables unblocking while focus mode is on. Changes apply to open YouTube tabs, preserving today's usage
+- Each unblock keeps the 30-second delay. **Day ends at** controls when the allowance resets (default: `02:00`, local time)
 - The chosen setting applies globally, including embedded videos
 
 ## Embeds

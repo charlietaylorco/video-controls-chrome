@@ -623,7 +623,28 @@
       <section class="settings-section" aria-labelledby="focus-heading">
         <div class="section-heading">
           <h2 id="focus-heading">Focus mode</h2>
-          <p>Set when the daily YouTube feed reveal allowance resets.</p>
+          <p>Control YouTube feed blocking and your daily unblock allowance.</p>
+        </div>
+        <label class="toggle-item" for="hide-feed-videos">
+          <span class="setting-copy">
+            <span class="setting-title">Enable focus mode</span>
+            <span class="setting-hint">Hide YouTube Home and Subscriptions feeds. Turn off to browse freely.</span>
+          </span>
+          <input class="toggle-input" id="hide-feed-videos" type="checkbox">
+        </label>
+        <div class="setting-row">
+          <div class="setting-copy">
+            <label for="feed-reveal-daily-limit">Daily unblocks</label>
+            <span class="setting-hint" id="feed-reveal-daily-limit-hint">Default: 3. Set 0 to prevent unblocking while focus mode is on.</span>
+          </div>
+          <div class="stepper-control">
+            <button class="stepper" data-feed-reveal-delta="-1" type="button" aria-label="Decrease daily unblocks by 1">−</button>
+            <div class="value-wrap">
+              <input id="feed-reveal-daily-limit" type="number" min="0" max="100" step="1" inputmode="numeric" aria-describedby="feed-reveal-daily-limit-hint">
+            </div>
+            <span class="suffix"></span>
+            <button class="stepper" data-feed-reveal-delta="1" type="button" aria-label="Increase daily unblocks by 1">+</button>
+          </div>
         </div>
         <div class="setting-row">
           <div class="setting-copy">
