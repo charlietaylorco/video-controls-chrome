@@ -3,6 +3,8 @@ importScripts("x-video-download.js");
 const DOWNIE_PREFIX = "downie://XUOpenLink?url=";
 const READER_SAVE_URL = "https://readwise.io/api/v3/save/";
 const READER_SOURCE = "minimal-video-speed";
+const RAINDROP_SAVED_URLS_KEY = "raindropSavedUrls";
+const MAX_RAINDROP_SAVED_URLS = 2000;
 const READER_SAVED_URLS_KEY = "readerSavedUrls";
 const MAX_READER_SAVED_URLS = 2000;
 const DOWNIE_SENT_URLS_KEY = "downieSentUrls";
@@ -349,6 +351,55 @@ const isReaderUrlSaved = async (targetUrl) => {
   return keys.some((key) => Boolean(savedUrls[key]));
 };
 
+const getRaindropSavedUrls = () =>
+  new Promise((resolve) => {
+    chrome.storage.local.get({ [RAINDROP_SAVED_URLS_KEY]: {} }, (result) => {
+      const savedUrls = result[RAINDROP_SAVED_URLS_KEY];
+      resolve(savedUrls && typeof savedUrls === "object" && !Array.isArray(savedUrls) ? savedUrls : {});
+    });
+  });
+
+const setRaindropSavedUrls = (savedUrls) =>
+  new Promise((resolve) => {
+    chrome.storage.local.set({ [RAINDROP_SAVED_URLS_KEY]: savedUrls }, resolve);
+  });
+
+const pruneRaindropSavedUrls = (savedUrls) => {
+  const entries = Object.entries(savedUrls)
+    .filter(([url, savedAt]) => isHttpUrl(url) && Number.isFinite(Number(savedAt)))
+    .sort((a, b) => Number(b[1]) - Number(a[1]));
+
+  return Object.fromEntries(entries.slice(0, MAX_RAINDROP_SAVED_URLS));
+};
+
+const markRaindropUrlSaved = async (targetUrl, extraUrl = null) => {
+  const keys = [...getSavedUrlKeys(targetUrl), ...getSavedUrlKeys(extraUrl)];
+
+  if (keys.length === 0) {
+    return;
+  }
+
+  const savedUrls = await getRaindropSavedUrls();
+  const savedAt = Date.now();
+
+  for (const key of keys) {
+    savedUrls[key] = savedAt;
+  }
+
+  await setRaindropSavedUrls(pruneRaindropSavedUrls(savedUrls));
+};
+
+const isRaindropUrlSaved = async (targetUrl) => {
+  const keys = getSavedUrlKeys(targetUrl);
+
+  if (keys.length === 0) {
+    return false;
+  }
+
+  const savedUrls = await getRaindropSavedUrls();
+  return keys.some((key) => Boolean(savedUrls[key]));
+};
+
 const getDownieSentUrls = () =>
   new Promise((resolve) => {
     chrome.storage.local.get({ [DOWNIE_SENT_URLS_KEY]: {} }, (result) => {
@@ -433,7 +484,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     XVideoDownload.start(message.variants, message.metadata).then(sendResponse, (error) => {
       const codes = ["no_mp4", "ambiguous_video", "invalid_mp4", "fragmented_mp4", "encrypted_mp4",
-        "no_video", "no_audio", "access_denied", "range_failed", "changed_file", "metadata_too_large"];
+        "no_video", "no_audio", "access_denied", "range_failed", "changed_file", "metadata_too_large",
+        "verification_timeout", "network_failed", "save_failed"];
       sendResponse({ ok: false, code: codes.includes(error?.message) ? error.message : "download_failed" });
     });
     return true;
@@ -461,6 +513,45 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
     });
 
+    return true;
+  }
+
+  if (message?.type === "get-raindrop-save-state") {
+    const targetUrl = normalizeTargetUrl(message?.pageUrl);
+    isRaindropUrlSaved(targetUrl).then((saved) => sendResponse({ ok: true, saved, url: targetUrl }));
+    return true;
+  }
+
+  if (message?.type === "save-to-raindrop") {
+    const targetUrl = normalizeTargetUrl(message?.pageUrl);
+    if (!isYouTubeVideoPageUrl(targetUrl)) {
+      sendResponse({ ok: false, code: "invalid_url" });
+      return undefined;
+    }
+    chrome.storage.local.get({ raindropToken: "" }, async ({ raindropToken }) => {
+      if (typeof raindropToken !== "string" || !raindropToken.trim()) {
+        sendResponse({ ok: false, code: "missing_token" });
+        return;
+      }
+      try {
+        const response = await fetch("https://api.raindrop.io/rest/v1/raindrop", {
+          method: "POST",
+          signal: AbortSignal.timeout(15000),
+          redirect: "error",
+          headers: { Authorization: `Bearer ${raindropToken.trim()}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ link: targetUrl, collection: { $id: -1 }, pleaseParse: {} })
+        });
+        if (!response.ok) {
+          sendResponse({ ok: false, code: [401, 403].includes(response.status) ? "unauthorized" : "save_failed" });
+          return;
+        }
+        const data = await response.json();
+        if (data.result === true) await markRaindropUrlSaved(targetUrl);
+        sendResponse({ ok: data.result === true, url: targetUrl });
+      } catch {
+        sendResponse({ ok: false, code: "save_failed" });
+      }
+    });
     return true;
   }
 

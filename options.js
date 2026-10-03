@@ -415,3 +415,58 @@ readerTokenInput.addEventListener("keydown", (event) => {
   event.preventDefault();
   saveTokenButton.click();
 });
+
+const iconLabels = { pip: "Picture-in-picture", "download-x": "X download", downie: "Downie", reader: "Reader", raindrop: "Raindrop" };
+let iconOrder = Object.keys(iconLabels);
+const renderIconOrder = (focusAction, focusDelta) => {
+  const list = document.getElementById("icon-order");
+  list.replaceChildren();
+  iconOrder.forEach((action, index) => {
+    const row = document.createElement("div");
+    row.className = "setting-row";
+    const label = document.createElement("span");
+    label.className = "setting-title";
+    label.textContent = `${index + 1}. ${iconLabels[action]}`;
+    const controls = document.createElement("div");
+    [-1, 1].forEach((delta) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "save-button";
+      button.textContent = delta === -1 ? "← Move left" : "Move right →";
+      button.setAttribute("aria-label", `Move ${iconLabels[action]} ${delta === -1 ? "left" : "right"}`);
+      button.disabled = index + delta < 0 || index + delta >= iconOrder.length;
+      button.addEventListener("click", () => {
+        [iconOrder[index], iconOrder[index + delta]] = [iconOrder[index + delta], iconOrder[index]];
+        chrome.storage.local.set({ iconOrder }, () => {
+          const error = chrome.runtime.lastError;
+          showStatus(error ? "Could not save icon order" : "Icon order saved");
+        });
+        renderIconOrder(action, delta);
+      });
+      controls.appendChild(button);
+      if (action === focusAction && delta === focusDelta) {
+        // Restore keyboard focus after rebuilding the reordered list.
+        queueMicrotask(() => (button.disabled ? controls.querySelector("button:not(:disabled)") : button)?.focus());
+      }
+    });
+    row.append(label, controls);
+    list.appendChild(row);
+  });
+};
+const raindropTokenInput = document.getElementById("raindrop-token");
+const showRaindropInput = document.getElementById("show-raindrop");
+chrome.storage.local.get(["iconOrder", "raindropToken", "showRaindrop"], (result) => {
+  iconOrder = [...new Set([...(Array.isArray(result.iconOrder) ? result.iconOrder : []), ...Object.keys(iconLabels)])]
+    .filter((action) => Object.hasOwn(iconLabels, action));
+  renderIconOrder();
+  raindropTokenInput.value = typeof result.raindropToken === "string" ? result.raindropToken : "";
+  showRaindropInput.checked = result.showRaindrop !== false;
+});
+showRaindropInput.addEventListener("change", () => saveToggle("showRaindrop", showRaindropInput.checked, "Raindrop visibility saved"));
+const saveRaindropToken = () => chrome.storage.local.set({ raindropToken: raindropTokenInput.value.trim() }, () => {
+  showStatus(chrome.runtime.lastError ? "Could not save Raindrop token" : "Raindrop token saved");
+});
+document.getElementById("save-raindrop-token").addEventListener("click", saveRaindropToken);
+raindropTokenInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") { event.preventDefault(); saveRaindropToken(); }
+});

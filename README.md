@@ -12,6 +12,7 @@ Minimal Chrome extension that injects a compact hover-only speed controller into
 - The picture-in-picture button toggles PiP for that specific video when the site allows it
 - The speed readout shows the current saved speed for that video
 - The Downie icon opens the current video or page in Downie when possible
+- The cloud icon saves YouTube videos and embeds to Raindrop.io's Unsorted collection and highlights videos already saved by the extension
 - On X/Twitter, the separate download-to-tray icon saves the highest-resolution complete MP4 exposed by that player, using bitrate to break ties. It verifies both audio and video tracks before downloading and never silently falls back to a lower quality
 
 ## X/Twitter downloads
@@ -33,6 +34,8 @@ The extension reads only that player's available renditions and matching post me
 - Each hover band speed can be set from `0` to `16`
 - The options page supports direct number input plus `-0.25` and `+0.25` adjustments
 - Reader saving requires a Readwise access token in **Extension options**
+- Raindrop saving requires a Test token from your Raindrop.io app in **Extension options**; the token is stored locally in this browser
+- **Icon order** lets you move overlay actions left or right; unavailable actions stay hidden
 - **Focus mode** hides YouTube Home and Subscriptions feeds; toggle it on/off in **Extension options** or YT Lists' filters
 - **Daily unblocks** defaults to `3` and can be set from `0` to `100`; `0` disables unblocking while focus mode is on. Changes apply to open YouTube tabs, preserving today's usage
 - Each unblock keeps the 30-second delay. **Day ends at** controls when the allowance resets (default: `02:00`, local time)

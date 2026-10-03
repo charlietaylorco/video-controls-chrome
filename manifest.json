@@ -17,6 +17,7 @@
   "host_permissions": [
     "https://video.twimg.com/*",
     "https://readwise.io/*",
+    "https://api.raindrop.io/*",
     "https://www.youtube.com/*",
     "https://youtube.com/*",
     "https://m.youtube.com/*",

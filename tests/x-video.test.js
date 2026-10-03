@@ -169,7 +169,7 @@ test('downloads the verified best MP4 with an informative safe filename and neve
   let attempts = 0;
   const failed = load({ fetch: async () => { attempts++; throw new Error('offline'); },
     chrome: { downloads: { async download() { assert.fail('unverified video must not download'); } } } });
-  await assert.rejects(failed.start([variant(640, 360), variant(1920, 1080)]), /offline/);
+  await assert.rejects(failed.start([variant(640, 360), variant(1920, 1080)]), /^Error: network_failed$/);
   assert.equal(attempts, 1);
 });
 
@@ -177,6 +177,29 @@ test('missing audio prevents the native download', async () => {
   const api = load({ fetch: rangeFetch(Buffer.concat([ftyp, movie('vide'), mdat])),
     chrome: { downloads: { download() { assert.fail('silent file must not download'); } } } });
   await assert.rejects(api.start([variant(1280, 720)]), /no_audio/);
+});
+
+test('download errors distinguish timeout, response-stream failure and browser save failure', async () => {
+  const timedOut = load({ fetch: async () => { throw new Error('private media URL'); } });
+  const signal = AbortSignal.abort(new DOMException('Timed out', 'TimeoutError'));
+  await assert.rejects(timedOut.verifyAudioVideo(variant(1280, 720).url, signal), /^Error: verification_timeout$/);
+
+  let cancelled = false;
+  const brokenStream = load({ fetch: async () => ({
+    status: 206, headers: new Headers({ 'Content-Range': 'bytes 0-15/1000' }),
+    body: { getReader() { return {
+      async read() { throw new Error('private media URL'); },
+      async cancel() { cancelled = true; }
+    }; } }
+  }) });
+  await assert.rejects(brokenStream.verifyAudioVideo(variant(1280, 720).url), /^Error: network_failed$/);
+  assert.equal(cancelled, true);
+
+  const cannotSave = load({
+    fetch: rangeFetch(Buffer.concat([ftyp, movie('vide', 'soun'), mdat])),
+    chrome: { downloads: { async download() { throw new Error('private local path'); } } }
+  });
+  await assert.rejects(cannotSave.start([variant(1280, 720)]), /^Error: save_failed$/);
 });
 
 test('filenames keep author, tweet ID, display name and truncated text in the requested order', () => {

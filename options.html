@@ -620,6 +620,33 @@
         </div>
       </section>
 
+      <section class="settings-section" aria-labelledby="order-heading">
+        <div class="section-heading">
+          <h2 id="order-heading">Icon order</h2>
+          <p>Move actions left or right in the overlay. Changes save automatically; unavailable actions stay hidden.</p>
+        </div>
+        <div id="icon-order" class="settings-rows"></div>
+      </section>
+
+      <section class="settings-section" aria-labelledby="raindrop-heading">
+        <div class="section-heading">
+          <h2 id="raindrop-heading">Raindrop.io</h2>
+          <p>Save YouTube videos and embeds to Unsorted with the cloud button.</p>
+        </div>
+        <label class="toggle-item" for="show-raindrop">
+          <span class="setting-title">Raindrop button</span>
+          <input class="toggle-input" id="show-raindrop" type="checkbox">
+        </label>
+        <div class="setting-row">
+          <label class="setting-title" for="raindrop-token">API token</label>
+          <div class="token-row">
+            <input class="token-input" id="raindrop-token" type="password" spellcheck="false" autocomplete="off">
+            <button class="save-button" id="save-raindrop-token" type="button">Save</button>
+          </div>
+        </div>
+        <div class="hint">Create an app in <a href="https://app.raindrop.io/settings/integrations" target="_blank" rel="noreferrer">Raindrop integrations</a>, then copy its Test token here. Stored locally in this browser.</div>
+      </section>
+
       <section class="settings-section" aria-labelledby="focus-heading">
         <div class="section-heading">
           <h2 id="focus-heading">Focus mode</h2>

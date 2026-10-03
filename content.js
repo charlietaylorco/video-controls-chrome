@@ -17,7 +17,8 @@
     overlayIdleHideDelay: 2,
     showHoverSlowZoneHint: false,
     showDownie: true,
-    showReader: true
+    showReader: true,
+    showRaindrop: true
   };
   let activeVideo = null;
   let activeTarget = null;
@@ -86,6 +87,12 @@
     encrypted_mp4: "This video is encrypted; nothing downloaded.",
     access_denied: "X denied access. Reload the post while signed in.",
     range_failed: "Could not verify the file. Reload the post and try again.",
+    invalid_mp4: "X returned an incomplete or unsupported MP4; nothing downloaded.",
+    changed_file: "The video file changed during the check. Try again.",
+    metadata_too_large: "This video's MP4 metadata is too large to verify; nothing downloaded.",
+    verification_timeout: "X took too long to respond while checking the video. Try again.",
+    network_failed: "Could not read the video from X. Check your connection and try again.",
+    save_failed: "The video passed the audio check, but the browser could not start saving it. Check Downloads.",
     invalid_sender: "Reload this X tab, then try again."
   }[code] || "Download failed. Reload the post and try again.");
 
@@ -372,11 +379,13 @@
         color: #d5ffe4;
       }
 
+      .icon-button[data-raindrop-saved="true"],
       .icon-button[data-reader-saved="true"] {
         background: rgba(199, 255, 219, 0.18);
         color: #d5ffe4;
       }
 
+      .icon-button[data-raindrop-saved="true"] svg,
       .icon-button[data-reader-saved="true"] svg {
         fill: rgba(213, 255, 228, 0.18);
       }
@@ -496,8 +505,7 @@
         </button>
         <button class="icon-button" data-action="download-x" type="button" aria-label="Download highest-quality X video with audio" title="Download highest-quality X video with audio" hidden>
           <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M12 3v11m-4-4 4 4 4-4"></path>
-            <path d="M4 15v5h16v-5"></path>
+            <path d="M4 4h4l12 16h-4L4 4ZM20 4 4 20"></path>
           </svg>
         </button>
         <button class="icon-button" data-action="downie" type="button" aria-label="Open in Downie" title="Open in Downie">
@@ -511,6 +519,9 @@
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M8 4.5h8A1.5 1.5 0 0 1 17.5 6v13l-5.5-3.25L6.5 19V6A1.5 1.5 0 0 1 8 4.5Z"></path>
           </svg>
+        </button>
+        <button class="icon-button" data-action="raindrop" type="button" aria-label="Save video to Raindrop" title="Save video to Raindrop" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 19h12a4 4 0 0 0 .7-7.94A7 7 0 0 0 5.2 9.1 5 5 0 0 0 6 19Z"></path></svg>
         </button>
       </div>
       <div class="feedback" aria-live="polite" data-visible="false">
@@ -531,14 +542,24 @@
   const xDownloadButton = shadowRoot.querySelector('[data-action="download-x"]');
   const downieButton = shadowRoot.querySelector('[data-action="downie"]');
   const readerButton = shadowRoot.querySelector('[data-action="reader"]');
+  const raindropButton = shadowRoot.querySelector('[data-action="raindrop"]');
+  const defaultIconOrder = ["pip", "download-x", "downie", "reader", "raindrop"];
+  const applyIconOrder = (value) => {
+    const order = [...new Set([...(Array.isArray(value) ? value : []), ...defaultIconOrder])]
+      .filter((action) => defaultIconOrder.includes(action));
+    const controls = shadowRoot.querySelector(".controls");
+    order.forEach((action) => controls.appendChild(shadowRoot.querySelector(`[data-action="${action}"]`)));
+  };
   let buttonStatusTimer = 0;
   let buttonStatusTarget = null;
   let feedbackTimer = 0;
   let feedbackTarget = null;
   let downieSentStateToken = 0;
   let readerSavedStateToken = 0;
+  let raindropSavedStateToken = 0;
   const downieSentUrlCache = new Map();
   const readerSavedUrlCache = new Map();
+  const raindropSavedUrlCache = new Map();
   let dragState = null;
   let overlayPositionX = null;
   let overlayPositionY = null;
@@ -621,7 +642,7 @@
     window.clearTimeout(buttonStatusTimer);
     buttonStatusTarget = null;
 
-    for (const button of [pipButton, downieButton, readerButton, xDownloadButton]) {
+    for (const button of [pipButton, downieButton, readerButton, xDownloadButton, raindropButton]) {
       delete button.dataset.status;
     }
   };
@@ -842,6 +863,7 @@
     xDownloadButton.hidden = !isXDownloadPage || !activeVideo || activeMode === "card";
     downieButton.hidden = !settings.showDownie;
     const pageUrl = getAssociatedPageUrl(getCurrentContextSource());
+    raindropButton.hidden = !settings.showRaindrop || !isYouTubeReaderSaveUrl(pageUrl);
     readerButton.hidden = !settings.showReader || !isYouTubeReaderSaveUrl(pageUrl);
   };
 
@@ -951,6 +973,58 @@
     });
   };
 
+  const setRaindropSavedState = (saved) => {
+    raindropButton.dataset.raindropSaved = String(Boolean(saved));
+    const label = saved ? "Saved in Raindrop" : "Save video to Raindrop";
+    raindropButton.title = label;
+    raindropButton.setAttribute("aria-label", label);
+  };
+
+  const refreshRaindropSavedState = () => {
+    if (!settings.showRaindrop || panel.dataset.visible !== "true") {
+      return;
+    }
+
+    const source = getCurrentContextSource();
+    const pageUrl = getAssociatedPageUrl(source);
+    const cacheKey = normalizeYouTubeStateUrl(pageUrl);
+    const token = ++raindropSavedStateToken;
+
+    if (!isYouTubeReaderSaveUrl(pageUrl)) {
+      setRaindropSavedState(false);
+      return;
+    }
+
+    if (raindropSavedUrlCache.has(cacheKey)) {
+      setRaindropSavedState(raindropSavedUrlCache.get(cacheKey));
+      return;
+    }
+
+    setRaindropSavedState(false);
+
+    sendRuntimeMessage({
+      type: "get-raindrop-save-state",
+      pageUrl
+    }).then(({ response, error }) => {
+      if (
+        token !== raindropSavedStateToken ||
+        error ||
+        getCurrentContextSource() !== source
+      ) {
+        return;
+      }
+
+      const saved = Boolean(response?.saved);
+      raindropSavedUrlCache.set(cacheKey, saved);
+
+      if (response?.url && response.url !== pageUrl) {
+        raindropSavedUrlCache.set(normalizeYouTubeStateUrl(response.url), saved);
+      }
+
+      setRaindropSavedState(saved);
+    });
+  };
+
   const refreshVisiblePanelMode = () => {
     if (panel.dataset.visible !== "true") {
       return;
@@ -965,7 +1039,7 @@
       return "player";
     }
 
-    return settings.showDownie || settings.showReader ? "card" : "player";
+    return settings.showDownie || settings.showReader || settings.showRaindrop ? "card" : "player";
   };
 
   const getCurrentContextSource = () => activeMetadataTarget || activeTarget || activeVideo;
@@ -1040,6 +1114,7 @@
     panel.setAttribute("aria-hidden", "false");
     refreshDownieSentState();
     refreshReaderSavedState();
+    refreshRaindropSavedState();
     refreshHoverZoneHint();
   };
 
@@ -2042,7 +2117,7 @@
       const isYoutubeHost = ["youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"].includes(url.hostname);
       return isYoutubeHost && (
         (url.pathname === "/watch" && Boolean(url.searchParams.get("v"))) ||
-        /^\/(shorts|live)\/[^/]+/.test(url.pathname)
+        /^\/(shorts|live|embed)\/[^/]+/.test(url.pathname)
       );
     } catch {
       return false;
@@ -2827,6 +2902,33 @@
       return;
     }
 
+    if (action === "raindrop") {
+      if (button.disabled) return;
+      const source = getCurrentContextSource();
+      const pageUrl = getAssociatedPageUrl(source);
+      button.disabled = true;
+      setButtonLoading(button);
+      showPendingFeedback("Saving to Raindrop...");
+      const { response, error } = await sendRuntimeMessage({ type: "save-to-raindrop", pageUrl });
+      button.disabled = false;
+      if (response?.ok && !error) {
+        ++raindropSavedStateToken;
+        raindropSavedUrlCache.set(normalizeYouTubeStateUrl(pageUrl), true);
+        if (response.url) raindropSavedUrlCache.set(normalizeYouTubeStateUrl(response.url), true);
+        if (getCurrentContextSource() === source) setRaindropSavedState(true);
+        else refreshRaindropSavedState();
+      }
+      if (response?.code === "missing_token") void sendRuntimeMessage({ type: "open-options" });
+      if (getCurrentContextSource() === source) {
+        const ok = response?.ok && !error;
+        setButtonStatus(button, ok ? "success" : "error");
+        showFeedback(ok ? "success" : "error", ok ? "Saved to Raindrop" :
+          response?.code === "missing_token" ? "Add your Raindrop token in settings" :
+          response?.code === "unauthorized" ? "Check your Raindrop token in settings" : "Raindrop save failed. Try again.");
+      } else clearButtonStatus(button);
+      return;
+    }
+
     if (action === "reader") {
       const source = getCurrentContextSource();
       const pageUrl = getAssociatedPageUrl(source);
@@ -3130,9 +3232,13 @@
         "overlayIdleHideDelay",
         "showHoverSlowZoneHint",
         "showDownie",
-        "showReader"
+        "showReader",
+        "showRaindrop",
+        "iconOrder"
       ],
       (result) => {
+        applyIconOrder(result.iconOrder);
+        settings.showRaindrop = result.showRaindrop !== false;
         const legacyHoverSpeed = Number(result.hoverSpeed);
         const hasSavedHoverBandSettings =
           result.hoverCenterSpeed !== undefined ||
@@ -3204,7 +3310,10 @@
           !changes.showHoverSlowZoneHint &&
           !changes.showDownie &&
           !changes.showReader &&
+          !changes.showRaindrop &&
+          !changes.iconOrder &&
           !changes.readerSavedUrls &&
+          !changes.raindropSavedUrls &&
           !changes.downieSentUrls
         )
       ) {
@@ -3274,6 +3383,9 @@
         settings.showDownie = changes.showDownie.newValue !== false;
       }
 
+      if (changes.iconOrder) applyIconOrder(changes.iconOrder.newValue);
+      if (changes.showRaindrop) settings.showRaindrop = changes.showRaindrop.newValue !== false;
+
       if (changes.showReader) {
         settings.showReader = changes.showReader.newValue !== false;
       }
@@ -3286,12 +3398,17 @@
         downieSentUrlCache.clear();
       }
 
+      if (changes.raindropSavedUrls) {
+        raindropSavedUrlCache.clear();
+      }
+
       if (changes.readerSavedUrls) {
         readerSavedUrlCache.clear();
       }
 
       refreshDownieSentState();
       refreshReaderSavedState();
+      refreshRaindropSavedState();
 
       if (hoveredVideo && Number.isFinite(hoverPointerClientX) && Number.isFinite(hoverPointerClientY)) {
         hoveredPreviewRate = getHoverPreviewRateAtPoint(

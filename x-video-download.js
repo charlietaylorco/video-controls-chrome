@@ -133,11 +133,18 @@ const XVideoDownload = (() => {
   // payload. This also supports files whose moov box is at the end of the file.
   const verifyAudioVideo = async (url, signal) => {
     let fileSize = null;
+    const readNetwork = async (operation) => {
+      try {
+        return await operation();
+      } catch {
+        fail(signal?.reason?.name === "TimeoutError" ? "verification_timeout" : "network_failed");
+      }
+    };
     const read = async (start, length) => {
-      const response = await fetch(url, {
+      const response = await readNetwork(() => fetch(url, {
         headers: { Range: `bytes=${start}-${start + length - 1}` },
         credentials: "include", redirect: "error", cache: "no-store", signal
-      });
+      }));
       const cancel = async () => { try { await response.body?.cancel(); } catch {} };
       const range = response.headers.get("content-range")?.match(/^bytes (\d+)-(\d+)\/(\d+)$/);
       if (response.status !== 206 || !range || Number(range[1]) !== start ||
@@ -158,7 +165,7 @@ const XVideoDownload = (() => {
       let received = 0;
       try {
         while (true) {
-          const { done, value } = await reader.read();
+          const { done, value } = await readNetwork(() => reader.read());
           if (done) break;
           if (received + value.length > expected) fail("invalid_mp4");
           bytes.set(value, received);
@@ -196,11 +203,17 @@ const XVideoDownload = (() => {
     const best = selectBest(variants);
     // No silent quality fallback: failure of the best rendition is reported.
     await verifyAudioVideo(best.url, AbortSignal.timeout(20000));
-    const downloadId = await chrome.downloads.download({
-      url: best.url,
-      filename: makeFilename(metadata, best),
-      conflictAction: "uniquify"
-    });
+    const filename = makeFilename(metadata, best);
+    let downloadId;
+    try {
+      downloadId = await chrome.downloads.download({
+        url: best.url, filename, conflictAction: "uniquify"
+      });
+    } catch {
+      // Browser error messages can change and may contain private URLs or paths.
+      // Identify the failed step without passing those details back to the page.
+      fail("save_failed");
+    }
     return { ok: true, downloadId, width: best.width, height: best.height };
   };
 
