@@ -10,7 +10,8 @@ const INLINE_CLASS = 'ytl-inline';
 const FLOATING_CLASS = 'ytl-floating';
 const FEED_REVEAL_DELAY_MS = 30000;
 const FEED_REVEAL_DELAY_SECONDS = FEED_REVEAL_DELAY_MS / 1000;
-const FEED_REVEAL_DAILY_LIMIT = 3;
+const DEFAULT_FEED_REVEAL_DAILY_LIMIT = 3;
+const FEED_REVEAL_DAILY_LIMIT_KEY = 'ytListsFeedRevealDailyLimit';
 const FEED_REVEAL_DAY_END_MINUTES_KEY = 'ytListsFeedRevealDayEndMinutes';
 const FEED_REVEAL_USAGE_KEY = 'ytListsFeedRevealUsage';
 const DEFAULT_FEED_REVEAL_DAY_END_MINUTES = 2 * 60;
@@ -29,6 +30,7 @@ let feedRevealCountdownTimer = null;
 let feedRevealResetRefreshTimer = null;
 let feedRevealDeadline = 0;
 let feedRevealDayEndMinutes = DEFAULT_FEED_REVEAL_DAY_END_MINUTES;
+let feedRevealDailyLimit = DEFAULT_FEED_REVEAL_DAILY_LIMIT;
 let feedRevealUsage = { dayKey: '', count: 0 };
 
 function isExtensionContextInvalidated(error) {
@@ -559,16 +561,20 @@ function normalizeFeedRevealDayEndMinutes(value) {
   return Math.min(23 * 60 + 59, Math.max(0, minutes));
 }
 
+function normalizeFeedRevealDailyLimit(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_FEED_REVEAL_DAILY_LIMIT;
+  return Math.min(100, Math.max(0, Math.floor(value)));
+}
+
 function normalizeFeedRevealUsage(value) {
   if (!value || typeof value !== 'object') {
     return { dayKey: '', count: 0 };
   }
 
   const dayKey = typeof value.dayKey === 'string' ? value.dayKey : '';
-  const count = Math.min(
-    FEED_REVEAL_DAILY_LIMIT,
-    Math.max(0, Math.floor(Number(value.count) || 0))
-  );
+  // Preserve actual usage when the allowance is lowered and raised again.
+  const rawCount = Number(value.count);
+  const count = Number.isFinite(rawCount) ? Math.max(0, Math.floor(rawCount)) : 0;
 
   return { dayKey, count };
 }
@@ -607,7 +613,7 @@ function getFeedRevealUsageForCurrentDay() {
 
 function getFeedRevealRemaining() {
   const usage = getFeedRevealUsageForCurrentDay();
-  return Math.max(0, FEED_REVEAL_DAILY_LIMIT - usage.count);
+  return Math.max(0, feedRevealDailyLimit - usage.count);
 }
 
 function getNextFeedRevealResetTime(timestamp = Date.now()) {
@@ -649,12 +655,14 @@ function scheduleFeedRevealResetRefresh() {
 }
 
 async function refreshFeedRevealQuotaState() {
-  const [dayEndMinutes, usage] = await Promise.all([
+  const [dayEndMinutes, dailyLimit, usage] = await Promise.all([
     getStorage(FEED_REVEAL_DAY_END_MINUTES_KEY, DEFAULT_FEED_REVEAL_DAY_END_MINUTES),
+    getStorage(FEED_REVEAL_DAILY_LIMIT_KEY, DEFAULT_FEED_REVEAL_DAILY_LIMIT),
     getStorage(FEED_REVEAL_USAGE_KEY, { dayKey: '', count: 0 })
   ]);
 
   feedRevealDayEndMinutes = normalizeFeedRevealDayEndMinutes(dayEndMinutes);
+  feedRevealDailyLimit = normalizeFeedRevealDailyLimit(dailyLimit);
   feedRevealUsage = normalizeFeedRevealUsage(usage);
 }
 
@@ -662,7 +670,7 @@ async function consumeFeedRevealQuota() {
   await refreshFeedRevealQuotaState();
 
   const usage = getFeedRevealUsageForCurrentDay();
-  if (usage.count >= FEED_REVEAL_DAILY_LIMIT) {
+  if (!hideFeedVideos || !isFeedFocusPage() || usage.count >= feedRevealDailyLimit) {
     feedRevealUsage = usage;
     return false;
   }
@@ -712,7 +720,7 @@ function getFeedFocusOverlay() {
         updateFeedFocusOverlayContent();
         return;
       }
-      startFeedRevealCountdown();
+      if (hideFeedVideos && isFeedFocusPage()) startFeedRevealCountdown();
     });
   });
   overlay.querySelector('[data-action="open-feed"]')?.addEventListener('click', () => {
@@ -762,7 +770,9 @@ function updateFeedFocusOverlayContent() {
   if (copy) copy.textContent = getFeedFocusMessage();
   if (status) {
     if (isPendingReveal) {
-      status.textContent = `Revealing in ${secondsRemaining} second${secondsRemaining === 1 ? '' : 's'}. This uses one of today's ${FEED_REVEAL_DAILY_LIMIT} reveals.`;
+      status.textContent = `Revealing in ${secondsRemaining} second${secondsRemaining === 1 ? '' : 's'}. This uses one of today's ${feedRevealDailyLimit} reveals.`;
+    } else if (feedRevealDailyLimit === 0) {
+      status.textContent = 'Unblocking is disabled. Change daily unblocks in Extension options.';
     } else if (isQuotaExhausted) {
       status.textContent = `No reveals left until ${formatFeedRevealResetTime()}.`;
     } else {
@@ -773,7 +783,7 @@ function updateFeedFocusOverlayContent() {
     revealButton.textContent = isPendingReveal
       ? `Cancel reveal (${secondsRemaining}s)`
       : isQuotaExhausted
-        ? 'No reveals left today'
+        ? (feedRevealDailyLimit === 0 ? 'Unblocking disabled' : 'No reveals left today')
         : `Reveal YouTube feed (${remainingReveals} left)`;
     revealButton.setAttribute('aria-pressed', isPendingReveal ? 'true' : 'false');
     revealButton.disabled = isQuotaExhausted && !isPendingReveal;
@@ -812,6 +822,7 @@ function applyFeedFocusMode() {
   document.documentElement.classList.toggle(FEED_FOCUS_CLASS, shouldHide);
 
   if (!shouldHide) {
+    clearFeedRevealCountdown();
     removeFeedFocusOverlay();
     return;
   }
@@ -1361,6 +1372,14 @@ chrome.storage.onChanged.addListener((changes, area) => {
     feedRevealDayEndMinutes = normalizeFeedRevealDayEndMinutes(
       changes[FEED_REVEAL_DAY_END_MINUTES_KEY].newValue
     );
+    if (document.getElementById(FEED_FOCUS_OVERLAY_ID)) {
+      updateFeedFocusOverlayContent();
+    }
+  }
+
+  if (changes[FEED_REVEAL_DAILY_LIMIT_KEY]) {
+    feedRevealDailyLimit = normalizeFeedRevealDailyLimit(changes[FEED_REVEAL_DAILY_LIMIT_KEY].newValue);
+    if (getFeedRevealRemaining() <= 0) clearFeedRevealCountdown();
     if (document.getElementById(FEED_FOCUS_OVERLAY_ID)) {
       updateFeedFocusOverlayContent();
     }
