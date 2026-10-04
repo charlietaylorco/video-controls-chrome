@@ -25,6 +25,21 @@ The extension reads only that player's available renditions and matching post me
 
 "Highest quality" means the largest complete MP4 rendition X supplies to the current player, not the original uploaded file or a potentially higher streaming-only rendition. The downloaded MP4 must contain both audio and video tracks. Silent GIFs, live streams, DRM media, HLS-only videos, unavailable/expired media, or files whose tracks cannot be verified produce an error instead of a misleading download. Access still depends on your signed-in account being able to view the post. X's internal player metadata can change; if detection stops working, reload the tab first.
 
+## Subscription review
+
+On desktop `https://www.youtube.com/feed/subscriptions`, use **Review subscriptions** in the bottom-right toolbar. Review follows YouTube's native newest-first page order; it does not sort approximate relative dates or fetch RSS feeds. It covers recognized video cards currently loaded on the page, deduplicating repeated videos. Scroll the normal feed to let YouTube load more, then start another review. "Loaded videos reviewed" does not mean your entire subscription history has been scanned. Mobile YouTube and Shorts shelves without an individual supported video card are outside this first version.
+
+- Drag left or choose **← Hide** to hide that video from this subscriptions page. It stays hidden when you exit review, reload, or return. Home, search, channel pages, and YouTube account state are unaffected.
+- Drag right or choose **Later →** to save a video snapshot to the independent **Later** queue. Saved videos remain visible in the normal subscriptions feed; they are excluded from subsequent review decks until removed from Later.
+- **↓ Skip** leaves a video unchanged and skips it only for the current review. **Undo** reverses recent individual decisions; it refuses to overwrite a newer decision on the same video from another tab. Bulk actions require a second confirmation and clear the recent undo history.
+- While review has focus, **← / ↓ / →** hide, skip, or save for later. **Cmd/Ctrl+Z** undoes and **Escape** closes. Typing, composing text, held keys, and modified arrow shortcuts do not trigger decisions. Buttons work without gestures or motion.
+- **Later** offers Watch, Remove from Later, Hide from subscriptions, search, and Clear Later. Opening a video does not remove it or claim it was watched.
+- **Hidden** offers search, Restore, and Restore all, including videos whose original cards are no longer loaded.
+
+This feature is independent of YT Lists: it uses only its own `subscriptionsReviewV1` local storage key, never imports or changes lists or archives, and adds no permissions or credentials. Decisions are shared by YouTube accounts using the same browser extension profile, do not sync between browsers, and are removed when the extension is uninstalled. Storage is bounded at 5,000 decisions and 1.5 MB including recent undo records; reaching that budget or Chrome's shared storage quota produces a visible error without dropping existing decisions.
+
+The existing **Focus mode** gate still applies. Subscription tools stay unavailable until Focus has evaluated the page and allowed the feed, including the existing unblock delay and allowance. The feature does not turn Focus off or spend an unblock on its own. YouTube renderer changes may require selector updates; no live account or installed-extension smoke test was performed for the initial implementation. See [fixture verification](tests/SUBSCRIPTIONS.md).
+
 ## Settings
 
 - Open the extension details page in `chrome://extensions` and use **Extension options**

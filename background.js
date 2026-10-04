@@ -1,4 +1,4 @@
-importScripts("x-video-download.js");
+importScripts("x-video-download.js", "subscriptions-state.js");
 
 const DOWNIE_PREFIX = "downie://XUOpenLink?url=";
 const READER_SAVE_URL = "https://readwise.io/api/v3/save/";
@@ -476,6 +476,12 @@ const pickTargetUrl = (message, sender) => {
 };
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "subscriptions-review") {
+    SubscriptionsReviewState.handleMessage(message, sender).then(sendResponse, (error) => {
+      sendResponse({ ok: false, error: error.message || "Could not save this decision." });
+    });
+    return true;
+  }
   if (message?.type === "download-x-video") {
     if (sender.id !== chrome.runtime.id || !Number.isInteger(sender.tab?.id) ||
         !XVideoDownload.isXPage(sender.url)) {
