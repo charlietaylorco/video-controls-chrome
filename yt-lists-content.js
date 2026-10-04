@@ -820,6 +820,10 @@ function startFeedRevealCountdown() {
 function applyFeedFocusMode() {
   const shouldHide = hideFeedVideos && isFeedFocusPage() && !temporaryFeedReveal;
   document.documentElement.classList.toggle(FEED_FOCUS_CLASS, shouldHide);
+  // Other subscription tools wait for the existing Focus gate to initialize.
+  if (document.documentElement.dataset.mvsFeedFocusReady !== 'true') {
+    document.documentElement.dataset.mvsFeedFocusReady = 'true';
+  }
 
   if (!shouldHide) {
     clearFeedRevealCountdown();

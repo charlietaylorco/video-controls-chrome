@@ -29,6 +29,12 @@
   },
   "content_scripts": [
     {
+      "matches": ["https://www.youtube.com/*", "https://youtube.com/*"],
+      "js": ["subscriptions-state.js", "subscriptions-content.js"],
+      "css": ["subscriptions.css"],
+      "run_at": "document_start"
+    },
+    {
       "matches": [
         "https://x.com/*",
         "https://www.x.com/*",
