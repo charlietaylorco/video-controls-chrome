@@ -9,6 +9,36 @@
     : null;
   const boundedText = (value, length) => typeof value === "string" ? value.slice(0, length) : undefined;
 
+  const detailsForDownloadUrl = (props) => {
+    // The logged-out Relay player supplies a single complete MP4 separately
+    // from its HLS src. Never infer an MP4 URL from streaming fragments.
+    if (typeof props?.downloadUrl !== "string" || props.downloadUrl.length > 4096) return null;
+    const selectedMediaId = mediaId(props.downloadUrl);
+    if (!selectedMediaId) return null;
+    for (const source of [props.src, props.content?.mediaAssetUrl]) {
+      const sourceMediaId = mediaId(source);
+      if (sourceMediaId && sourceMediaId !== selectedMediaId) return null;
+    }
+    const content = props.content;
+    const matchesContent = content?.contentId === selectedMediaId;
+    if (content?.contentId && !matchesContent) return null;
+    const metadata = matchesContent ? {
+      tweetId: boundedText(content.tweetId, 25),
+      displayName: boundedText(content.displayMetadata?.artist, 500)
+    } : {};
+    // Use this player's permalink, never the enclosing post/page (quotes may
+    // have a different author). Only attribute it when the post IDs agree.
+    if (matchesContent && typeof props.mediaPermalink === "string" && props.mediaPermalink.length <= 4096) {
+      try {
+        const url = new URL(props.mediaPermalink);
+        const match = url.pathname.match(/^\/([A-Za-z0-9_]{1,15})\/status\/(\d{1,25})(?:\/video\/\d+)?\/?$/);
+        if (url.protocol === "https:" && ["x.com", "www.x.com", "twitter.com", "www.twitter.com", "mobile.twitter.com"].includes(url.hostname) &&
+            !url.username && !url.password && !url.port && match?.[2] === metadata.tweetId) metadata.handle = match[1];
+      } catch {}
+    }
+    return { variants: [{ url: props.downloadUrl, type: "video/mp4" }], metadata };
+  };
+
   const metadataForTweet = (tweet, selectedMediaId, depth = 0) => {
     if (!tweet || typeof tweet !== "object" || depth > 3) return null;
     const legacy = tweet.legacy || tweet;
@@ -42,6 +72,7 @@
       if (!key) continue;
       let fiber = element[key];
       let variants = null;
+      let playerMetadata = {};
       const visited = new Set();
       // X's player can have over 90 ancestors before the tweet props. Follow
       // the parent chain to its root; protect against cycles and excessive depth.
@@ -55,6 +86,14 @@
             bitrate: variant?.bitrate ?? variant?.bit_rate
           }));
         }
+        if (!variants && props?.downloadUrl !== undefined) {
+          const details = detailsForDownloadUrl(props);
+          // An invalid/recycled player source must not fall through to a
+          // wider ancestor that could belong to a different video.
+          if (!details) return { variants: [], metadata: {} };
+          variants = details.variants;
+          playerMetadata = details.metadata;
+        }
         if (variants) {
           const selectedMediaId = variants.map((variant) => mediaId(variant.url)).find(Boolean);
           const metadata = metadataForTweet(props?.tweet, selectedMediaId);
@@ -62,7 +101,7 @@
         }
       }
       // Do not search a wider post/timeline if this player has no variants.
-      return { variants: variants || [], metadata: {} };
+      return { variants: variants || [], metadata: playerMetadata };
     }
     return { variants: [], metadata: {} };
   };
