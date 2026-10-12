@@ -373,6 +373,94 @@ test('logged-out Relay player downloads its supplied MP4 through the existing au
   assert.deepEqual(response.variants, [], 'HLS alone cannot supply a complete MP4');
 });
 
+test('logged-out filenames match signed-in filenames using only the selected post Relay snapshot', () => {
+  let request;
+  let response;
+  class Video {
+    isConnected = true;
+    getAttribute() { return '12345678-1234-1234-1234-123456789abc'; }
+    dispatchEvent(event) { response = JSON.parse(event.detail); }
+  }
+  vm.runInNewContext(fs.readFileSync(path.join(root, 'x-video-page.js'), 'utf8'), {
+    URL, window: {}, HTMLVideoElement: Video,
+    CustomEvent: class { constructor(type, options) { this.detail = options.detail; } },
+    document: { addEventListener(type, listener) { request = listener; } }
+  });
+  const id = '123456789';
+  const tweetId = '1111111111111111111';
+  const url = variant(1280, 720).url;
+  const text = 'Original post: 🌞 a lovely day / outside\n' + 'x'.repeat(100);
+  const hook = (data, next = null) => ({ memoizedState: { snapshot: { data } }, next });
+  // Observed Relay shape: details.full_text and core.user_results.result.core.
+  const tweet = { rest_id: tweetId, details: { full_text: text }, note_tweet: null,
+    core: { user_results: { result: { core: { screen_name: 'videoAuthor', name: 'Video Author' } } } } };
+  const snapshotHook = hook(tweet);
+  Object.defineProperty(snapshotHook.memoizedState, 'environment', { get() { assert.fail('must not read Relay environment'); } });
+  const ancestor = {
+    memoizedProps: { tweet: { __id: 'fragment-reference', __fragments: {} } },
+    // Unrelated enclosing quote comes first and must be ignored.
+    memoizedState: hook({ ...tweet, rest_id: '2222222222222222222', details: { full_text: 'Quote commentary' } }, snapshotHook)
+  };
+  const player = { memoizedProps: {
+    src: `https://video.twimg.com/amplify_video/${id}/pl/playlist.m3u8`, downloadUrl: url,
+    content: { contentId: id, tweetId, displayMetadata: { artist: 'Fallback Name' } },
+    mediaPermalink: `https://x.com/videoAuthor/status/${tweetId}/video/1`
+  }, return: ancestor };
+  const video = new Video();
+  video.parentElement = { __reactFiber$test: { return: player,
+    sibling: { memoizedState: hook({ ...tweet, details: { full_text: 'Sibling text' } }) } } };
+  request({ target: video });
+  const loggedOutMetadata = response.metadata;
+  assert.deepEqual(loggedOutMetadata, { handle: 'videoAuthor', displayName: 'Video Author', tweetId, text });
+
+  // Resolve the identical post via the signed-in player, then compare the
+  // actual shared formatter output (sanitization, Unicode and 80-char cap).
+  delete player.memoizedProps.downloadUrl;
+  player.memoizedProps.variants = [variant(1280, 720)];
+  ancestor.memoizedProps.tweet = { rest_id: tweetId, core: tweet.core,
+    legacy: { full_text: text, extended_entities: { media: [{ video_info: { variants: [{ url }] } }] } } };
+  request({ target: video });
+  const api = load();
+  const best = api.selectBest(response.variants);
+  assert.equal(api.makeFilename(loggedOutMetadata, best), api.makeFilename(response.metadata, best));
+  assert.ok(api.makeFilename(loggedOutMetadata, best).startsWith(`@videoAuthor ${tweetId} Video Author Original post 🌞`));
+  assert.ok(api.makeFilename(loggedOutMetadata, best).endsWith('….mp4'));
+
+  delete player.memoizedProps.variants;
+  player.memoizedProps.downloadUrl = url;
+  ancestor.memoizedProps.tweet = { __id: 'fragment-reference' };
+  // Long posts prefer note text, and normalized user wrappers are supported.
+  tweet.note_tweet = { note_tweet_results: { result: { text: 'Full long post text' } } };
+  tweet.core.user_results.result = { user: { core: { screen_name: 'videoAuthor', name: 'Video Author' } } };
+  request({ target: video });
+  assert.equal(response.metadata.text, 'Full long post text');
+  assert.equal(response.metadata.displayName, 'Video Author');
+  tweet.note_tweet = null;
+  tweet.details.full_text = 'Updated post text';
+  request({ target: video });
+  assert.equal(response.metadata.text, 'Updated post text', 'read current snapshot on each request');
+
+  // Missing text, mismatched IDs and malformed hook cycles retain safe player
+  // metadata without borrowing from the quote or unrelated sibling.
+  delete tweet.details.full_text;
+  snapshotHook.next = ancestor.memoizedState;
+  request({ target: video });
+  assert.equal(response.metadata.text, undefined);
+  assert.equal(response.metadata.displayName, 'Fallback Name');
+  tweet.details.full_text = 'Wrong post';
+  tweet.rest_id = '999';
+  request({ target: video });
+  assert.equal(response.metadata.text, undefined);
+  tweet.rest_id = tweetId;
+  tweet.details.full_text = 'z'.repeat(3000);
+  request({ target: video });
+  assert.equal(response.metadata.text.length, 2000);
+  ancestor.memoizedState = snapshotHook;
+  for (let i = 0; i < 64; i++) ancestor.memoizedState = hook({}, ancestor.memoizedState);
+  request({ target: video });
+  assert.equal(response.metadata.text, undefined, 'bound hook traversal');
+});
+
 test('page bridge associates metadata with matching media, including quotes, reposts and empty text', () => {
   let request;
   let response;
