@@ -85,7 +85,7 @@
     no_video: "No video track found; nothing downloaded.",
     fragmented_mp4: "Only a streaming fragment was found; nothing downloaded.",
     encrypted_mp4: "This video is encrypted; nothing downloaded.",
-    access_denied: "X denied access. Reload the post while signed in.",
+    access_denied: "X denied access. Reload the post and check that the video still plays.",
     range_failed: "Could not verify the file. Reload the post and try again.",
     invalid_mp4: "X returned an incomplete or unsupported MP4; nothing downloaded.",
     changed_file: "The video file changed during the check. Try again.",

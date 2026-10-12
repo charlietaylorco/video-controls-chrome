@@ -272,6 +272,107 @@ test('page bridge resolves the requested player only, including reused video nod
   assert.equal(responses.length, 3);
 });
 
+test('logged-out Relay player downloads its supplied MP4 through the existing audio verification', async () => {
+  let request;
+  let response;
+  class Video {
+    isConnected = true;
+    getAttribute() { return '12345678-1234-1234-1234-123456789abc'; }
+    dispatchEvent(event) { response = JSON.parse(event.detail); }
+  }
+  vm.runInNewContext(fs.readFileSync(path.join(root, 'x-video-page.js'), 'utf8'), {
+    URL, window: {}, HTMLVideoElement: Video,
+    CustomEvent: class { constructor(type, options) { this.detail = options.detail; } },
+    document: { addEventListener(type, listener) { request = listener; } }
+  });
+  const id = '2109434440195706880';
+  const url = variant(576, 736, 1000, id).url;
+  // Shape observed on a playing logged-out X post in Arc. The src is HLS,
+  // media/tweet props are Relay fragment references, and variants is absent.
+  const props = {
+    src: `https://video.twimg.com/amplify_video/${id}/pl/playlist.m3u8`,
+    downloadUrl: url,
+    content: { contentId: id, tweetId: '2109434534303277471',
+      displayMetadata: { artist: 'Example Person' } },
+    mediaPermalink: 'https://x.com/example/status/2109434534303277471/video/1'
+  };
+  const enclosing = { memoizedProps: {
+    media: { __id: 'relay-media', __fragments: {} },
+    tweet: { __id: 'relay-tweet', __fragments: {} },
+    variants: [variant(1920, 1080, 1000, '999')]
+  } };
+  const player = { memoizedProps: props, return: enclosing };
+  const video = new Video();
+  video.parentElement = { __reactFiber$test: { return: player,
+    sibling: { memoizedProps: { downloadUrl: variant(1920, 1080, 1000, '888').url } } } };
+  request({ target: video });
+  assert.equal(response.variants.length, 1);
+  assert.equal(response.variants[0].url, url);
+  assert.equal(response.metadata.handle, 'example');
+  assert.equal(response.metadata.tweetId, props.content.tweetId);
+  assert.equal(response.metadata.displayName, 'Example Person');
+
+  const downloads = [];
+  const api = load({ fetch: rangeFetch(Buffer.concat([ftyp, movie('vide', 'soun'), mdat])),
+    chrome: { downloads: { async download(options) { downloads.push(options); return 42; } } } });
+  const result = await api.start(response.variants, response.metadata);
+  assert.equal(result.width, 576);
+  assert.equal(result.height, 736);
+  assert.equal(downloads[0].url, url);
+  assert.equal(downloads[0].filename, '@example 2109434534303277471 Example Person.mp4');
+
+  // Reused player props are read at click time; no stale cached download URL.
+  props.downloadUrl = variant(1280, 720, 1000, id).url;
+  request({ target: video });
+  assert.equal(response.variants[0].url, props.downloadUrl);
+
+  // A mismatched source must fail without taking the enclosing video's URL.
+  props.content.contentId = '999';
+  request({ target: video });
+  assert.deepEqual(response.variants, []);
+  props.content.contentId = id;
+  props.src = 'https://video.twimg.com/amplify_video/999/pl/other.m3u8';
+  request({ target: video });
+  assert.deepEqual(response.variants, []);
+  props.src = `https://video.twimg.com/amplify_video/${id}/pl/playlist.m3u8`;
+  props.content.mediaAssetUrl = 'https://video.twimg.com/amplify_video/999/pl/other.m3u8';
+  request({ target: video });
+  assert.deepEqual(response.variants, []);
+  delete props.content.mediaAssetUrl;
+
+  // Never borrow attribution from a quote's enclosing post or foreign URL.
+  for (const permalink of [
+    'https://x.com/quoteAuthor/status/999/video/1',
+    'https://evil.example/example/status/2109434534303277471/video/1',
+    'https://user@x.com/example/status/2109434534303277471/video/1'
+  ]) {
+    props.mediaPermalink = permalink;
+    request({ target: video });
+    assert.equal(response.metadata.handle, undefined);
+  }
+  delete props.content;
+  request({ target: video });
+  assert.deepEqual(response.metadata, {});
+  assert.equal(response.variants[0].url, props.downloadUrl);
+
+  // The service worker remains responsible for rejecting untrusted media.
+  for (const unsafe of [
+    props.downloadUrl.replace('video.twimg.com', 'evil.example'),
+    `https://video.twimg.com/amplify_video/${id}/vid/avc1/0/0/init.mp4`,
+    `https://video.twimg.com/amplify_video/${id}/aud/mp4a/audio.mp4`,
+    `https://video.twimg.com/amplify_video/${id}/pl/playlist.m3u8`
+  ]) {
+    props.downloadUrl = unsafe;
+    request({ target: video });
+    await assert.rejects(api.start(response.variants, response.metadata), /no_mp4/);
+  }
+  assert.equal(downloads.length, 1);
+  delete props.downloadUrl;
+  delete enclosing.memoizedProps.variants;
+  request({ target: video });
+  assert.deepEqual(response.variants, [], 'HLS alone cannot supply a complete MP4');
+});
+
 test('page bridge associates metadata with matching media, including quotes, reposts and empty text', () => {
   let request;
   let response;
