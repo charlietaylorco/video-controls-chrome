@@ -39,19 +39,41 @@
     return { variants: [{ url: props.downloadUrl, type: "video/mp4" }], metadata };
   };
 
+  const metadataFromTweet = (tweet) => {
+    const legacy = tweet.legacy || tweet;
+    const result = tweet.core?.user_results?.result;
+    const user = result?.user || result || tweet.user || legacy.user || {};
+    return {
+      handle: boundedText(user.core?.screen_name || user.legacy?.screen_name || user.screen_name, 16),
+      displayName: boundedText(user.core?.name || user.legacy?.name || user.name, 500),
+      tweetId: boundedText(tweet.rest_id || legacy.id_str, 25),
+      text: boundedText(tweet.note_tweet?.note_tweet_results?.result?.text || tweet.details?.full_text || legacy.full_text || legacy.text, 2000)
+    };
+  };
+
+  const metadataForRelayFiber = (fiber, tweetId) => {
+    if (typeof tweetId !== "string" || !/^\d{1,25}$/.test(tweetId)) return null;
+    // Relay props are fragment references. Its resolved post text is in a
+    // hook snapshot on this player's ancestor chain. Read only matching post
+    // data; never traverse the environment, store, or other timeline records.
+    const visited = new Set();
+    for (let hook = fiber.memoizedState; hook && !visited.has(hook) && visited.size < 64; hook = hook.next) {
+      visited.add(hook);
+      const tweet = hook.memoizedState?.snapshot?.data;
+      if (tweet?.rest_id !== tweetId) continue;
+      const metadata = metadataFromTweet(tweet);
+      if (metadata.text !== undefined) return metadata;
+    }
+    return null;
+  };
+
   const metadataForTweet = (tweet, selectedMediaId, depth = 0) => {
     if (!tweet || typeof tweet !== "object" || depth > 3) return null;
     const legacy = tweet.legacy || tweet;
     const media = legacy.extended_entities?.media || legacy.entities?.media || [];
     if (selectedMediaId && Array.isArray(media) && media.some((item) =>
       Array.isArray(item?.video_info?.variants) && item.video_info.variants.some((variant) => mediaId(variant?.url || variant?.src) === selectedMediaId))) {
-      const user = tweet.core?.user_results?.result || tweet.user || legacy.user || {};
-      return {
-        handle: boundedText(user.core?.screen_name || user.legacy?.screen_name || user.screen_name, 16),
-        displayName: boundedText(user.core?.name || user.legacy?.name || user.name, 500),
-        tweetId: boundedText(tweet.rest_id || legacy.id_str, 25),
-        text: boundedText(tweet.note_tweet?.note_tweet_results?.result?.text || legacy.full_text || legacy.text, 2000)
-      };
+      return metadataFromTweet(tweet);
     }
     // Quoted and reposted videos belong to their own post. Never use the
     // enclosing tweet's author/text unless its own media matches this player.
@@ -98,6 +120,11 @@
           const selectedMediaId = variants.map((variant) => mediaId(variant.url)).find(Boolean);
           const metadata = metadataForTweet(props?.tweet, selectedMediaId);
           if (metadata) return { variants, metadata };
+          const relayMetadata = metadataForRelayFiber(fiber, playerMetadata.tweetId);
+          if (relayMetadata) return {
+            variants,
+            metadata: { ...playerMetadata, ...Object.fromEntries(Object.entries(relayMetadata).filter(([, value]) => value !== undefined)) }
+          };
         }
       }
       // Do not search a wider post/timeline if this player has no variants.
