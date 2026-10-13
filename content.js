@@ -861,7 +861,7 @@
   };
 
   const updateIntegrationVisibility = () => {
-    xDownloadButton.hidden = !isXDownloadPage || isXBroadcastPage() || !activeVideo || activeMode === "card";
+    xDownloadButton.hidden = !isXDownloadPage || !activeVideo || activeMode === "card";
     downieButton.hidden = !settings.showDownie;
     const pageUrl = getAssociatedPageUrl(getCurrentContextSource());
     raindropButton.hidden = !settings.showRaindrop || !isYouTubeReaderSaveUrl(pageUrl);

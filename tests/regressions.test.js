@@ -44,7 +44,7 @@ test('Downie prefers an X Broadcast page over its temporary direct stream URL', 
   }
 });
 
-test('Broadcast controls use the page URL for Downie and hide the unsupported direct download action', () => {
+test('Broadcast controls use the page URL for Downie and retain the direct download action', () => {
   const source = fs.readFileSync(path.join(root, 'content.js'), 'utf8');
   const helper = (name) => {
     const start = source.indexOf(`  const ${name} =`);
@@ -69,7 +69,7 @@ test('Broadcast controls use the page URL for Downie and hide the unsupported di
   assert.equal(context.api.getAssociatedPageUrl(new Element()), window.location.href);
   assert.equal(context.api.getDirectVideoUrl({ currentSrc: 'https://video.pscp.tv/temporary.m3u8' }), null);
   context.api.updateIntegrationVisibility();
-  assert.equal(xDownloadButton.hidden, true);
+  assert.equal(xDownloadButton.hidden, false);
   assert.equal(context.downieButton.hidden, false);
   window.location = new URL('https://x.com/example/status/123');
   assert.equal(context.api.isXBroadcastPage(), false, 'SPA navigation is evaluated at hover/click time');

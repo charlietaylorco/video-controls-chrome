@@ -17,7 +17,7 @@ Minimal Chrome extension that injects a compact hover-only speed controller into
 
 ## X/Twitter downloads
 
-X Broadcasts use the **Open in Downie** button in the same hover controls. The extension sends the Broadcast page URL so Downie can resolve its stream and title; the direct MP4 download button is hidden on Broadcast pages. Downie manages the download and filename.
+X Broadcasts offer both the direct MP4 download button and **Open in Downie** in the same hover controls. The direct button uses the existing MP4 detection and audio verification; if the player does not expose a complete MP4, it reports an error. The Downie button sends the Broadcast page URL so Downie can resolve its stream and title. Downie manages its download and filename.
 
 If the controls do not appear, check the extension's **Site access** in `chrome://extensions`. With **On click** access, activate the extension from its toolbar button on the X tab and reload the page if prompted. Hover controls require access to that page.
 
