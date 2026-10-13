@@ -70,6 +70,12 @@ const isPreferredVideoPageUrl = (value) => {
   try {
     const url = new URL(value);
 
+    if (url.protocol === "https:" && !url.port &&
+        ["x.com", "www.x.com", "twitter.com", "www.twitter.com", "mobile.twitter.com"].includes(url.hostname) &&
+        /^\/i\/broadcasts\/[A-Za-z0-9]{1,32}\/?$/.test(url.pathname)) {
+      return true;
+    }
+
     if (isYouTubeWatchUrl(url)) {
       return true;
     }

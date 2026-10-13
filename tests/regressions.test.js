@@ -25,11 +25,56 @@ function loadBackgroundHelpers(overrides = {}) {
   };
   const source = fs.readFileSync(path.join(root, 'background.js'), 'utf8');
   vm.runInNewContext(
-    `${source}\nglobalThis.__helpers = { isYouTubeVideoPageUrl, normalizeTargetUrl, isPreferredVideoPageUrl, fetchHtml };`,
+    `${source}\nglobalThis.__helpers = { isYouTubeVideoPageUrl, normalizeTargetUrl, isPreferredVideoPageUrl, pickTargetUrl, fetchHtml };`,
     context
   );
   return { ...context.__helpers, onMessage: listeners[0] };
 }
+
+test('Downie prefers an X Broadcast page over its temporary direct stream URL', () => {
+  const { isPreferredVideoPageUrl, pickTargetUrl } = loadBackgroundHelpers();
+  const pageUrl = 'https://x.com/i/broadcasts/1nGeLMdpnooKX';
+  assert.equal(isPreferredVideoPageUrl(pageUrl), true);
+  assert.equal(isPreferredVideoPageUrl('https://twitter.com/i/broadcasts/1nGeLMdpnooKX/'), true);
+  assert.equal(pickTargetUrl({ pageUrl, videoUrl: 'https://video.pscp.tv/temporary.m3u8' }, {}), pageUrl);
+  for (const url of [pageUrl.replace('https:', 'http:'), pageUrl.replace('x.com', 'x.com.evil.example'),
+    pageUrl.replace('x.com', 'user@x.com'), pageUrl.replace('x.com', 'x.com:444'),
+    'https://x.com/i/broadcasts/', pageUrl + '/chat']) {
+    assert.equal(isPreferredVideoPageUrl(url), false);
+  }
+});
+
+test('Broadcast controls use the page URL for Downie and hide the unsupported direct download action', () => {
+  const source = fs.readFileSync(path.join(root, 'content.js'), 'utf8');
+  const helper = (name) => {
+    const start = source.indexOf(`  const ${name} =`);
+    const end = source.indexOf('\n  const ', start + 1);
+    assert.ok(start >= 0 && end > start);
+    return source.slice(start, end);
+  };
+  class Element {}
+  const window = { location: new URL('https://x.com/i/broadcasts/1nGeLMdpnooKX') };
+  window.top = window;
+  const xDownloadButton = {};
+  const context = { window, Element, activeVideo: new Element(), activeMode: 'player', xDownloadButton,
+    downieButton: {}, readerButton: {}, raindropButton: {},
+    settings: { showDownie: true }, isYouTubeReaderSaveUrl: () => false,
+    getCurrentContextSource: () => new Element() };
+  vm.runInNewContext([
+    helper('isXDownloadPage'), helper('isXBroadcastPage'), helper('getDirectVideoUrl'),
+    helper('getAssociatedPageUrl'), helper('updateIntegrationVisibility'),
+    'globalThis.api = { isXBroadcastPage, getDirectVideoUrl, getAssociatedPageUrl, updateIntegrationVisibility };'
+  ].join('\n'), context);
+  assert.equal(context.api.isXBroadcastPage(), true);
+  assert.equal(context.api.getAssociatedPageUrl(new Element()), window.location.href);
+  assert.equal(context.api.getDirectVideoUrl({ currentSrc: 'https://video.pscp.tv/temporary.m3u8' }), null);
+  context.api.updateIntegrationVisibility();
+  assert.equal(xDownloadButton.hidden, true);
+  assert.equal(context.downieButton.hidden, false);
+  window.location = new URL('https://x.com/example/status/123');
+  assert.equal(context.api.isXBroadcastPage(), false, 'SPA navigation is evaluated at hover/click time');
+  assert.equal(context.api.getDirectVideoUrl({ currentSrc: 'https://video.twimg.com/example.mp4' }), 'https://video.twimg.com/example.mp4');
+});
 
 function loadDownieButtonState() {
   const source = fs.readFileSync(path.join(root, 'feed.js'), 'utf8');

@@ -17,6 +17,10 @@ Minimal Chrome extension that injects a compact hover-only speed controller into
 
 ## X/Twitter downloads
 
+X Broadcasts use the **Open in Downie** button in the same hover controls. The extension sends the Broadcast page URL so Downie can resolve its stream and title; the direct MP4 download button is hidden on Broadcast pages. Downie manages the download and filename.
+
+If the controls do not appear, check the extension's **Site access** in `chrome://extensions`. With **On click** access, activate the extension from its toolbar button on the X tab and reload the page if prompted. Hover controls require access to that page.
+
 After updating the extension, reload it in `chrome://extensions` (also in Arc), then reload any open X tabs. Open/play an accessible video, signed in or logged out, and hover over it to use **Download highest-quality X video with audio**. The file is saved through the browser's normal downloads flow; check the browser's Downloads list for progress, completion, or an interrupted transfer.
 
 Filenames use `@handle tweet-id Display Name Tweet text….mp4`. Tweet text is capped at 80 characters, with whole emoji preserved; invalid filename characters and line breaks become spaces. Very long names/text are shortened further to fit filesystem limits. The ID is always included, even for posts without text. Missing names/text are omitted; if post metadata cannot be identified, the filename falls back to `x-video media-<media-id>.mp4`. Metadata is matched to the selected video, including quoted/reposted videos, and duplicate downloads receive the browser's normal numbered suffix.
