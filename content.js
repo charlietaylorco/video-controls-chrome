@@ -49,6 +49,7 @@
   const HOST_Z_INDEX = "1000";
   const isXDownloadPage = window.top === window && window.location.protocol === "https:" &&
     ["x.com", "www.x.com", "twitter.com", "www.twitter.com", "mobile.twitter.com"].includes(window.location.hostname);
+  const isXBroadcastPage = () => isXDownloadPage && /^\/i\/broadcasts\/[A-Za-z0-9]{1,32}\/?$/.test(window.location.pathname);
   const pendingXDownloads = new WeakSet();
 
   const requestXVideoDetails = (video) => new Promise((resolve, reject) => {
@@ -2322,7 +2323,9 @@
   };
 
   const getDirectVideoUrl = (video) => {
-    if (!video) {
+    // Downie resolves Broadcasts from their page URL, including the stream and
+    // its title. Blob/playlist URLs alone lose that page context.
+    if (!video || isXBroadcastPage()) {
       return null;
     }
 
@@ -2431,6 +2434,10 @@
   const getAssociatedPageUrl = (source) => {
     if (!(source instanceof Element)) {
       return null;
+    }
+
+    if (isXBroadcastPage()) {
+      return window.location.href;
     }
 
     const container = getVideoCardContainer(source);
