@@ -14,24 +14,29 @@
       chrome.runtime.lastError ? reject(new Error('storage_error')) : resolve()));
     const mutate = (fn) => {
       const result = storageQueue.then(async () => {
-        const data = await read({ [KEY]: {} });
+        const data = await read({ [KEY]: {}, readerDeletedVideos: {} });
         const index = data[KEY] && typeof data[KEY] === 'object' ? data[KEY] : {};
-        await fn(index);
+        const deleted = data.readerDeletedVideos && typeof data.readerDeletedVideos === 'object' ? data.readerDeletedVideos : {};
+        const patch = {};
+        await fn(index, deleted, patch);
         const entries = Object.entries(index).filter(([url, v]) => C.canonical(url) === url && C.validId(v?.id))
           .sort((a, b) => b[1].at - a[1].at).slice(0, 2000);
-        await write({ [KEY]: Object.fromEntries(entries) });
+        const markers = Object.entries(deleted).filter(([url, v]) => C.canonical(url) === url && C.validId(v?.id) && Number.isFinite(v.at))
+          .sort((a, b) => b[1].at - a[1].at).slice(0, 2000);
+        await write({ ...patch, [KEY]: Object.fromEntries(entries), readerDeletedVideos: Object.fromEntries(markers) });
       });
       storageQueue = result.catch(() => {});
       return result;
     };
     // Existing one-click saves publish their timestamp flags and document id in
     // the same storage queue as deletion, so a late delete cannot erase a new save.
-    const remember = (url, id, markSaved) => mutate(async index => {
+    const remember = (url, id, markSaved) => mutate(async (index, deleted) => {
       await markSaved?.();
       if (C.canonical(url) && C.validId(id)) index[C.canonical(url)] = { id, at: now() };
+      if (C.canonical(url) && (C.validId(id) || markSaved)) delete deleted[C.canonical(url)];
     });
     const forget = (url, id) => mutate(index => { if (index[url]?.id === id) delete index[url]; });
-    const forgetDeleted = (url, id) => mutate(async index => {
+    const forgetDeleted = (url, id, confirmedDeletion = false) => mutate(async (index, deleted, patch) => {
       const replacement = index[url] && index[url].id !== id;
       for (const [key, value] of Object.entries(index)) if (value?.id === id) delete index[key];
       const data = await read({ readerSavedUrls: {} });
@@ -44,8 +49,21 @@
         } catch { /* legacy flags may contain non-URLs */ }
         if ((!replacement && C.canonical(key) === url) || readerId === id) delete flags[key];
       }
-      await write({ readerSavedUrls: flags });
+      patch.readerSavedUrls = flags;
+      // Absence alone is not evidence that this extension performed a deletion.
+      if (confirmedDeletion && !replacement) deleted[url] = { id, at: now() };
     });
+    const savedState = async value => {
+      const url = C.canonical(value);
+      if (!url) return { saved: false, deleted: false };
+      await storageQueue;
+      const data = await read({ [KEY]: {}, readerSavedUrls: {}, readerDeletedVideos: {} });
+      const marker = data.readerDeletedVideos?.[url], mapped = data[KEY]?.[url];
+      const newer = C.validId(mapped?.id) && mapped.id !== marker?.id && mapped.at >= (marker?.at || 0);
+      const deleted = C.validId(marker?.id) && !newer;
+      const saved = !deleted && (C.validId(mapped?.id) || Object.entries(data.readerSavedUrls || {}).some(([key, at]) => at && C.canonical(key) === url));
+      return { saved: Boolean(saved), deleted: Boolean(deleted), url };
+    };
     const error = (code, extra = {}) => Object.assign(new Error(code), { code, ...extra });
     const api = async (path, init = {}) => {
       const { readerToken, readerPanelBudget = {} } = await read({ readerToken: '', readerPanelBudget: {} });
@@ -99,6 +117,7 @@
         else await forget(url, id);
         throw error('not_found');
       }
+      if ((await read({ readerDeletedVideos: {} })).readerDeletedVideos?.[url]) await remember(url, clean.id);
       return clean;
     };
     const get = async (message) => {
@@ -116,10 +135,13 @@
       const data = await api(`list/?category=video&limit=100${cursor ? `&pageCursor=${encodeURIComponent(cursor)}` : ''}`);
       const matches = data.results.map(doc => C.cleanDocument(doc, url)).filter(Boolean);
       if (matches.length > 1) throw error('ambiguous');
-      await mutate(index => {
+      await mutate((index, deleted) => {
         for (const doc of data.results) {
           const videoUrl = C.canonical(doc.source_url);
-          if (C.cleanDocument(doc, videoUrl) && !index[videoUrl]) index[videoUrl] = { id: doc.id, at: now() };
+          if (C.cleanDocument(doc, videoUrl)) {
+            if (!index[videoUrl]) index[videoUrl] = { id: doc.id, at: now() };
+            delete deleted[videoUrl];
+          }
         }
       });
       if (matches[0]) return { ok: true, document: matches[0] };
@@ -163,13 +185,40 @@
       let alreadyDeleted = false;
       try { await api(`delete/${encodeURIComponent(id)}/`, { method: 'DELETE' }); }
       catch (e) { if (e.code !== 'not_found') throw e; alreadyDeleted = true; }
-      try { await forgetDeleted(url, id); }
+      try { await forgetDeleted(url, id, !alreadyDeleted); }
       catch { throw error('delete_cache_error'); }
       return { ok: true, id, alreadyDeleted };
     };
+    const getCard = async (message) => {
+      const url = C.canonical(message.targetUrl);
+      if (!url) throw error('invalid_request');
+      await storageQueue;
+      const data = await read({ [KEY]: {}, readerSavedUrls: {}, readerCardDiscoveryAt: 0 });
+      const id = data[KEY]?.[url]?.id;
+      if (C.validId(id)) {
+        try { return { ok: true, document: await byId(url, id) }; }
+        catch (e) { if (e.code !== 'not_found') throw e; return { ok: true, document: null, code: 'unlinked' }; }
+      }
+      if (!Object.entries(data.readerSavedUrls || {}).some(([key, saved]) => Boolean(saved) && C.canonical(key) === url))
+        return { ok: true, document: null, code: 'not_saved' };
+      // Shared, persisted cold-cache budget: one page total, no pagination on hover.
+      if (data.readerCardDiscoveryAt > 0 && now() - data.readerCardDiscoveryAt < 60000)
+        return { ok: true, document: null, code: 'unlinked' };
+      await write({ readerCardDiscoveryAt: now() });
+      const result = await get({ pageUrl: url });
+      return { ok: true, document: result.document, code: result.document ? undefined : 'unlinked' };
+    };
+    const deleteCard = async (message) => {
+      const url = C.canonical(message.targetUrl);
+      await storageQueue;
+      if (!url || !C.validId(message.id) || (await read({ [KEY]: {} }))[KEY]?.[url]?.id !== message.id)
+        throw error('document_changed');
+      return deleteDocument({ ...message, pageUrl: url });
+    };
     const handle = (message, { isCurrent = () => true, scope = null } = {}) => {
       // Never share a rejected/stale visit's reply with a new visit or another tab.
-      const key = message.type === 'reader-panel-get' ? JSON.stringify([scope, message.pageUrl, message.cursor, message.visit]) : null;
+      const key = ['reader-panel-get', 'reader-card-get'].includes(message.type)
+        ? JSON.stringify([message.type, scope, message.pageUrl, message.targetUrl, message.cursor, message.visit]) : null;
       if (key && pending.has(key)) return pending.get(key);
       const result = operationQueue.then(async () => {
         operationIsCurrent = isCurrent;
@@ -178,6 +227,8 @@
         if (message.type === 'reader-panel-get') return get(message);
         if (message.type === 'reader-panel-save-note') return saveNote(message);
         if (message.type === 'reader-panel-delete') return deleteDocument(message);
+        if (message.type === 'reader-card-get') return getCard(message);
+        if (message.type === 'reader-card-delete') return deleteCard(message);
         throw error('invalid_request');
       })
         .catch(e => ({ ok: false, code: e.code || 'storage_error', retryAt: e.retryAt }));
@@ -185,7 +236,7 @@
       if (key) { pending.set(key, result); result.finally(() => pending.delete(key)); }
       return result;
     };
-    return { remember, handle };
+    return { remember, handle, savedState };
   };
   globalThis.MVSReaderService = { create };
 })();

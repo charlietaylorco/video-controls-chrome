@@ -390,6 +390,11 @@
       .icon-button[data-reader-saved="true"] svg {
         fill: rgba(213, 255, 228, 0.18);
       }
+      .reader-slash-gap,.reader-slash{display:none}
+      .icon-button[data-reader-deleted="true"]{color:#ff8585;background:rgba(255,80,80,.14)}
+      .icon-button[data-reader-deleted="true"] .reader-bookmark{fill:currentColor;stroke:currentColor}
+      .icon-button[data-reader-deleted="true"] .reader-slash-gap{display:block;stroke:#181818;stroke-width:5;fill:none}
+      .icon-button[data-reader-deleted="true"] .reader-slash{display:block;stroke:currentColor;stroke-width:2;fill:none}
 
       .icon-button[data-downie-sent="true"] {
         background: rgba(199, 255, 219, 0.18);
@@ -518,7 +523,8 @@
         </button>
         <button class="icon-button" data-action="reader" type="button" aria-label="Save page to Reader" title="Save page to Reader">
           <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M8 4.5h8A1.5 1.5 0 0 1 17.5 6v13l-5.5-3.25L6.5 19V6A1.5 1.5 0 0 1 8 4.5Z"></path>
+            <path class="reader-bookmark" d="M8 4.5h8A1.5 1.5 0 0 1 17.5 6v13l-5.5-3.25L6.5 19V6A1.5 1.5 0 0 1 8 4.5Z"></path>
+            <path class="reader-slash-gap" d="M3 3 21 21"></path><path class="reader-slash" d="M3 3 21 21"></path>
           </svg>
         </button>
         <button class="icon-button" data-action="raindrop" type="button" aria-label="Save video to Raindrop" title="Save video to Raindrop" hidden>
@@ -560,6 +566,8 @@
   let raindropSavedStateToken = 0;
   const downieSentUrlCache = new Map();
   const readerSavedUrlCache = new Map();
+  const readerDeletedUrlCache = new Map();
+  let readerCardPreview = null;
   const raindropSavedUrlCache = new Map();
   let dragState = null;
   let overlayPositionX = null;
@@ -649,6 +657,7 @@
   };
 
   const hidePanel = () => {
+    readerCardPreview?.close();
     clearHideTimer();
     clearIdleHideTimer();
     hintedVideo = null;
@@ -922,11 +931,14 @@
     });
   };
 
-  const setReaderSavedState = (saved) => {
-    readerButton.dataset.readerSaved = String(Boolean(saved));
-    const label = saved ? "Saved in Reader" : "Save page to Reader";
+  const readerStateKey = value => globalThis.MVSReaderCore?.canonical(value) || normalizeYouTubeStateUrl(value);
+  const setReaderSavedState = (saved, deleted = false) => {
+    readerButton.dataset.readerSaved = String(Boolean(saved) && !deleted);
+    readerButton.dataset.readerDeleted = String(Boolean(deleted));
+    const label = deleted ? "Deleted from Reader by this extension. Click to save again" : saved ? "Saved in Reader" : "Save page to Reader";
     readerButton.title = label;
     readerButton.setAttribute("aria-label", label);
+    readerCardPreview?.update();
   };
 
   const refreshReaderSavedState = () => {
@@ -936,7 +948,7 @@
 
     const source = getCurrentContextSource();
     const pageUrl = getAssociatedPageUrl(source);
-    const cacheKey = normalizeYouTubeStateUrl(pageUrl);
+    const cacheKey = readerStateKey(pageUrl);
     const token = ++readerSavedStateToken;
 
     if (!isYouTubeReaderSaveUrl(pageUrl)) {
@@ -945,7 +957,7 @@
     }
 
     if (readerSavedUrlCache.has(cacheKey)) {
-      setReaderSavedState(readerSavedUrlCache.get(cacheKey));
+      setReaderSavedState(readerSavedUrlCache.get(cacheKey), readerDeletedUrlCache.get(cacheKey));
       return;
     }
 
@@ -958,19 +970,23 @@
       if (
         token !== readerSavedStateToken ||
         error ||
-        getCurrentContextSource() !== source
+        !response?.ok ||
+        getCurrentContextSource() !== source || readerStateKey(getAssociatedPageUrl(source)) !== cacheKey
       ) {
         return;
       }
 
       const saved = Boolean(response?.saved);
+      const deleted = Boolean(response?.deleted);
       readerSavedUrlCache.set(cacheKey, saved);
+      readerDeletedUrlCache.set(cacheKey, deleted);
 
       if (response?.url && response.url !== pageUrl) {
-        readerSavedUrlCache.set(normalizeYouTubeStateUrl(response.url), saved);
+        readerSavedUrlCache.set(readerStateKey(response.url), saved);
+        readerDeletedUrlCache.set(readerStateKey(response.url), deleted);
       }
 
-      setReaderSavedState(saved);
+      setReaderSavedState(saved, deleted);
     });
   };
 
@@ -1168,7 +1184,7 @@
     clearHideTimer();
     clearIdleHideTimer();
     hideTimer = window.setTimeout(() => {
-      if (activePanel) {
+      if (activePanel || shadowRoot.activeElement || readerCardPreview?.isActive()) {
         return;
       }
 
@@ -1187,6 +1203,7 @@
 
   const hidePanelForIdle = () => {
     clearIdleHideTimer();
+    if (shadowRoot.activeElement || readerCardPreview?.isActive()) return;
 
     if (panel.dataset.visible !== "true") {
       return;
@@ -1206,6 +1223,8 @@
     if (
       delayMs <= 0 ||
       activePanel ||
+      shadowRoot.activeElement ||
+      readerCardPreview?.isActive() ||
       dragState ||
       panel.dataset.visible !== "true" ||
       !(hoveredTarget || hoveredVideo)
@@ -1214,7 +1233,7 @@
     }
 
     idleHideTimer = window.setTimeout(() => {
-      if (activePanel || dragState) {
+      if (activePanel || shadowRoot.activeElement || dragState || readerCardPreview?.isActive()) {
         return;
       }
 
@@ -2939,6 +2958,7 @@
     if (action === "reader") {
       const source = getCurrentContextSource();
       const pageUrl = getAssociatedPageUrl(source);
+      const savedVideoKey = readerStateKey(pageUrl);
       const title = getAssociatedTitle(source);
       const author = getAssociatedAuthor(source);
       const shouldOpenExisting = button.dataset.readerSaved === "true";
@@ -2960,15 +2980,20 @@
         void sendRuntimeMessage({ type: "open-options" });
       }
 
-      if (getCurrentContextSource() === source) {
+      if (response?.ok && !error) {
+        ++readerSavedStateToken;
+        readerSavedUrlCache.set(savedVideoKey, true); readerDeletedUrlCache.set(savedVideoKey, false);
+      }
+
+      if (getCurrentContextSource() === source && readerStateKey(getAssociatedPageUrl(source)) === savedVideoKey) {
         setButtonStatus(button, response?.ok && !error ? "success" : "error");
         if (response?.ok && !error) {
           if (pageUrl) {
-            readerSavedUrlCache.set(normalizeYouTubeStateUrl(pageUrl), true);
+            readerSavedUrlCache.set(readerStateKey(pageUrl), true); readerDeletedUrlCache.set(readerStateKey(pageUrl), false);
           }
 
           if (response.url) {
-            readerSavedUrlCache.set(normalizeYouTubeStateUrl(response.url), true);
+            readerSavedUrlCache.set(readerStateKey(response.url), true); readerDeletedUrlCache.set(readerStateKey(response.url), false);
           }
 
           setReaderSavedState(true);
@@ -2979,7 +3004,7 @@
             url: response.url
           });
 
-          if (getCurrentContextSource() !== source) {
+          if (getCurrentContextSource() !== source || readerStateKey(getAssociatedPageUrl(source)) !== savedVideoKey) {
             clearButtonStatus(button);
             return;
           }
@@ -3002,6 +3027,7 @@
         );
       } else {
         clearButtonStatus(button);
+        refreshReaderSavedState();
       }
 
       return;
@@ -3016,12 +3042,44 @@
     }
   }));
 
+  // Only a unique video link inside the actual card can be a preview target.
+  // Never fall back to the active watch URL for a missing/recycled card link.
+  const getReaderCardTarget = () => {
+    if (activeMode !== "card" || !settings.showReader || panel.dataset.visible !== "true") return null;
+    const source = getVideoCardContainer(getCurrentContextSource());
+    if (!source?.isConnected) return null;
+    const urls = new Set(Array.from(source.querySelectorAll("a[href]"))
+      .map(anchor => globalThis.MVSReaderCore?.canonical(anchor.href)).filter(Boolean));
+    if (urls.size !== 1) return null;
+    const videoUrl = urls.values().next().value;
+    return { source, videoUrl, title: getAssociatedTitle(source),
+      saved: readerButton.dataset.readerSaved === "true" && readerSavedUrlCache.get(readerStateKey(getAssociatedPageUrl(source))) === true };
+  };
+  if (window.top === window && globalThis.MVSReaderCore?.youtubeOrigin(location.href) && globalThis.MVSReaderCardPreview) {
+    readerCardPreview = MVSReaderCardPreview.create({ button: readerButton, getTarget: getReaderCardTarget,
+      onHold() { activePanel = true; clearHideTimer(); clearIdleHideTimer(); stopPreview(); },
+      onClose() { activePanel = false; scheduleHide(); scheduleIdleHide(); },
+      onDeleted() { ++readerSavedStateToken; readerSavedUrlCache.clear(); readerDeletedUrlCache.clear(); refreshReaderSavedState(); }
+    });
+  }
+
   panel.addEventListener("pointerenter", () => {
     activePanel = true;
     clearHideTimer();
     clearIdleHideTimer();
     hideHoverZoneHint();
     stopPreview();
+  });
+
+  panel.addEventListener("focusin", () => {
+    activePanel = true; clearHideTimer(); clearIdleHideTimer(); stopPreview();
+  });
+  panel.addEventListener("focusout", () => {
+    window.setTimeout(() => {
+      if (!shadowRoot.activeElement && !readerCardPreview?.isActive()) {
+        activePanel = false; scheduleHide(); scheduleIdleHide();
+      }
+    }, 0);
   });
 
   panel.addEventListener("pointerleave", () => {
@@ -3085,7 +3143,7 @@
         return;
       }
 
-      const inPanel = event.composedPath().includes(panel);
+      const inPanel = event.composedPath().includes(panel) || readerCardPreview?.owns(event);
 
       if (inPanel) {
         activePanel = true;
@@ -3320,6 +3378,8 @@
           !changes.showRaindrop &&
           !changes.iconOrder &&
           !changes.readerSavedUrls &&
+          !changes.readerDeletedVideos &&
+          !changes.readerDocuments &&
           !changes.raindropSavedUrls &&
           !changes.downieSentUrls
         )
@@ -3409,8 +3469,8 @@
         raindropSavedUrlCache.clear();
       }
 
-      if (changes.readerSavedUrls) {
-        readerSavedUrlCache.clear();
+      if (changes.readerSavedUrls || changes.readerDeletedVideos || changes.readerDocuments) {
+        ++readerSavedStateToken; readerSavedUrlCache.clear(); readerDeletedUrlCache.clear();
       }
 
       refreshDownieSentState();

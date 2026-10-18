@@ -6,6 +6,41 @@ const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '..');
 
+test('Reader deleted state uses accessible slashed SVG styling and re-save restores the saved state', () => {
+  const source = fs.readFileSync(path.join(root, 'content.js'), 'utf8');
+  const helper = source.match(/  const setReaderSavedState = \([\s\S]*?\n  \};/)[0];
+  const readerButton = { dataset: {}, setAttribute(name, value) { this[name] = value; } };
+  const context = { readerButton, readerCardPreview: null };
+  vm.runInNewContext(helper + '\nglobalThis.setState = setReaderSavedState;', context);
+  context.setState(true, true);
+  assert.equal(readerButton.dataset.readerSaved, 'false'); assert.equal(readerButton.dataset.readerDeleted, 'true');
+  assert.match(readerButton['aria-label'], /Deleted from Reader by this extension.*save again/);
+  context.setState(true, false);
+  assert.equal(readerButton.dataset.readerDeleted, 'false'); assert.equal(readerButton['aria-label'], 'Saved in Reader');
+  assert.match(source, /class="reader-slash"/); assert.match(source, /data-reader-deleted="true"[^}]*color:#ff8585/);
+});
+
+test('Reader saved-state responses cannot paint a recycled card and canonical aliases reuse deleted state', async () => {
+  const source = fs.readFileSync(path.join(root, 'content.js'), 'utf8');
+  const helper = source.match(/  const refreshReaderSavedState = \([\s\S]*?\n  \};/)[0];
+  const C = require('../reader-core.js'), A = 'https://www.youtube.com/watch?v=alpha', B = 'https://www.youtube.com/watch?v=beta';
+  const pending = [], states = [];
+  let current = { url: A };
+  const context = { settings: { showReader: true }, panel: { dataset: { visible: 'true' } }, readerSavedStateToken: 0,
+    readerSavedUrlCache: new Map(), readerDeletedUrlCache: new Map(), readerStateKey: C.canonical,
+    getCurrentContextSource: () => current, getAssociatedPageUrl: node => node.url, isYouTubeReaderSaveUrl: value => Boolean(C.canonical(value)),
+    setReaderSavedState: (saved, deleted) => states.push({ saved: Boolean(saved), deleted: Boolean(deleted) }),
+    sendRuntimeMessage: () => new Promise(resolve => pending.push(resolve)) };
+  vm.runInNewContext(helper + '\nglobalThis.refresh = refreshReaderSavedState;', context);
+  context.refresh(); current.url = B;
+  pending.shift()({ response: { ok: true, saved: false, deleted: true, url: A } }); await new Promise(setImmediate);
+  assert.equal(states.some(s => s.deleted), false); assert.equal(context.readerSavedUrlCache.size, 0);
+  current = { url: A }; context.refresh(); pending.shift()({ response: { ok: true, saved: false, deleted: true, url: A } }); await new Promise(setImmediate);
+  assert.equal(states.at(-1).deleted, true);
+  current = { url: 'https://youtu.be/alpha?t=30' }; context.refresh();
+  assert.equal(pending.length, 0); assert.equal(states.at(-1).deleted, true);
+});
+
 function loadBackgroundHelpers(overrides = {}) {
   const listeners = [];
   const context = {

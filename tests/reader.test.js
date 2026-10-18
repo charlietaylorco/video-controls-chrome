@@ -9,9 +9,10 @@ const B = 'https://www.youtube.com/watch?v=beta';
 const doc = (id = 'doc-a', source_url = A, notes = 'Original') => ({
   id, source_url, notes, title: 'A Reader video', summary: 'Summary from Reader', tags: { science: { name: 'Science' } }, parent_id: null,
 });
-function harness({ stored = {}, responder, tabUrl = A } = {}) {
+function harness({ stored = {}, responder, tabUrl = A, cardValid = true } = {}) {
   const data = { readerToken: 'fixture-token', ...structuredClone(stored) };
   const requests = [];
+  const challenges = [];
   let clock = 100000;
   let listener;
   let tab = { id: 1, url: tabUrl };
@@ -21,7 +22,8 @@ function harness({ stored = {}, responder, tabUrl = A } = {}) {
       storage: { local: {
         get(defaults, cb) { cb({ ...defaults, ...data }); },
         set(values, cb) { Object.assign(data, values); cb?.(); },
-      } }, action: { onClicked: { addListener() {} } }, tabs: { get(id, callback) { callback(tab); } },
+      } }, action: { onClicked: { addListener() {} } }, tabs: { get(id, callback) { callback(tab); },
+        sendMessage(id, message, options, callback) { challenges.push({ id, message, options }); callback({ ...message, ok: cardValid }); } },
     },
     fetch: async (url, options) => {
       requests.push({ url, ...options });
@@ -37,7 +39,9 @@ function harness({ stored = {}, responder, tabUrl = A } = {}) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), context));
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../background.js'), 'utf8'), context);
   const service = context.MVSReaderService.create({ storage: context.chrome.storage.local, fetch: context.fetch, now: () => clock });
-  return { data, requests, context, service, advance(ms) { clock += ms; }, setTab(value) { tab = value; },
+  const create = context.MVSReaderService.create;
+  context.MVSReaderService.create = options => create({ ...options, now: () => clock });
+  return { data, requests, challenges, context, service, advance(ms) { clock += ms; }, setTab(value) { tab = value; },
     get: (pageUrl = A, cursor) => service.handle({ type: 'reader-panel-get', pageUrl, cursor }),
     note: (values = {}) => service.handle({ type: 'reader-panel-save-note', pageUrl: A, id: 'doc-a', notes: 'Edited', baseNotes: 'Original', ...values }),
     delete: (values = {}) => service.handle({ type: 'reader-panel-delete', pageUrl: A, id: 'doc-a', confirmed: true,
@@ -58,6 +62,96 @@ test('canonical identity matches watch, mobile, music, embed, short links, live 
     'https://youtube.com/watch?v=a/b', 'https://youtube.com/embed/alpha/extra', 'https://youtu.be/alpha/extra', 'javascript:alert(1)', null]) {
     assert.equal(C.canonical(value), null);
   }
+});
+
+const cardMessage = (type = 'reader-card-get', extra = {}) => ({ type, pageUrl: A, targetUrl: B, lease: 'fixture-lease', ...extra });
+const cardStored = { readerDocuments: { [B]: { id: 'doc-b', at: 1 } }, readerSavedUrls: { [B]: 1 } };
+const cardDoc = () => doc('doc-b', B);
+const cardDelete = extra => cardMessage('reader-card-delete', { id: 'doc-b', title: 'A Reader video', updatedAt: '', baseNotes: 'Original', confirmed: true, ...extra });
+
+test('card requests target the hovered video on Home/subscriptions/search/channel/watch while watch guards stay strict', async () => {
+  for (const pageUrl of ['https://www.youtube.com/', 'https://www.youtube.com/feed/subscriptions',
+    'https://www.youtube.com/results?search_query=learn', 'https://www.youtube.com/@example/videos', A]) {
+    const app = harness({ stored: cardStored, tabUrl: pageUrl, responder: () => ({ results: [cardDoc()] }) });
+    const result = await app.message(cardMessage('reader-card-get', { pageUrl }));
+    assert.equal(result.document.id, 'doc-b'); assert.equal(result.document.videoUrl, B);
+    assert.ok(app.requests[0].url.endsWith('list/?id=doc-b'));
+    assert.equal((await app.message({ type: 'reader-panel-get', pageUrl: B })).code, 'invalid_sender');
+  }
+});
+
+test('unsaved card targets never call Reader; legacy saved cards share at most one bounded discovery page per minute', async () => {
+  const unsaved = harness();
+  assert.equal((await unsaved.message(cardMessage())).code, 'not_saved'); assert.equal(unsaved.requests.length, 0);
+  const falseFlag = harness({ stored: { readerSavedUrls: { [B]: false } } });
+  assert.equal((await falseFlag.message(cardMessage())).code, 'not_saved'); assert.equal(falseFlag.requests.length, 0);
+  const old = harness({ stored: { readerSavedUrls: { [A]: 1, [B]: 1 } }, responder: () => ({ results: [], nextPageCursor: 'do-not-follow' }) });
+  assert.equal((await old.message(cardMessage())).code, 'unlinked');
+  assert.equal((await old.message(cardMessage('reader-card-get', { targetUrl: A }))).code, 'unlinked');
+  assert.equal(old.requests.length, 1); assert.ok(old.requests[0].url.endsWith('list/?category=video&limit=100'));
+  const restarted = harness({ stored: old.data });
+  assert.equal((await restarted.message(cardMessage())).code, 'unlinked'); assert.equal(restarted.requests.length, 0);
+  old.advance(60001); await old.message(cardMessage()); assert.equal(old.requests.length, 2);
+});
+
+test('one card discovery page links all matching saved ids without repeated library scans', async () => {
+  const app = harness({ stored: { readerSavedUrls: { [B]: 1 } }, responder: () => ({ results: [cardDoc(), doc()] }) });
+  assert.equal((await app.message(cardMessage())).document.id, 'doc-b');
+  assert.equal((await app.message(cardMessage())).document.id, 'doc-b');
+  assert.equal(app.requests.length, 2); assert.ok(app.requests[1].url.endsWith('list/?id=doc-b'));
+  assert.equal(app.data.readerDocuments[A].id, 'doc-a');
+});
+
+test('card lease, source page, frame, origin and live-card validation reject unsafe targets without API requests', async () => {
+  const app = harness({ stored: cardStored });
+  for (const values of [{ targetUrl: 'https://evil.test' }, { pageUrl: 'https://evil.test' }, { pageUrl: B }, { lease: '../bad' }])
+    assert.equal((await app.message(cardMessage('reader-card-get', values))).code, 'invalid_sender');
+  const sender = { id: 'extension', frameId: 1, url: A, tab: { id: 1 } };
+  assert.equal((await app.message(cardMessage(), sender)).code, 'invalid_sender');
+  const cancelled = harness({ stored: cardStored, cardValid: false });
+  assert.equal((await cancelled.message(cardMessage())).code, 'invalid_sender'); assert.equal(cancelled.requests.length, 0);
+  assert.equal(app.requests.length, 0);
+});
+
+test('a card deletion requires the exact linked id and confirmation; successful deletion clears only that video', async () => {
+  const app = harness({ stored: { readerDocuments: { ...cardStored.readerDocuments, [A]: { id: 'doc-a', at: 1 } }, readerSavedUrls: { [A]: 1, [B]: 1 } },
+    responder: (url, init) => init.method === 'DELETE' ? { status: 204 } : { results: [cardDoc()] } });
+  for (const values of [{ confirmed: false }, { id: 'doc-a' }]) assert.equal((await app.message(cardDelete(values))).ok, false);
+  assert.equal(app.requests.length, 0);
+  assert.equal((await app.message(cardDelete())).ok, true);
+  assert.deepEqual(app.requests.map(r => r.method), [undefined, 'DELETE']);
+  assert.ok(app.requests[1].url.endsWith('delete/doc-b/'));
+  assert.equal(app.data.readerDocuments[B], undefined); assert.equal(app.data.readerSavedUrls[B], undefined);
+  assert.equal(app.data.readerDocuments[A].id, 'doc-a'); assert.equal(app.data.readerSavedUrls[A], 1);
+});
+
+test('recycled card or navigation during deletion preflight cancels DELETE, including document-scoped challenges', async () => {
+  for (const change of ['card', 'page']) {
+    const app = harness({ stored: cardStored, responder: () => {
+      if (change === 'card') app.context.chrome.tabs.sendMessage = (id, message, options, cb) => cb({ ...message, ok: false });
+      else app.setTab({ id: 1, url: B });
+      return { results: [cardDoc()] };
+    } });
+    const result = await app.message(cardDelete(), { id: 'extension', frameId: 0, url: A, documentId: 'document-1', tab: { id: 1 } });
+    assert.equal(result.code, 'invalid_sender'); assert.equal(app.requests.length, 1);
+    assert.equal(app.challenges[0].options.documentId, 'document-1');
+  }
+});
+
+test('card source mismatch, changed notes, offline, 429, absent and uncertain delete outcomes stay explicit without retries', async () => {
+  for (const [reply, expected] of [[{ results: [doc('doc-b', A)] }, 'document_changed'],
+    [{ results: [{ ...cardDoc(), notes: 'Changed elsewhere' }] }, 'delete_conflict'],
+    [{ status: 401 }, 'unauthorized'], [{ status: 429 }, 'rate_limited'], [new Error('offline'), 'network_error']]) {
+    const app = harness({ stored: cardStored, responder: () => reply });
+    assert.equal((await app.message(cardDelete())).code, expected); assert.equal(app.requests.length, 1);
+    assert.equal(app.data.readerSavedUrls[B], 1);
+  }
+  const uncertain = harness({ stored: cardStored, responder: (url, init) => init.method === 'DELETE' ? new Error('offline') : { results: [cardDoc()] } });
+  assert.equal((await uncertain.message(cardDelete())).code, 'delete_uncertain'); assert.equal(uncertain.requests.length, 2);
+  assert.equal(uncertain.data.readerSavedUrls[B], 1);
+  const absent = harness({ stored: cardStored, responder: () => ({ results: [] }) });
+  assert.equal((await absent.message(cardDelete())).alreadyDeleted, true); assert.equal(absent.requests.length, 1);
+  assert.equal(absent.data.readerSavedUrls[B], undefined);
 });
 
 test('document projection excludes highlights and foreign videos and uses safe Reader links', () => {
@@ -463,4 +557,51 @@ test('deletion clears clean notes, preserves dirty and newer drafts, and cannot 
       assert.equal(state.conflict.id, 'replacement'); assert.equal(state.value, value);
     }
   }
+});
+
+test('confirmed extension deletion persists a canonical deleted marker across aliases, duplicate cards and worker restarts', async () => {
+  const app = harness({ stored: { readerDocuments: { [A]: { id: 'doc-a', at: 1 } }, readerSavedUrls: { [A]: 1, 'https://youtu.be/alpha?t=4': 1 } },
+    responder: (url, init) => init.method === 'DELETE' ? { status: 204 } : { results: [doc()] } });
+  assert.equal((await app.delete()).ok, true);
+  assert.equal(app.data.readerDeletedVideos[A].id, 'doc-a');
+  const restarted = harness({ stored: app.data });
+  for (const url of [A, A + '&t=8', 'https://youtu.be/alpha', 'https://m.youtube.com/watch?v=alpha']) {
+    const state = await restarted.message({ type: 'get-reader-save-state', pageUrl: url });
+    assert.equal(state.saved, false); assert.equal(state.deleted, true); assert.equal(state.url, A);
+  }
+  assert.equal(restarted.requests.length, 0);
+});
+
+test('absence and failed/uncertain deletion never invent extension deletion history', async () => {
+  for (const response of [{ results: [] }, { status: 404 }]) {
+    const app = harness({ stored: { readerDocuments: { [A]: { id: 'doc-a', at: 1 } } }, responder: () => response });
+    assert.equal((await app.delete()).alreadyDeleted, true); assert.equal((await app.service.savedState(A)).deleted, false);
+  }
+  const app = harness({ stored: { readerSavedUrls: { [A]: 1 } },
+    responder: (url, init) => init.method === 'DELETE' ? new Error('offline') : { results: [doc()] } });
+  assert.equal((await app.delete()).code, 'delete_uncertain');
+  assert.equal((await app.service.savedState(A)).deleted, false); assert.equal((await app.service.savedState(A)).saved, true);
+});
+
+test('intentional successful re-save clears a prior deleted marker and stale flags cannot override deletion', async () => {
+  const app = harness({ stored: { readerDeletedVideos: { [A]: { id: 'deleted-id', at: 1 } }, readerSavedUrls: { [A]: 1 } },
+    responder: () => ({ status: 201, id: 'new-id', url: 'https://read.readwise.io/read/new-id' }) });
+  assert.equal((await app.service.savedState(A)).deleted, true); assert.equal((await app.service.savedState(A)).saved, false);
+  assert.equal((await app.message({ type: 'save-to-reader', pageUrl: A, title: 'Title', author: 'Author' })).ok, true);
+  assert.equal(app.data.readerDeletedVideos[A], undefined);
+  const state = await app.service.savedState(A); assert.equal(state.saved, true); assert.equal(state.deleted, false);
+});
+
+test('newer verified Reader state clears the marker without auto-saving, and a replacement save wins a late deletion', async () => {
+  const app = harness({ stored: { readerDeletedVideos: { [A]: { id: 'old', at: 1 } } } });
+  assert.equal((await app.get()).document.id, 'doc-a'); assert.equal(app.data.readerDeletedVideos[A], undefined);
+  assert.equal((await app.service.savedState(A)).saved, true); assert.ok(app.requests.every(r => !r.method));
+  let release;
+  const race = harness({ stored: { readerDocuments: { [A]: { id: 'doc-a', at: 1 } } }, responder: async (url, init) => {
+    if (init.method === 'DELETE') { await new Promise(resolve => { release = resolve; }); return { status: 204 }; }
+    return { results: [doc()] };
+  } });
+  const deleting = race.delete(); await new Promise(setImmediate); await race.service.remember(A, 'replacement'); release();
+  assert.equal((await deleting).ok, true); assert.equal(race.data.readerDeletedVideos[A], undefined);
+  assert.equal((await race.service.savedState(A)).saved, true);
 });
