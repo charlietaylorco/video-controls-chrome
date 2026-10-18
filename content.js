@@ -560,6 +560,7 @@
   let raindropSavedStateToken = 0;
   const downieSentUrlCache = new Map();
   const readerSavedUrlCache = new Map();
+  let readerCardPreview = null;
   const raindropSavedUrlCache = new Map();
   let dragState = null;
   let overlayPositionX = null;
@@ -649,6 +650,7 @@
   };
 
   const hidePanel = () => {
+    readerCardPreview?.close();
     clearHideTimer();
     clearIdleHideTimer();
     hintedVideo = null;
@@ -927,6 +929,7 @@
     const label = saved ? "Saved in Reader" : "Save page to Reader";
     readerButton.title = label;
     readerButton.setAttribute("aria-label", label);
+    readerCardPreview?.update();
   };
 
   const refreshReaderSavedState = () => {
@@ -1168,7 +1171,7 @@
     clearHideTimer();
     clearIdleHideTimer();
     hideTimer = window.setTimeout(() => {
-      if (activePanel) {
+      if (activePanel || shadowRoot.activeElement || readerCardPreview?.isActive()) {
         return;
       }
 
@@ -1187,6 +1190,7 @@
 
   const hidePanelForIdle = () => {
     clearIdleHideTimer();
+    if (shadowRoot.activeElement || readerCardPreview?.isActive()) return;
 
     if (panel.dataset.visible !== "true") {
       return;
@@ -1206,6 +1210,8 @@
     if (
       delayMs <= 0 ||
       activePanel ||
+      shadowRoot.activeElement ||
+      readerCardPreview?.isActive() ||
       dragState ||
       panel.dataset.visible !== "true" ||
       !(hoveredTarget || hoveredVideo)
@@ -1214,7 +1220,7 @@
     }
 
     idleHideTimer = window.setTimeout(() => {
-      if (activePanel || dragState) {
+      if (activePanel || shadowRoot.activeElement || dragState || readerCardPreview?.isActive()) {
         return;
       }
 
@@ -3016,12 +3022,44 @@
     }
   }));
 
+  // Only a unique video link inside the actual card can be a preview target.
+  // Never fall back to the active watch URL for a missing/recycled card link.
+  const getReaderCardTarget = () => {
+    if (activeMode !== "card" || !settings.showReader || panel.dataset.visible !== "true") return null;
+    const source = getVideoCardContainer(getCurrentContextSource());
+    if (!source?.isConnected) return null;
+    const urls = new Set(Array.from(source.querySelectorAll("a[href]"))
+      .map(anchor => globalThis.MVSReaderCore?.canonical(anchor.href)).filter(Boolean));
+    if (urls.size !== 1) return null;
+    const videoUrl = urls.values().next().value;
+    return { source, videoUrl, title: getAssociatedTitle(source),
+      saved: readerButton.dataset.readerSaved === "true" && readerSavedUrlCache.get(normalizeYouTubeStateUrl(getAssociatedPageUrl(source))) === true };
+  };
+  if (window.top === window && globalThis.MVSReaderCore?.youtubeOrigin(location.href) && globalThis.MVSReaderCardPreview) {
+    readerCardPreview = MVSReaderCardPreview.create({ button: readerButton, getTarget: getReaderCardTarget,
+      onHold() { activePanel = true; clearHideTimer(); clearIdleHideTimer(); stopPreview(); },
+      onClose() { activePanel = false; scheduleHide(); scheduleIdleHide(); },
+      onDeleted() { ++readerSavedStateToken; readerSavedUrlCache.clear(); refreshReaderSavedState(); }
+    });
+  }
+
   panel.addEventListener("pointerenter", () => {
     activePanel = true;
     clearHideTimer();
     clearIdleHideTimer();
     hideHoverZoneHint();
     stopPreview();
+  });
+
+  panel.addEventListener("focusin", () => {
+    activePanel = true; clearHideTimer(); clearIdleHideTimer(); stopPreview();
+  });
+  panel.addEventListener("focusout", () => {
+    window.setTimeout(() => {
+      if (!shadowRoot.activeElement && !readerCardPreview?.isActive()) {
+        activePanel = false; scheduleHide(); scheduleIdleHide();
+      }
+    }, 0);
   });
 
   panel.addEventListener("pointerleave", () => {
@@ -3085,7 +3123,7 @@
         return;
       }
 
-      const inPanel = event.composedPath().includes(panel);
+      const inPanel = event.composedPath().includes(panel) || readerCardPreview?.owns(event);
 
       if (inPanel) {
         activePanel = true;

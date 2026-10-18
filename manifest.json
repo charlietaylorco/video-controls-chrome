@@ -71,6 +71,8 @@
       ],
       "all_frames": true,
       "js": [
+        "reader-core.js",
+        "reader-card-preview.js",
         "content.js"
       ],
       "match_about_blank": true,

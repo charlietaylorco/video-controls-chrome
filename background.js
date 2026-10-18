@@ -485,6 +485,32 @@ const pickTargetUrl = (message, sender) => {
 };
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (["reader-card-get", "reader-card-delete"].includes(message?.type)) {
+    const origin = MVSReaderCore.youtubeOrigin(sender.url);
+    const page = MVSReaderCore.pageKey(message.pageUrl), target = MVSReaderCore.canonical(message.targetUrl);
+    if (sender.id !== chrome.runtime.id || sender.frameId !== 0 || !Number.isInteger(sender.tab?.id) || !origin ||
+        !page || !target || typeof message.lease !== "string" || !/^[\w-]{1,100}$/.test(message.lease) ||
+        (sender.documentLifecycle && sender.documentLifecycle !== "active")) {
+      sendResponse({ ok: false, code: "invalid_sender" }); return undefined;
+    }
+    // Card targets deliberately differ from the active watch URL. A dedicated
+    // isolated-world challenge binds the request to a still-live, unchanged card.
+    const isCurrent = () => new Promise(resolve => {
+      try {
+        chrome.tabs.get(sender.tab.id, tab => {
+          if (chrome.runtime.lastError || tab?.id !== sender.tab.id || MVSReaderCore.youtubeOrigin(tab.url) !== origin ||
+              MVSReaderCore.pageKey(tab.url) !== page || (tab.pendingUrl && MVSReaderCore.pageKey(tab.pendingUrl) !== page)) {
+            resolve(false); return;
+          }
+          const options = sender.documentId ? { documentId: sender.documentId } : { frameId: 0 };
+          chrome.tabs.sendMessage(sender.tab.id, { type: "reader-card-validate", lease: message.lease, pageUrl: page, targetUrl: target }, options,
+            reply => resolve(!chrome.runtime.lastError && reply?.ok === true && reply.lease === message.lease && reply.pageUrl === page && reply.targetUrl === target));
+        });
+      } catch { resolve(false); }
+    });
+    getReaderPanelService().handle(message, { isCurrent, scope: [sender.tab.id, sender.documentId || "", message.lease] }).then(sendResponse);
+    return true;
+  }
   if (["reader-panel-get", "reader-panel-save-note", "reader-panel-delete"].includes(message?.type)) {
     const origin = MVSReaderCore.youtubeOrigin(sender.url);
     const target = MVSReaderCore.canonical(message.pageUrl);

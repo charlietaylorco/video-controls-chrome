@@ -167,9 +167,36 @@
       catch { throw error('delete_cache_error'); }
       return { ok: true, id, alreadyDeleted };
     };
+    const getCard = async (message) => {
+      const url = C.canonical(message.targetUrl);
+      if (!url) throw error('invalid_request');
+      await storageQueue;
+      const data = await read({ [KEY]: {}, readerSavedUrls: {}, readerCardDiscoveryAt: 0 });
+      const id = data[KEY]?.[url]?.id;
+      if (C.validId(id)) {
+        try { return { ok: true, document: await byId(url, id) }; }
+        catch (e) { if (e.code !== 'not_found') throw e; return { ok: true, document: null, code: 'unlinked' }; }
+      }
+      if (!Object.entries(data.readerSavedUrls || {}).some(([key, saved]) => Boolean(saved) && C.canonical(key) === url))
+        return { ok: true, document: null, code: 'not_saved' };
+      // Shared, persisted cold-cache budget: one page total, no pagination on hover.
+      if (data.readerCardDiscoveryAt > 0 && now() - data.readerCardDiscoveryAt < 60000)
+        return { ok: true, document: null, code: 'unlinked' };
+      await write({ readerCardDiscoveryAt: now() });
+      const result = await get({ pageUrl: url });
+      return { ok: true, document: result.document, code: result.document ? undefined : 'unlinked' };
+    };
+    const deleteCard = async (message) => {
+      const url = C.canonical(message.targetUrl);
+      await storageQueue;
+      if (!url || !C.validId(message.id) || (await read({ [KEY]: {} }))[KEY]?.[url]?.id !== message.id)
+        throw error('document_changed');
+      return deleteDocument({ ...message, pageUrl: url });
+    };
     const handle = (message, { isCurrent = () => true, scope = null } = {}) => {
       // Never share a rejected/stale visit's reply with a new visit or another tab.
-      const key = message.type === 'reader-panel-get' ? JSON.stringify([scope, message.pageUrl, message.cursor, message.visit]) : null;
+      const key = ['reader-panel-get', 'reader-card-get'].includes(message.type)
+        ? JSON.stringify([message.type, scope, message.pageUrl, message.targetUrl, message.cursor, message.visit]) : null;
       if (key && pending.has(key)) return pending.get(key);
       const result = operationQueue.then(async () => {
         operationIsCurrent = isCurrent;
@@ -178,6 +205,8 @@
         if (message.type === 'reader-panel-get') return get(message);
         if (message.type === 'reader-panel-save-note') return saveNote(message);
         if (message.type === 'reader-panel-delete') return deleteDocument(message);
+        if (message.type === 'reader-card-get') return getCard(message);
+        if (message.type === 'reader-card-delete') return deleteCard(message);
         throw error('invalid_request');
       })
         .catch(e => ({ ok: false, code: e.code || 'storage_error', retryAt: e.retryAt }));

@@ -1,5 +1,6 @@
 /* Shared identity and draft rules. No Reader credentials or page HTML. */
 (() => {
+  if (globalThis.MVSReaderCore) return;
   const youtubeOrigin = (value) => {
     try {
       const u = new URL(value);
@@ -21,6 +22,7 @@
     } catch { return null; }
   };
   const validId = (id) => typeof id === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(id);
+  const pageKey = value => youtubeOrigin(value) ? new URL(value).href : null;
   const readerUrl = (id) => validId(id) ? `https://read.readwise.io/read/${id}` : null;
   const cleanDocument = (doc, videoUrl) => {
     if (!doc || !validId(doc.id) || doc.is_deleted || doc.parent_id || canonical(doc.source_url) !== videoUrl) return null;
@@ -54,7 +56,7 @@
     if (!state.dirty) state.value = state.base = '';
     return true;
   };
-  const api = { youtubeOrigin, canonical, validId, readerUrl, cleanDocument, draft, edit, receive, saved, removed };
+  const api = { youtubeOrigin, pageKey, canonical, validId, readerUrl, cleanDocument, draft, edit, receive, saved, removed };
   globalThis.MVSReaderCore = api;
   if (typeof module !== 'undefined') module.exports = api;
 })();

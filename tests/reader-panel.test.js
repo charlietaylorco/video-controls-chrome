@@ -10,6 +10,15 @@ const B = 'https://www.youtube.com/watch?v=beta';
 const D = 'https://www.youtube.com/watch?v=gamma';
 const tick = () => new Promise(setImmediate);
 
+test('card deletion cache changes preserve that video’s dirty note and leave other video drafts intact', async () => {
+  const f = fixture(); await f.open(); f.edit('Keep A'); f.navigate(B); await tick(); f.edit('Keep deleted B');
+  f.docs.delete('doc-b');
+  f.change({ readerDocuments: { oldValue: { [A]: { id: 'doc-a' }, [B]: { id: 'doc-b' } }, newValue: { [A]: { id: 'doc-a' } } } });
+  assert.equal(f.value, 'Keep deleted B'); assert.equal(f.button('Save note').disabled, true);
+  f.navigate(A); await tick(); assert.equal(f.value, 'Keep A');
+  f.navigate(B); await tick(); assert.equal(f.value, 'Keep deleted B'); assert.equal(f.button('Save note').disabled, true);
+});
+
 function fixture({ url = A } = {}) {
   const events = new Map(), timers = new Map(), storageListeners = [], messages = [];
   let timerId = 0, active, editor, input, escape, responder;
