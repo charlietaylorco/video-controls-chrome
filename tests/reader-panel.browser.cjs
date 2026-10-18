@@ -65,7 +65,7 @@ async function fixture({ enabled = true, width = 1100, height = 1100 } = {}) {
   const panel = page.locator('#mvs-reader-panel');
   const open = async (tab) => {
     await panel.locator('.toggle').click();
-    if (tab === 'note' && await panel.getByRole('tab', { name: /^Note/ }).isVisible()) await panel.getByRole('tab', { name: /^Note/ }).click();
+    if (tab === 'note' && await panel.getByRole('tab', { name: /^Note/ }).isVisible() && await panel.getByRole('tab', { name: /^Note/ }).isEnabled()) await panel.getByRole('tab', { name: /^Note/ }).click();
   };
   const navigate = async url => {
     await page.evaluate(url => { history.pushState({}, '', url); document.dispatchEvent(new Event('yt-navigate-finish')); }, url);
@@ -92,10 +92,10 @@ test('launcher is opt-in, collapsed, and opens without creating a Reader documen
 test('dirty drafts survive refresh, collapse, SPA navigation and late responses', async () => {
   const f = await fixture(); await f.open('note');
   await f.panel.locator('textarea').fill('Draft for A');
-  await f.panel.getByText('Refresh', { exact: true }).click();
+  await f.panel.getByRole('button', { name: 'Refresh', exact: true }).click();
   assert.equal(await f.panel.locator('textarea').inputValue(), 'Draft for A');
   await f.page.evaluate(() => { mock.defer = true; });
-  await f.panel.getByText('Refresh', { exact: true }).click();
+  await f.panel.getByRole('button', { name: 'Refresh', exact: true }).click();
   await f.navigate(B); await f.open('note');
   await f.page.evaluate(() => { mock.release(); mock.release(); mock.defer = false; });
   await f.panel.getByRole('tab', { name: /^Note/ }).click();
@@ -129,7 +129,7 @@ test('late save stays on its captured video and preserves edits made while savin
 test('refresh while typing does not replace the draft and external changes require resolution', async () => {
   const f = await fixture(); await f.open('note');
   await f.page.evaluate(() => { mock.defer = true; mock.notes = 'Changed elsewhere'; });
-  await f.panel.getByText('Refresh', { exact: true }).click();
+  await f.panel.getByRole('button', { name: 'Refresh', exact: true }).click();
   await f.panel.locator('textarea').fill('Typed while loading');
   await f.page.evaluate(() => { mock.release(); mock.defer = false; });
   assert.equal(await f.panel.locator('textarea').inputValue(), 'Typed while loading');
@@ -165,6 +165,7 @@ test('remote HTML stays inert text and never becomes a script, image or link', a
   await f.open();
   assert.equal(await f.panel.locator('.summary').innerText(), malicious);
   assert.equal(await f.panel.locator('textarea').inputValue(), malicious);
+  await f.panel.locator('.tag-toggle').click();
   assert.equal(await f.panel.locator('.tag').innerText(), malicious);
   assert.equal(await f.panel.locator('img, script').count(), 0);
   assert.equal(await f.page.evaluate(() => window.pwned), undefined);
@@ -177,7 +178,7 @@ test('not-found pagination and errors stay explicit and never trigger automatic 
   await f.panel.getByText('Search next 100 videos', { exact: true }).click();
   assert.equal(await f.page.evaluate(() => mock.messages.at(-1).cursor), 'next');
   await f.page.evaluate(() => { mock.error = 'unauthorized'; });
-  await f.panel.getByText('Refresh', { exact: true }).click();
+  await f.panel.getByRole('button', { name: 'Refresh', exact: true }).click();
   assert.match(await f.panel.locator('.status').innerText(), /rejected/);
   assert.equal(await f.page.evaluate(() => mock.messages.length), 3);
   assert.ok((await f.page.evaluate(() => mock.messages.map(m => m.type))).every(t => t === 'reader-panel-get'));
@@ -203,7 +204,9 @@ test('compact launcher and popover fit light, dark, mobile and short viewports w
     if (dark) await f.page.addStyleTag({ content: 'html{--yt-spec-base-background:#0f0f0f;--yt-spec-text-primary:#f1f1f1;--yt-spec-text-secondary:#aaa;--yt-spec-10-percent-layer:#333;--yt-spec-badge-chip-background:#272727}body{background:#0f0f0f;color:#f1f1f1}' });
     const before = await f.page.locator('h1').boundingBox();
     const launcher = await f.panel.locator('.toggle').boundingBox();
-    assert.ok(launcher.width < 130);
+    assert.equal(launcher.width, 36);
+    assert.equal(launcher.y, 0);
+    assert.equal(launcher.x + launcher.width, width);
     assert.ok(launcher.x >= 0 && launcher.x + launcher.width <= width);
     await f.open();
     const dialog = await f.panel.getByRole('dialog').boundingBox();
@@ -285,10 +288,10 @@ test('Summary is first and keyboard tab switching preserves drafts and visible t
   await f.panel.locator('textarea').fill('Draft across views');
   await note.focus(); await f.page.keyboard.press('Home');
   assert.equal(await summary.getAttribute('aria-selected'), 'true');
-  assert.equal(await f.panel.locator('.tags').isVisible(), true);
+  assert.equal(await f.panel.locator('.tag-toggle').isVisible(), true);
   await f.page.keyboard.press('End');
   assert.equal(await f.panel.locator('textarea').inputValue(), 'Draft across views');
-  assert.equal(await f.panel.locator('.tags').isVisible(), true);
+  assert.equal(await f.panel.locator('.tag-toggle').isVisible(), true);
   assert.deepEqual(f.errors, []); await f.close();
 });
 
@@ -332,5 +335,64 @@ test('fullscreen hides the launcher and resizing keeps the restored draft inside
   assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 280);
   assert.ok(bounds.y >= 0 && bounds.y + bounds.height <= 210);
   assert.equal(await f.page.evaluate(() => mock.messages.filter(m => m.type === 'reader-panel-get').length), 1);
+  assert.deepEqual(f.errors, []); await f.close();
+});
+
+
+test('header is one compact row with working icon actions and no removed explanatory chrome', async () => {
+  const f = await fixture(); await f.open();
+  assert.equal(await f.panel.locator('.toggle').innerText(), '');
+  assert.equal(await f.panel.locator('h2, label, .hint').count(), 0);
+  assert.equal(await f.panel.locator('.status').isVisible(), false);
+  const header = f.panel.locator('.header');
+  const headerBounds = await header.boundingBox();
+  assert.ok(headerBounds.height <= 40);
+  for (const label of ['Refresh', 'Open in Reader', 'Extension options', 'Close Reader']) {
+    const action = f.panel.getByRole(label === 'Open in Reader' ? 'link' : 'button', { name: label, exact: true });
+    assert.ok(await action.getAttribute('title'));
+    assert.equal(await action.innerText(), '');
+    const bounds = await action.boundingBox();
+    assert.ok(bounds.width >= 28 && bounds.height >= 28);
+    assert.ok(bounds.y >= headerBounds.y && bounds.y + bounds.height <= headerBounds.y + headerBounds.height);
+  }
+  await f.panel.getByRole('button', { name: 'Refresh', exact: true }).click();
+  assert.equal(await f.page.evaluate(() => mock.messages.filter(m => m.type === 'reader-panel-get').length), 2);
+  const popupPromise = f.page.waitForEvent('popup');
+  await f.panel.getByRole('link', { name: 'Open in Reader', exact: true }).click();
+  const popup = await popupPromise;
+  await popup.waitForURL('https://read.readwise.io/read/doc-a');
+  assert.equal(popup.url(), 'https://read.readwise.io/read/doc-a');
+  await popup.close();
+  await f.panel.getByRole('button', { name: 'Extension options', exact: true }).click();
+  assert.equal(await f.page.evaluate(() => mock.messages.at(-1).type), 'open-options');
+  await f.panel.getByRole('tab', { name: /^Note/ }).click();
+  assert.equal(await f.panel.getByLabel('Document Note', { exact: true }).isVisible(), true);
+  assert.equal(await f.panel.locator('.status').isVisible(), false);
+  await f.panel.getByRole('button', { name: 'Close Reader', exact: true }).click();
+  assert.equal(await f.panel.locator('.toggle').getAttribute('aria-expanded'), 'false');
+  assert.deepEqual(f.errors, []); await f.close();
+});
+
+test('long and multiple tags expand safely without displacing header controls at narrow widths', async () => {
+  const f = await fixture({ width: 280, height: 640 });
+  const tags = ['A very long category name '.repeat(10), ...Array.from({ length: 9 }, (_, i) => `Category ${i}`)];
+  await f.page.evaluate(tags => { mock.tags = tags; }, tags);
+  await f.open();
+  const header = f.panel.locator('.header');
+  const before = await header.boundingBox();
+  assert.ok(before.height <= 40);
+  assert.equal(await f.panel.locator('.tag-total').innerText(), '10');
+  await f.panel.getByRole('button', { name: 'Show 10 tags', exact: true }).click();
+  assert.equal(await f.panel.locator('.tag').count(), tags.length);
+  assert.deepEqual(await f.panel.locator('.tag').allTextContents(), tags);
+  assert.deepEqual(await header.boundingBox(), before);
+  for (const action of await header.locator('.icon').all()) {
+    const bounds = await action.boundingBox();
+    assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 280);
+    assert.ok(bounds.y >= before.y && bounds.y + bounds.height <= before.y + before.height);
+  }
+  assert.ok(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  await f.panel.locator('.tag-toggle').click();
+  assert.equal(await f.panel.locator('.tags').isVisible(), false);
   assert.deepEqual(f.errors, []); await f.close();
 });

@@ -10,7 +10,7 @@
   let open = false;
   let scheduled = false;
   const stateFor = (url) => {
-    if (!states.has(url)) states.set(url, { ...C.draft(), status: '', cursor: null, loaded: false, tab: 'summary' });
+    if (!states.has(url)) states.set(url, { ...C.draft(), status: '', cursor: null, loaded: false, tab: 'summary', tagsOpen: false });
     return states.get(url);
   };
   const current = () => activeUrl && stateFor(activeUrl);
@@ -50,10 +50,17 @@
   };
   const selectTab = (tab, focus = false) => {
     const s = current();
-    if (!s) return;
+    if (!s || (tab === 'note' && !s.doc && !s.dirty)) return;
     s.tab = tab;
     render();
     if (focus) (tab === 'summary' ? view.summaryTab : view.noteTab).focus();
+  };
+  const icon = (parent, paths) => {
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg');
+    for (const [key, value] of Object.entries({ viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.7', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', focusable: 'false' })) svg.setAttribute(key, value);
+    for (const d of paths) { const path = document.createElementNS(ns, 'path'); path.setAttribute('d', d); svg.append(path); }
+    parent.append(svg);
   };
   const createView = () => {
     host = document.createElement('div');
@@ -61,49 +68,53 @@
     root = host.attachShadow({ mode: 'closed' });
     const style = element('style', '', root);
     style.textContent = `
-      :host{--reader-top:clamp(12px,calc(100dvh - 180px),72px);position:fixed;top:var(--reader-top);right:max(12px,env(safe-area-inset-right));width:min(390px,calc(100vw - 24px));z-index:2147483000;pointer-events:none;color:var(--yt-spec-text-primary,#171717);font:14px/1.55 "YouTube Sans",Roboto,sans-serif;color-scheme:light dark}
-      *{box-sizing:border-box}[hidden]{display:none!important}button,a,textarea{font:inherit}button,a{color:inherit}button{cursor:pointer}
-      .launch-row{display:flex;justify-content:flex-end}.toggle{pointer-events:auto;display:flex;align-items:center;gap:8px;border:1px solid var(--yt-spec-10-percent-layer,rgba(128,128,128,.3));border-radius:20px;padding:6px 12px 6px 7px;font-size:12px;font-weight:600;background:var(--yt-spec-base-background,#fff);box-shadow:0 2px 10px #00000012}
-      .mark{display:grid;place-items:center;width:23px;height:23px;border-radius:7px;background:#f2c867;color:#292219;font:bold 16px Georgia,serif}.draft-dot{width:6px;height:6px;border-radius:50%;background:#c5912e}.body{pointer-events:auto;margin-top:8px;max-height:min(680px,calc(100dvh - var(--reader-top) - 56px));overflow:auto;overscroll-behavior:contain;border:1px solid var(--yt-spec-10-percent-layer,rgba(128,128,128,.25));border-radius:16px;background:var(--yt-spec-base-background,#fff);box-shadow:0 12px 48px #00000024}
-      .heading{display:flex;align-items:center;justify-content:space-between;padding:12px 16px 8px;position:sticky;top:0;background:var(--yt-spec-base-background,#fff);z-index:1}.heading h2{font-size:14px;margin:0;font-weight:650}.close{border:0;background:transparent;border-radius:50%;width:28px;height:28px;font-size:22px;line-height:1}
-      .content{padding:0 16px 16px}.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}button.small,a{padding:5px 10px;border:1px solid var(--yt-spec-10-percent-layer,rgba(128,128,128,.3));border-radius:18px;background:transparent;text-decoration:none;font-size:12px}
-      button:hover,a:hover{background:var(--yt-spec-badge-chip-background,rgba(128,128,128,.12))}button:disabled{opacity:.5;cursor:default}button:focus-visible,a:focus-visible,textarea:focus-visible{outline:2px solid #b38523;outline-offset:2px}
-      .tabs{display:flex;gap:18px;border-bottom:1px solid var(--yt-spec-10-percent-layer,rgba(128,128,128,.2));margin:14px 0}.tab{position:relative;padding:8px 0;background:transparent;border:0;border-bottom:2px solid transparent;font-size:13px;color:var(--yt-spec-text-secondary,#666)}.tab[aria-selected="true"]{color:var(--yt-spec-text-primary,#171717);border-bottom-color:currentColor;font-weight:600}.tab .draft-dot{display:inline-block;vertical-align:middle;margin-left:5px}
-      .summary{white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;line-height:1.75}.tags{display:flex;gap:6px;flex-wrap:wrap}.tag{font-size:11px;padding:2px 8px;border-radius:6px;background:var(--yt-spec-badge-chip-background,rgba(128,128,128,.1));overflow-wrap:anywhere;max-width:100%}
-      label{display:block;font-size:11px;letter-spacing:.08em;text-transform:uppercase;font-weight:650;margin:0 0 8px;color:var(--yt-spec-text-secondary,#666)}textarea{display:block;resize:vertical;width:100%;min-height:160px;max-height:320px;padding:11px;border-radius:10px;border:1px solid var(--yt-spec-10-percent-layer,rgba(128,128,128,.4));background:transparent;color:inherit;line-height:1.6}
-      .footer{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px}.save{border:0;border-radius:20px;background:#e9be61;color:#211b10;font-weight:600;padding:7px 14px}.muted,.status,.hint{font-size:12px;color:var(--yt-spec-text-secondary,#666)}.status{margin:8px 0 12px;overflow-wrap:anywhere}.hint{font-size:11px;margin:12px 0 0;line-height:1.5}
-      .conflict{border-left:3px solid #c59b42;padding:8px 10px;margin-top:12px;font-size:12px}.remote{white-space:pre-wrap;max-height:150px;overflow:auto;overflow-wrap:anywhere;margin-bottom:8px}.conflict button{margin:4px 3px 0 0}
-      @media(max-width:420px){.content{padding:0 13px 14px}.heading{padding:10px 13px 6px}}
+      :host{position:fixed;top:0;right:0;width:min(390px,100vw);z-index:2147483000;pointer-events:none;color:var(--yt-spec-text-primary,#171717);font:14px/1.55 "YouTube Sans",Roboto,sans-serif;color-scheme:light dark}
+      *{box-sizing:border-box}[hidden]{display:none!important}button,a,textarea{font:inherit}button,a{color:inherit}button{cursor:pointer}svg{display:block;width:17px;height:17px;flex-shrink:0}
+      .launch-row{display:flex;justify-content:flex-end}.toggle{pointer-events:auto;position:relative;display:grid;place-items:center;width:36px;height:36px;border:1px solid var(--yt-spec-10-percent-layer,rgba(128,128,128,.3));border-top:0;border-right:0;border-radius:0 0 0 11px;padding:0;background:var(--yt-spec-base-background,#fff);box-shadow:0 2px 8px #00000010}.toggle svg{width:20px;height:20px}.toggle .draft-dot{position:absolute;top:5px;right:5px}
+      .draft-dot{width:5px;height:5px;border-radius:50%;background:#c5912e}.body{pointer-events:auto;margin-top:4px;max-height:min(680px,calc(100dvh - 40px));overflow:auto;overscroll-behavior:contain;border:1px solid var(--yt-spec-10-percent-layer,rgba(128,128,128,.25));border-radius:12px 0 12px 12px;background:var(--yt-spec-base-background,#fff);box-shadow:0 10px 36px #00000024}
+      .header{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:6px;align-items:center;padding:5px 6px 0;position:sticky;top:0;background:var(--yt-spec-base-background,#fff);z-index:1;border-bottom:1px solid var(--yt-spec-10-percent-layer,rgba(128,128,128,.2))}.tabs{grid-column:1;display:flex;gap:8px;white-space:nowrap}.tab{display:flex;align-items:center;gap:4px;height:32px;padding:0 2px;background:transparent;border:0;border-bottom:2px solid transparent;font-size:12px;color:var(--yt-spec-text-secondary,#666)}.tab[aria-selected="true"]{color:var(--yt-spec-text-primary,#171717);border-bottom-color:currentColor;font-weight:600}
+      .actions{grid-column:3;display:flex;gap:2px;align-items:center}.icon{display:grid;place-items:center;width:28px;height:28px;flex-shrink:0;padding:0;border:0;border-radius:6px;background:transparent;text-decoration:none}.icon[aria-disabled="true"]{opacity:.4;pointer-events:none}
+      .tag-toggle{grid-column:2;display:flex;align-items:center;gap:4px;justify-self:start;min-width:0;max-width:100%;height:25px;padding:0 6px;border:0;border-radius:6px;font-size:11px;background:var(--yt-spec-badge-chip-background,rgba(128,128,128,.1))}.tag-toggle svg{width:12px;height:12px}.tag-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tag-count{flex-shrink:0;font-size:10px;color:var(--yt-spec-text-secondary,#666)}.tag-total{display:none}.tags{display:flex;gap:5px;flex-wrap:wrap;max-height:130px;overflow:auto;margin:0 0 10px}.tag{font-size:11px;padding:2px 8px;border-radius:6px;background:var(--yt-spec-badge-chip-background,rgba(128,128,128,.1));overflow-wrap:anywhere;max-width:100%}
+      button:hover,a:hover{background:var(--yt-spec-badge-chip-background,rgba(128,128,128,.12))}button:disabled{opacity:.5;cursor:default}button:focus-visible,a:focus-visible,textarea:focus-visible{outline:2px solid #b38523;outline-offset:-2px}
+      .content{padding:12px}.summary{white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;line-height:1.75}textarea{display:block;resize:vertical;width:100%;min-height:160px;max-height:320px;padding:10px;border-radius:9px;border:1px solid var(--yt-spec-10-percent-layer,rgba(128,128,128,.4));background:transparent;color:inherit;line-height:1.6}
+      .footer{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:9px}.save{border:0;border-radius:18px;background:#e9be61;color:#211b10;font-weight:600;padding:6px 13px}.muted,.status{font-size:12px;color:var(--yt-spec-text-secondary,#666)}.status{margin:0 0 10px;overflow-wrap:anywhere}.small{padding:5px 9px;border:1px solid var(--yt-spec-10-percent-layer,rgba(128,128,128,.3));border-radius:18px;background:transparent;font-size:12px}
+      .conflict{border-left:3px solid #c59b42;padding:8px 10px;margin-top:10px;font-size:12px}.remote{white-space:pre-wrap;max-height:150px;overflow:auto;overflow-wrap:anywhere;margin-bottom:8px}.conflict button{margin:4px 3px 0 0}
+      @media(max-width:360px){.tag-name,.tag-count{display:none}.tag-total{display:inline}.tag-toggle{padding:0 5px}.header{gap:4px;padding-left:5px;padding-right:5px}.tabs{gap:5px}.tab{font-size:11px}.actions{gap:0}}
     `;
     const row = element('div', '', root, { class: 'launch-row' });
-    const toggle = element('button', '', row, { class: 'toggle', type: 'button', 'aria-label': 'Open Reader', 'aria-haspopup': 'dialog', 'aria-expanded': 'false', 'aria-controls': 'reader-body' });
-    element('span', 'r', toggle, { class: 'mark', 'aria-hidden': 'true' });
-    element('span', 'Reader', toggle);
+    const toggle = element('button', '', row, { class: 'toggle', type: 'button', title: 'Reader summary and note', 'aria-label': 'Reader summary and note', 'aria-haspopup': 'dialog', 'aria-expanded': 'false', 'aria-controls': 'reader-body' });
+    icon(toggle, ['M12 5v15', 'M12 6C9 3.5 5 3.5 2.5 4.5v14c3-1.2 6.5-.5 9.5 2', 'M12 6c3-2.5 7-2.5 9.5-1.5v14c-3-1.2-6.5-.5-9.5 2']);
     const dot = element('span', '', toggle, { class: 'draft-dot', 'aria-hidden': 'true' });
-    const body = element('section', '', root, { class: 'body', id: 'reader-body', role: 'dialog', 'aria-modal': 'false', 'aria-labelledby': 'reader-title' });
+    const body = element('section', '', root, { class: 'body', id: 'reader-body', role: 'dialog', 'aria-modal': 'false', 'aria-label': 'Reader' });
     body.hidden = true;
-    const heading = element('div', '', body, { class: 'heading' });
-    element('h2', 'Reader', heading, { id: 'reader-title' });
-    const close = element('button', '×', heading, { class: 'close', type: 'button', 'aria-label': 'Close Reader' });
-    const content = element('div', '', body, { class: 'content' });
-    const toolbar = element('div', '', content, { class: 'toolbar' });
-    const refresh = element('button', 'Refresh', toolbar, { class: 'small', type: 'button' });
-    const link = element('a', 'Open in Reader ↗', toolbar, { target: '_blank', rel: 'noopener noreferrer' });
-    const settings = element('button', 'Options', toolbar, { class: 'small', type: 'button', 'aria-label': 'Extension options' });
-    settings.addEventListener('click', () => void send({ type: 'open-options' }));
-    const status = element('p', '', content, { class: 'status', role: 'status', 'aria-live': 'polite' });
-    const next = element('button', 'Search next 100 videos', content, { class: 'small', type: 'button' });
-    const details = element('div', '', content);
-    const tags = element('div', '', details, { class: 'tags', 'aria-label': 'Reader tags' });
-    const tabs = element('div', '', details, { class: 'tabs', role: 'tablist', 'aria-label': 'Reader views' });
+    const header = element('div', '', body, { class: 'header' });
+    const tabs = element('div', '', header, { class: 'tabs', role: 'tablist', 'aria-label': 'Reader views' });
     const summaryTab = element('button', 'Summary', tabs, { class: 'tab', id: 'reader-summary-tab', type: 'button', role: 'tab', 'aria-controls': 'reader-summary-view' });
     const noteTab = element('button', 'Note', tabs, { class: 'tab', id: 'reader-note-tab', type: 'button', role: 'tab', 'aria-controls': 'reader-note-view' });
     const noteDot = element('span', '', noteTab, { class: 'draft-dot', 'aria-hidden': 'true' });
+    const tagToggle = element('button', '', header, { class: 'tag-toggle', type: 'button', 'aria-label': 'Show tags', 'aria-expanded': 'false', 'aria-controls': 'reader-tags' });
+    icon(tagToggle, ['m20 13-7 7L3 10V3h7l10 10Z', 'M7 7h.01']);
+    const tagName = element('span', '', tagToggle, { class: 'tag-name' });
+    const tagCount = element('span', '', tagToggle, { class: 'tag-count', 'aria-hidden': 'true' });
+    const tagTotal = element('span', '', tagToggle, { class: 'tag-total', 'aria-hidden': 'true' });
+    const actions = element('div', '', header, { class: 'actions' });
+    const refresh = element('button', '', actions, { class: 'icon', type: 'button', title: 'Refresh', 'aria-label': 'Refresh' });
+    icon(refresh, ['M20 7v5h-5', 'M20 12a8 8 0 1 0-2 5', 'M20 7v5']);
+    const link = element('a', '', actions, { class: 'icon', title: 'Open in Reader', 'aria-label': 'Open in Reader', target: '_blank', rel: 'noopener noreferrer' });
+    icon(link, ['M14 3h7v7', 'M10 14 21 3', 'M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5']);
+    const settings = element('button', '', actions, { class: 'icon', type: 'button', title: 'Options', 'aria-label': 'Extension options' });
+    icon(settings, ['M10 2h4l.6 2.7L17 6.1l2.6-.8 2 3.4-2 1.9v2.8l2 1.9-2 3.4-2.6-.8-2.4 1.4L14 22h-4l-.6-2.7L7 17.9l-2.6.8-2-3.4 2-1.9v-2.8l-2-1.9 2-3.4 2.6.8 2.4-1.4L10 2Z', 'M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0']);
+    const close = element('button', '', actions, { class: 'icon close', type: 'button', title: 'Close', 'aria-label': 'Close Reader' });
+    icon(close, ['m6 6 12 12', 'M6 18 18 6']);
+    const content = element('div', '', body, { class: 'content' });
+    const status = element('p', '', content, { class: 'status', role: 'status', 'aria-live': 'polite' });
+    const next = element('button', 'Search next 100 videos', content, { class: 'small', type: 'button' });
+    const tags = element('div', '', content, { class: 'tags', id: 'reader-tags', 'aria-label': 'Reader tags' });
+    const details = element('div', '', content);
     const summaryView = element('div', '', details, { id: 'reader-summary-view', role: 'tabpanel', 'aria-labelledby': 'reader-summary-tab', tabindex: '0' });
     const summary = element('div', '', summaryView, { class: 'summary' });
     const noteView = element('div', '', details, { id: 'reader-note-view', role: 'tabpanel', 'aria-labelledby': 'reader-note-tab' });
-    element('label', 'Document Note', noteView, { for: 'reader-note' });
-    const note = element('textarea', '', noteView, { id: 'reader-note', placeholder: 'Add a thought about this video…' });
+    const note = element('textarea', '', noteView, { id: 'reader-note', 'aria-label': 'Document Note', placeholder: 'Add a thought about this video…' });
     const conflict = element('div', '', noteView, { class: 'conflict' });
     element('p', 'Reader has a different note. Compare it below; your draft is kept above.', conflict);
     const remote = element('div', '', conflict, { class: 'remote' });
@@ -112,11 +123,11 @@
     const footer = element('div', '', noteView, { class: 'footer' });
     const save = element('button', 'Save note', footer, { class: 'save', type: 'button' });
     const dirty = element('span', '', footer, { class: 'muted' });
-    element('p', 'Drafts stay in this tab when dismissed or switching videos. Save replaces the Document Note; an empty note clears it.', noteView, { class: 'hint' });
+    settings.addEventListener('click', () => void send({ type: 'open-options' }));
+    tagToggle.addEventListener('click', () => { const s = current(); if (s) { s.tagsOpen = !s.tagsOpen; render(); } });
     toggle.addEventListener('click', () => {
       if (open) { dismiss(); return; }
       open = true; render();
-      // The tabs may be hidden while an unsaved video is being located.
       (current()?.doc || current()?.dirty ? (current().tab === 'note' ? noteTab : summaryTab) : close).focus();
       if (!current()?.loaded) void load();
     });
@@ -135,7 +146,7 @@
     save.addEventListener('click', () => void saveNote());
     useRemote.addEventListener('click', () => resolveConflict(false));
     keepDraft.addEventListener('click', () => resolveConflict(true));
-    view = { toggle, dot, body, refresh, link, status, next, details, summary, tags, summaryTab, noteTab, noteDot, summaryView, noteView, note, conflict, remote, save, dirty };
+    view = { toggle, dot, body, refresh, link, status, next, details, summary, tags, tagToggle, tagName, tagCount, tagTotal, summaryTab, noteTab, noteDot, summaryView, noteView, note, conflict, remote, save, dirty };
   };
   const render = () => {
     if (!view) return;
@@ -151,21 +162,37 @@
     view.noteTab.setAttribute('aria-label', s?.dirty ? 'Note, unsaved draft' : 'Note');
     view.noteTab.tabIndex = s?.tab === 'note' ? 0 : -1;
     view.noteDot.hidden = !s?.dirty;
+    view.noteTab.disabled = !s?.doc && !s?.dirty;
     view.summaryView.hidden = s?.tab === 'note';
     view.noteView.hidden = s?.tab !== 'note';
     if (!s) return;
     view.status.textContent = s.status;
+    view.status.hidden = !s.status;
     view.refresh.disabled = s.busy;
     view.next.hidden = !s.cursor || Boolean(s.doc);
     view.next.disabled = s.busy;
-    view.link.hidden = !s.doc;
+    view.link.setAttribute('aria-disabled', String(!s.doc));
+    view.link.tabIndex = s.doc ? 0 : -1;
     if (s.doc) view.link.href = C.readerUrl(s.doc.id);
     else view.link.removeAttribute('href');
     view.details.hidden = !s.doc && !s.dirty;
     view.summary.textContent = s.doc?.summary || 'Summary not available yet. Reader may still be processing it, or automatic summaries may be disabled. Try Refresh later.';
-    view.tags.replaceChildren();
-    for (const tag of s.doc?.tags || []) element('span', tag, view.tags, { class: 'tag' });
-    if (!s.doc?.tags.length) element('span', 'No tags yet', view.tags, { class: 'muted' });
+    const tags = s.doc?.tags || [];
+    view.tagToggle.hidden = tags.length === 0;
+    view.tagToggle.title = tags.length ? tags.join(', ') : 'Tags';
+    view.tagToggle.setAttribute('aria-label', `Show ${tags.length} tag${tags.length === 1 ? '' : 's'}`);
+    view.tagToggle.setAttribute('aria-expanded', String(Boolean(s.tagsOpen)));
+    view.tagName.textContent = tags[0] || '';
+    view.tagCount.textContent = tags.length > 1 ? `+${tags.length - 1}` : '';
+    view.tagTotal.textContent = String(tags.length);
+    view.tags.hidden = !s.tagsOpen || !tags.length;
+    // Do not recreate text nodes on every keypress or move focus out of the header.
+    const tagKey = JSON.stringify(tags);
+    if (view.tags.dataset.key !== tagKey) {
+      view.tags.dataset.key = tagKey;
+      view.tags.replaceChildren();
+      for (const tag of tags) element('span', tag, view.tags, { class: 'tag' });
+    }
     if (view.note.value !== s.value) view.note.value = s.value;
     view.save.disabled = s.busy || !s.dirty || !s.doc || Boolean(s.conflict);
     view.dirty.textContent = s.busy ? 'Working…' : s.dirty ? 'Unsaved draft' : 'Saved in Reader';
@@ -182,7 +209,7 @@
     s.busy = false; s.loaded = true;
     if (response.ok && response.document) {
       C.receive(s, response.document); s.cursor = null;
-      s.status = s.conflict ? 'Reader changed. Review the note conflict before saving.' : 'Up to date with Reader.';
+      s.status = s.conflict ? 'Reader changed. Review the note conflict before saving.' : '';
     } else if (response.ok) {
       s.doc = null; s.cursor = response.nextCursor;
       s.status = s.cursor ? 'Not found in the videos checked so far. Search the next page, or save using the existing video overlay.'
