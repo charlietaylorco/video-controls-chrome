@@ -185,6 +185,17 @@ test('transient card-context errors are not cached across fresh hover intent', a
   assert.equal(f.messages.length, 2); assert.match(f.byClass('summary').textContent, /beta/);
 });
 
+test('a not-ready summary is explicit, briefly cached and never polls or regenerates Reader content', async () => {
+  const f = fixture(); f.responder = (message, normal) => {
+    const reply = normal(); reply.document.summary = ''; return reply;
+  };
+  await f.hover(); assert.match(f.byClass('summary').textContent, /Summary not available yet/);
+  f.api.close(); await f.hover(); assert.equal(f.messages.length, 1);
+  f.api.close(); f.advance(15001); assert.equal(f.messages.length, 1);
+  await f.hover(); assert.equal(f.messages.length, 2);
+  assert.ok(f.messages.every(message => message.type === 'reader-card-get'));
+});
+
 test('position computation clamps above/below the icon inside a narrow viewport', async () => {
   const f = fixture({ width: 280, height: 210 }); await f.hover();
   assert.equal(f.host.style.left, '8px'); assert.equal(f.host.style.top, '8px');
