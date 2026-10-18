@@ -7,7 +7,7 @@ const C = require('../reader-core.js');
 const PAGE = 'https://www.youtube.com/feed/subscriptions';
 const A = 'https://www.youtube.com/watch?v=alpha', B = 'https://www.youtube.com/watch?v=beta';
 const tick = () => new Promise(setImmediate);
-function fixture({ saved = true, width = 1100, height = 700 } = {}) {
+function fixture({ saved = true, width = 1100, height = 700, nativeEvents = false } = {}) {
   const timers = new Map(), events = new Map(), storage = [], messages = [], validators = [];
   let active = null, clock = 100000, id = 0, uuid = 0, responder, mutation, deleted = 0;
   class Node {
@@ -19,10 +19,12 @@ function fixture({ saved = true, width = 1100, height = 700 } = {}) {
     addEventListener(key, fn) { this.listeners.set(key, [...(this.listeners.get(key) || []), fn]); }
     fire(key, values = {}) { const event = { key: '', composedPath: () => [this], preventDefault() { this.prevented = true; }, stopPropagation() {}, ...values }; (this.listeners.get(key) || []).forEach(fn => fn(event)); return event; }
     click() { if (!this.disabled && !this.hidden) this.fire('click'); }
+    get hidden() { return this._hidden; }
+    set hidden(value) { this._hidden = value; if (nativeEvents && value && active && this.contains(active)) focusNode(null); }
     contains(node) { for (let n = node; n; n = n.parentElement) if (n === this) return true; return false; }
     getRootNode() { for (let n = this; n; n = n.parentElement) if (n.tagName === 'shadow' || !n.parentElement) return n; }
-    focus() { active = this; this.fire('focusin'); }
-    blur() { active = null; this.fire('focusout'); }
+    focus() { if (nativeEvents) focusNode(this); else { active = this; this.fire('focusin'); } }
+    blur() { if (nativeEvents) focusNode(null); else { active = null; this.fire('focusout'); } }
     attachShadow() { this.shadowRoot = new Node('shadow'); this.shadowRoot.host = this; return this.shadowRoot; }
     get activeElement() { return this.tagName === 'shadow' ? (this.contains(active) ? active : null) : active; }
     get isConnected() { const root = this.getRootNode(); return root === document.documentElement || Boolean(root.host?.isConnected); }
@@ -34,6 +36,26 @@ function fixture({ saved = true, width = 1100, height = 700 } = {}) {
   }
   const document = { documentElement: new Node('html'), createElement: tag => new Node(tag), createElementNS: (_, tag) => new Node(tag),
     addEventListener(type, fn) { events.set(type, [...(events.get(type) || []), fn]); } };
+  const pathFor = node => {
+    const path = []; for (let n = node; n; n = n.parentElement || n.host) path.push(n); return path;
+  };
+  const dispatch = (node, type, values = {}) => {
+    const path = pathFor(node);
+    const event = { type, target: node, composedPath: () => path, preventDefault() { this.prevented = true; }, stopPropagation() { this.stopped = true; }, ...values };
+    if (type === 'pointerdown') for (const fn of events.get(type) || []) fn(event);
+    for (const n of path) {
+      if (event.stopped) break;
+      for (const fn of n.listeners.get(type) || []) fn(event);
+    }
+    if (type !== 'pointerdown' && !event.stopped) for (const fn of events.get(type) || []) fn(event);
+    return event;
+  };
+  function focusNode(node) {
+    if (active === node) return;
+    const previous = active; active = node;
+    if (previous) dispatch(previous, 'focusout', { relatedTarget: node });
+    if (node) dispatch(node, 'focusin', { relatedTarget: previous });
+  }
   const source = new Node('card'), overlay = new Node('overlay'), button = new Node('button');
   document.documentElement.append(source, overlay); overlay.attachShadow().append(button);
   let target = { source, videoUrl: B, title: 'Card title', saved };
@@ -74,6 +96,11 @@ function fixture({ saved = true, width = 1100, height = 700 } = {}) {
       let reply; validators.forEach(fn => fn(message, sender, result => { reply = result; })); return reply;
     },
     async hover() { button.hover = true; button.fire('pointerenter'); run(300); await tick(); },
+    userClick(node) {
+      dispatch(node, 'pointermove'); dispatch(node, 'pointerdown'); dispatch(node, 'mousedown');
+      focusNode(node); dispatch(node, 'pointerup'); dispatch(node, 'mouseup'); dispatch(node, 'click');
+    },
+    keyboardActivate(node) { focusNode(node); dispatch(node, 'keydown', { key: 'Enter' }); dispatch(node, 'click'); },
   };
 }
 
@@ -94,7 +121,7 @@ function connectWorker(f, responder) {
     },
   }, fetch: async (url, options) => {
     requests.push({ url, ...options });
-    const result = responder(url, options, requests);
+    const result = await responder(url, options, requests);
     return { status: result.status || 200, ok: !result.status || (result.status >= 200 && result.status < 300),
       headers: { get: () => null }, json: async () => result };
   } });
@@ -135,6 +162,52 @@ test('real hover route never displays success for a missing preflight target or 
     assert.equal(f.deleted, 0); assert.equal(worker.data.readerSavedUrls[B], 1); assert.equal(worker.data.readerDeletedVideos?.[B], undefined);
     assert.equal(worker.requests.filter(r => r.method === 'DELETE').length, failure === 'missing' ? 0 : 1);
     assert.match(f.byClass('summary').textContent, failure === 'missing' ? /No DELETE was sent/ : /still returns this document/);
+  }
+});
+
+test('native pointer confirmation retains its card lease through hidden-control focusout and a slow preflight', async () => {
+  const f = fixture({ nativeEvents: true }); let reads = 0, release, present = true;
+  const raw = () => ({ id: 'doc-beta', source_url: B, title: 'Fixture video', summary: 'Fixture summary', notes: 'Saved note', updated_at: 'v1' });
+  const worker = connectWorker(f, (url, init) => {
+    if (init.method === 'DELETE') { present = false; return { status: 204 }; }
+    if (++reads === 2) return new Promise(resolve => { release = () => resolve({ results: [raw()] }); });
+    return { results: present ? [raw()] : [] };
+  });
+  await f.hover(); f.button.fire('pointerleave');
+  f.host.fire('pointerenter'); f.userClick(f.findButton('Delete from Reader'));
+  assert.equal(f.byClass('confirmation').hidden, false); assert.equal(f.active, f.findButton('Cancel'));
+  f.userClick(f.findButton('Delete document')); await tick();
+  f.host.fire('pointerleave'); f.run(180); const dismissed = f.host.hidden;
+  release(); await tick();
+  assert.equal(dismissed, false, 'focusout from hiding the clicked confirmation must not dismiss an accepted pending action');
+  assert.equal(worker.requests.filter(r => r.method === 'DELETE').length, 1);
+  assert.equal(f.deleted, 1); assert.match(f.byClass('summary').textContent, /^Deleted from Reader/);
+});
+
+test('keyboard confirmation and accidental focus departure cannot implicitly cancel a pending delete or issue it twice', async () => {
+  const f = fixture({ nativeEvents: true }); let release;
+  f.responder = (message, normal) => message.type === 'reader-card-delete' ? new Promise(resolve => { release = () => resolve(normal()); }) : normal();
+  await f.hover(); f.keyboardActivate(f.findButton('Delete from Reader')); f.keyboardActivate(f.findButton('Delete document'));
+  f.active.blur(); f.host.fire('pointerleave'); f.run(180);
+  f.findButton('Delete document').fire('click');
+  assert.equal(f.host.hidden, false); assert.equal(f.messages.filter(m => m.type === 'reader-card-delete').length, 1);
+  release(); await tick(); assert.equal(f.deleted, 1);
+});
+
+test('explicit dismissal or a recycled card during slow preflight still revokes the lease before DELETE', async () => {
+  for (const dismissal of ['close', 'escape', 'outside', 'recycle']) {
+    const f = fixture({ nativeEvents: true }); let reads = 0, release;
+    const raw = { id: 'doc-beta', source_url: B, title: 'Fixture video', summary: 'Summary', notes: 'Saved note', updated_at: 'v1' };
+    const worker = connectWorker(f, () => ++reads === 2 ? new Promise(resolve => { release = () => resolve({ results: [raw] }); }) : { results: [raw] });
+    await f.hover(); f.userClick(f.findButton('Delete from Reader')); f.userClick(f.findButton('Delete document')); await tick();
+    if (dismissal === 'close') f.userClick(f.findButton('Close summary'));
+    if (dismissal === 'escape') f.event('keydown', { key: 'Escape', composedPath: () => [f.host] });
+    if (dismissal === 'outside') f.event('pointerdown');
+    if (dismissal === 'recycle') f.setTarget({ videoUrl: A });
+    release(); await tick();
+    assert.equal(f.host.hidden, true, dismissal); assert.equal(f.deleted, 0);
+    assert.equal(worker.requests.filter(r => r.method === 'DELETE').length, 0, dismissal);
+    assert.equal(worker.data.readerSavedUrls[B], 1);
   }
 });
 

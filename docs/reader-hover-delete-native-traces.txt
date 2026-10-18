@@ -1,0 +1,113 @@
+=== BASELINE — SYNTHETIC READER DATA ONLY ===
+1ms Ready. Focus bookmark and press ArrowDown, then click trash and Delete document. Preflight delay 800ms.
+190ms UI reader-card-get
+192ms Native focusin: Close summary
+193ms Live card validation true
+194ms Live card validation true
+194ms GET list/?id=fixture-doc
+194ms Mock HTTP 200 · records 1
+194ms Reply {"ok":true,"document":{"id":"fixture-doc","videoUrl":"https://www.youtube.com/watch?v=fixture_hover_delete","url":"https://read.readwise.io/read/fixture-doc","title":"Mock studio video","summary":"Mock Reader summary. No real library data.","notes":"Fixture note","tags":[],"updatedAt":"v1"}}
+284ms Native focusout:  -> none
+284ms Native focusin: Delete from Reader
+286ms Native focusout:  -> Cancel
+286ms Native focusin: small
+681ms Native focusout: Cancel -> Delete document
+682ms Native focusin: small destructive
+685ms UI reader-card-delete
+685ms Live card validation true
+685ms Live card validation true
+685ms GET list/?id=fixture-doc
+691ms Native focusout: Delete document -> none
+873ms POPOVER CLOSED
+1488ms Mock HTTP 200 · records 1
+1488ms Live card validation false
+1489ms Reply {"ok":false,"code":"invalid_sender"}
+
+=== FIXED — SYNTHETIC READER DATA ONLY ===
+1ms Ready. Focus bookmark and press ArrowDown, then click trash and Delete document. Preflight delay 800ms.
+236ms UI reader-card-get
+238ms Native focusin: Close summary
+240ms Live card validation true
+241ms Live card validation true
+241ms GET list/?id=fixture-doc
+241ms Mock HTTP 200 · records 1
+241ms Reply {"ok":true,"document":{"id":"fixture-doc","videoUrl":"https://www.youtube.com/watch?v=fixture_hover_delete","url":"https://read.readwise.io/read/fixture-doc","title":"Mock studio video","summary":"Mock Reader summary. No real library data.","notes":"Fixture note","tags":[],"updatedAt":"v1"}}
+5052ms Native focusout:  -> none
+5052ms Native focusin: Delete from Reader
+5055ms Native focusout:  -> Cancel
+5055ms Native focusin: small
+5398ms Native focusout: Cancel -> Delete document
+5398ms Native focusin: small destructive
+5400ms Native focusout: Delete document -> Mock studio videoMock Rea
+5400ms Native focusin: body
+5400ms UI reader-card-delete
+5400ms Live card validation true
+5401ms Live card validation true
+5401ms GET list/?id=fixture-doc
+6203ms Mock HTTP 200 · records 1
+6204ms Live card validation true
+6204ms DELETE delete/fixture-doc/
+6204ms Mock HTTP 204
+6204ms Live card validation true
+6204ms GET list/?id=fixture-doc
+6204ms Mock HTTP 200 · records 0
+6205ms Reply {"ok":true,"id":"fixture-doc","targetUrl":"https://www.youtube.com/watch?v=fixture_hover_delete","deleted":true,"deleteStatus":204,"verifiedAbsent":true}
+6205ms VERIFIED DELETION SUCCESS
+
+=== UNAUTHORIZED — SYNTHETIC READER DATA ONLY ===
+1ms Ready. Focus bookmark and press ArrowDown, then click trash and Delete document. Preflight delay 800ms.
+30ms UI reader-card-get
+31ms Native focusin: Close summary
+31ms Live card validation true
+32ms Live card validation true
+32ms GET list/?id=fixture-doc
+32ms Mock HTTP 200 · records 1
+32ms Reply {"ok":true,"document":{"id":"fixture-doc","videoUrl":"https://www.youtube.com/watch?v=fixture_hover_delete","url":"https://read.readwise.io/read/fixture-doc","title":"Mock studio video","summary":"Mock Reader summary. No real library data.","notes":"Fixture note","tags":[],"updatedAt":"v1"}}
+98ms Native focusout:  -> none
+99ms Native focusin: Delete from Reader
+100ms Native focusout:  -> Cancel
+100ms Native focusin: small
+363ms Native focusout: Cancel -> Delete document
+363ms Native focusin: small destructive
+364ms Native focusout: Delete document -> Mock studio videoMock Rea
+364ms Native focusin: body
+364ms UI reader-card-delete
+365ms Live card validation true
+365ms Live card validation true
+365ms GET list/?id=fixture-doc
+1167ms Mock HTTP 200 · records 1
+1167ms Live card validation true
+1167ms DELETE delete/fixture-doc/
+1167ms Mock HTTP 401
+1168ms Reply {"ok":false,"code":"unauthorized"}
+
+=== CLOSED-ROOT — SYNTHETIC READER DATA ONLY ===
+1ms Ready. Focus bookmark and press ArrowDown, then click trash and Delete document. Preflight delay 800ms.
+6248ms UI reader-card-get
+6250ms Native focusin: Close summary
+6250ms Live card validation true
+6251ms Live card validation true
+6251ms GET list/?id=fixture-doc
+6251ms Mock HTTP 200 · records 1
+6251ms Reply {"ok":true,"document":{"id":"fixture-doc","videoUrl":"https://www.youtube.com/watch?v=fixture_hover_delete","url":"https://read.readwise.io/read/fixture-doc","title":"Mock studio video","summary":"Mock Reader summary. No real library data.","notes":"Fixture note","tags":[],"updatedAt":"v1"}}
+6273ms Native focusout:  -> none
+6274ms Native focusin: Delete from Reader
+12092ms Native focusout:  -> Cancel
+12092ms Native focusin: small
+12389ms Native focusout: Cancel -> Delete document
+12389ms Native focusin: small destructive
+18234ms Native focusout: Delete document -> Mock studio videoMock Rea
+18235ms Native focusin: body
+18236ms UI reader-card-delete
+18236ms Live card validation true
+18237ms Live card validation true
+18237ms GET list/?id=fixture-doc
+19038ms Mock HTTP 200 · records 1
+19039ms Live card validation true
+19039ms DELETE delete/fixture-doc/
+19039ms Mock HTTP 204
+19040ms Live card validation true
+19040ms GET list/?id=fixture-doc
+19040ms Mock HTTP 200 · records 0
+19040ms Reply {"ok":true,"id":"fixture-doc","targetUrl":"https://www.youtube.com/watch?v=fixture_hover_delete","deleted":true,"deleteStatus":204,"verifiedAbsent":true}
+19041ms VERIFIED DELETION SUCCESS

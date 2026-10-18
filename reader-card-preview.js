@@ -137,8 +137,13 @@
     };
     const remove = async () => {
       const s = session;
-      if (!s?.confirm || !s.doc || s.busy || !valid(s)) { close(); return; }
+      if (!s || s.busy) return; // A repeated activation must not cancel the accepted request.
+      if (!s.confirm || !s.doc || !valid(s)) { close(); return; }
       const doc = s.doc;
+      // Hiding the clicked confirmation otherwise blurs it to the page. That
+      // focusout starts the hover-close timer and invalidates the card lease
+      // before a slow preflight can send DELETE. Keep focus on a stable node.
+      ui.body.focus({ preventScroll: true }); clearTimeout(leave);
       s.confirm = false; s.busy = true; s.action = 'delete'; s.text = 'Checking Reader before deleting…'; s.error = false; render();
       const reply = await send({ type: 'reader-card-delete', pageUrl: s.page, targetUrl: s.url, lease: s.lease,
         id: doc.id, confirmed: true, title: doc.title, baseNotes: doc.notes, updatedAt: doc.updatedAt });
@@ -159,7 +164,13 @@
     };
     const scheduleClose = () => {
       clearTimeout(intent); clearTimeout(leave);
-      leave = setTimeout(() => { if (session && !root?.activeElement && button.getRootNode().activeElement !== button) close(); }, 180);
+      leave = setTimeout(() => {
+        // Implicit hover/focus departure cannot revoke an accepted mutation.
+        // Explicit dismissal, navigation, recycled cards and credential changes
+        // still close the session and retain all background identity guards.
+        if (session?.busy && session.action === 'delete') return;
+        if (session && !root?.activeElement && button.getRootNode().activeElement !== button) close();
+      }, 180);
     };
     const begin = (immediate = false) => {
       clearTimeout(leave);
