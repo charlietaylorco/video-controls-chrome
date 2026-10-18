@@ -57,3 +57,52 @@ The extension reads only that player's available renditions and matching post me
 2. Enable **Developer mode**
 3. Click **Load unpacked**
 4. Select the extension folder you cloned or downloaded locally
+
+## Reader panel on YouTube
+
+In **Extension options → Reader**, enable **Reader panel on YouTube**. It defaults to off. On a YouTube watch/live page, click the book icon in the page’s top-right corner to open a popover with **Summary** and **Note** views, a shared tag chip, and icon actions in one compact header row. Click the tag chip to show all tags; long names truncate and narrow windows show a tag count. It shows the existing Reader summary and Document Note. The playback overlay and its one-click save work independently. No new permissions are required.
+
+- The **Refresh** icon fetches the current Reader document. Missing summaries mean no summary has been returned yet; Reader may still be processing the video or automatic summaries may be disabled. This extension does not generate summaries or invoke Ghostreader.
+- Close with **Escape**, the close button, or an outside click. Keyboard users can use arrow keys/Home/End to switch views; Escape/Close returns focus to the launcher. The popover fits the viewport and does not move the page content.
+- Drag unused header background to reposition the open popover. Controls and text keep their normal behavior. The position stays in this tab across dismissal/video changes, clamps to the viewport after resize, and resets to the corner on a full page reload.
+- Choose **System**, **Light**, or **Dark** in **Extension options → Reader → Popover theme**. System is the default and follows live system appearance changes. Launcher hover remains opaque in every mode.
+- Note typing is isolated from YouTube shortcuts while native editing/selection and browser commands remain available. Escape closes the popover after the key is released; Escape during IME composition stays in the editor.
+- Successful note saves show **Saved** beside the save button for three seconds, then clear. The reserved feedback slot and overlaid error/conflict details keep the editor in place; errors remain until addressed. New edits or a new save attempt clear old success feedback.
+- **Save note** explicitly replaces the Document Note. Saving an empty note clears it. Tags are display-only. Reader content is shown as plain text, including any Markdown/HTML markup.
+- The trash icon opens **Delete from Reader** confirmation naming the document, video URL, and Reader ID. Nothing is deleted until **Delete document** is clicked. Deletion includes the document's highlights and their notes. Cancel/Escape preserves the draft; confirmed deletion also keeps any unsaved local note in this tab for copying. It cannot be saved until a matching document exists again and any replacement conflict is reviewed. No automatic re-save occurs.
+- Deletion rechecks the captured document's source, title, note, and update timestamp. Changes require review and fresh confirmation. Confirmed removal (or an already-absent document) invalidates matching IDs and saved flags, including canonical URL aliases; a newer replacement save is retained. Authentication/rate/network failures keep drafts and never report unconfirmed success. An uncertain deletion must be checked with Refresh before retrying.
+- The [Reader API](https://readwise.io/reader_api#document-delete) documents `DELETE /api/v3/delete/<document_id>/` and `204` success. Reader's [app documentation](https://docs.readwise.io/reader/docs/faqs#can-i-restore-documents-that-ive-previously-deleted) describes device-specific Trash, but does not establish recovery behavior for API deletions. This extension offers no Undo or recovery promise. Preflight checks are not atomic with either note updates or deletion; another client can change a document between requests.
+- Unsaved drafts are retained per video in this tab through YouTube navigation, dismissal, switching Summary/Note views, remounts, refresh, and pending requests. Edits typed during a save remain unsaved after that save completes. Drafts are held in memory: copy or save them before a full page reload, tab close, browser crash, or extension reload. The tab requests the browser's leave-page warning when drafts are dirty; the browser controls whether that warning is shown.
+- Every save first re-reads the captured Reader document, verifies its source video, and compares its note with the editing baseline. If it changed, compare the Reader note and choose **Use Reader note** or **Keep my draft for next save**, then save explicitly. Reader's public API has no atomic conditional update: another client can still change the note between this check and the PATCH. Concurrent saves through this extension are serialized.
+- Newly saved videos retain a canonical video URL → Reader document ID mapping. Existing/externally saved videos are matched by source URL in one page of up to 100 Reader `video` documents per explicit action. **Search next 100 videos** continues manually. There is no automatic full-library scan or save on navigation/panel open. Older videos can require multiple clicks; documents Reader classified outside `video` are found only if their ID was retained by this extension. Deleted/stale IDs are verified and discarded before discovery.
+- Panel reads are capped locally below Reader's list limit. HTTP 429 cooldowns honor `Retry-After` (at least one minute) and survive service-worker restarts; there are no automatic retries. A failed or timed-out note write may have reached Reader: the draft stays intact, and **Refresh** checks the actual note before another attempt.
+
+![Reader panel with mock summary, tags, and Document Note](docs/reader-panel-mock.png)
+
+The previews use a mock YouTube layout and mock Reader data, captured before the trash action was added. [Dark Note preview](docs/reader-panel-dark-note-mock.png).
+
+The panel currently targets standard desktop/mobile watch and live pages, and hides during fullscreen playback. Shorts and embeds retain the existing save/playback controls. Summary polling, tag editing, transcript/highlights, and Ghostreader chat are outside this version.
+
+### Development checks
+
+No build step or lint configuration is required for this plain JavaScript extension. Run syntax and regression checks with Node.js:
+
+```sh
+for file in *.js tests/*.js tests/*.cjs; do node --check "$file" || exit; done
+node --test tests/*.test.js
+git diff --check
+```
+
+Optional browser checks use Playwright with a fresh headless Chromium profile. Every page/network response and Reader operation is mocked; they do not install the extension into your browser or use real Reader credentials/notes. Install Playwright locally if needed (keep `node_modules` untracked), then run:
+
+```sh
+npm install --no-save --package-lock=false playwright
+npx playwright install chromium
+node --test tests/reader-panel.browser.cjs
+```
+
+An existing Playwright module/browser can be supplied with `PLAYWRIGHT_MODULE` and `PLAYWRIGHT_CHROMIUM_EXECUTABLE`. Browser checks cover SPA drafts, late fetch/save responses, external note conflicts, explicit clearing, inert remote HTML, remounts, dismissal/focus/keyboard tabs, host capture/bubble shortcut isolation, native text/selection and composition, all theme modes/live system changes, opaque hover contrast, drag/clamping/resize, fixed save/error/conflict geometry and success expiry, all header icon actions, tag overflow, viewport bounds in light/dark/mobile/short windows, and existing playback/one-click save. Fixture screenshots are written under `output/playwright/`. These checks do not validate YouTube's live DOM or Reader's live authenticated responses; a manual smoke test in a separate test profile is still needed before release.
+
+The Note editor is a script-free, same-origin iframe with a native textarea, so keyboard events have their own browsing-context path rather than being retargeted to the shadow host on YouTube. Tests exercise event isolation and native defaults; real OS clipboard/IME and live site/browser-extension combinations still need manual testing.
+
+`tests/reader-panel.test.js` also runs the actual panel controller against a small Node DOM/editor fixture. Together with `tests/reader.test.js`, it covers deletion confirmation/cancellation, exact identity, changed documents, retained drafts, SPA and late responses, credential changes, cache invalidation, already-absent documents, uncertain outcomes and inert remote titles without launching a browser or making network requests.

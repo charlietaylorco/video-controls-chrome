@@ -53,6 +53,20 @@
     },
     {
       "matches": [
+        "https://www.youtube.com/*",
+        "https://youtube.com/*",
+        "https://m.youtube.com/*",
+        "https://music.youtube.com/*"
+      ],
+      "js": [
+        "reader-core.js",
+        "reader-editor.js",
+        "reader-panel.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
         "<all_urls>"
       ],
       "all_frames": true,

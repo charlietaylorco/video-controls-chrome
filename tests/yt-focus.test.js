@@ -218,3 +218,28 @@ test('options retain legacy focus settings and defaults when nothing was saved l
   const fresh = harness('options.js');
   assert.equal(fresh.input('hide-feed-videos').checked, false);
 });
+
+test('Reader panel defaults to off and options persist explicit opt-in', () => {
+  const app = harness('options.js');
+  const toggle = app.input('show-reader-panel');
+  assert.equal(toggle.checked, false);
+  toggle.checked = true;
+  toggle.events.change();
+  assert.equal(app.data.showReaderPanel, true);
+  const reloaded = harness('options.js', { showReaderPanel: true });
+  assert.equal(reloaded.input('show-reader-panel').checked, true);
+});
+
+
+test('Reader popover theme defaults to system, validates modes and persists without touching credentials', () => {
+  const app = harness('options.js', { readerToken: 'fixture-token' });
+  assert.equal(app.input('reader-panel-theme').value, 'system');
+  for (const mode of ['light', 'dark', 'system']) {
+    app.input('reader-panel-theme').value = mode;
+    app.input('reader-panel-theme').events.change();
+    assert.equal(app.data.readerPanelTheme, mode);
+    assert.equal(app.data.readerToken, 'fixture-token');
+    assert.equal(harness('options.js', app.data).input('reader-panel-theme').value, mode);
+  }
+  assert.equal(harness('options.js', { readerPanelTheme: 'invalid' }).input('reader-panel-theme').value, 'system');
+});
