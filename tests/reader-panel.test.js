@@ -67,7 +67,7 @@ function fixture({ url = A, width = 1100, height = 900 } = {}) {
         if (message.type === 'reader-panel-save-note') { doc.notes = message.notes; return { ok: true, id: message.id, notes: message.notes }; }
         if (message.type === 'reader-panel-move') { doc.location = message.location; doc.updatedAt = 'v2'; return { ok: true, document: { ...doc } }; }
         if (message.type === 'reader-panel-delete') { docs.delete(message.id); return { ok: true, id: message.id }; }
-        if (message.type === 'open-options') return { ok: true };
+        if (['open-options', 'open-watch-list'].includes(message.type)) return { ok: true };
         throw new Error(`Unexpected action: ${message.type}`);
       };
       Promise.resolve(responder ? responder(message, normal) : normal()).then(callback);
@@ -334,6 +334,8 @@ test('location control follows Note and precedes tags; overflow contains readabl
   assert.equal(f.button('Extension options').textContent, 'Options');
   f.button('Extension options').click(); await tick();
   assert.equal(f.messages.at(-1).type, 'open-options'); assert.equal(f.byId('reader-more-menu').hidden, true);
+  f.button('More Reader actions').click(); f.button('Watch list').click(); await tick();
+  assert.equal(f.messages.at(-1).type, 'open-watch-list'); assert.equal(f.byId('reader-more-menu').hidden, true);
 });
 
 test('location and overflow menus support arrow/Home/End, Escape, Tab and outside dismissal', async () => {
@@ -348,7 +350,7 @@ test('location and overflow menus support arrow/Home/End, Escape, Tab and outsid
   f.byClass('location').click(); menu.fire('keydown', { key: 'Tab' });
   assert.equal(menu.hidden, true); assert.equal(f.active, f.button('Refresh'));
   f.button('More Reader actions').fire('keydown', { key: 'ArrowUp' });
-  assert.equal(f.active, f.button('Extension options'));
+  assert.equal(f.active, f.button('Watch list'));
   f.event('pointerdown'); assert.equal(f.byId('reader-more-menu').hidden, true);
   assert.equal(f.byClass('body').hidden, true);
 });

@@ -2307,6 +2307,7 @@
 
   const getReaderFeedback = (response, error) => {
     if (response?.ok && !error) {
+      if (response.historyWarning) return { kind: "error", message: "Saved to Reader; Watch list storage could not be updated.", linkUrl: response.url };
       if (response.alreadyExists) {
         return {
           kind: "success",
@@ -2973,7 +2974,8 @@
         type: "save-to-reader",
         pageUrl,
         title,
-        author
+        author,
+        openExisting: shouldOpenExisting
       });
 
       if (response?.code === "missing_token") {

@@ -32,6 +32,7 @@
     const tags = Array.isArray(doc.tags) ? doc.tags : Object.entries(doc.tags || {}).map(([key, tag]) =>
       typeof tag?.name === 'string' ? tag.name : key);
     return { id: doc.id, videoUrl, url: readerUrl(doc.id), title: typeof doc.title === 'string' ? doc.title : '',
+      author: typeof doc.author === 'string' ? doc.author : '',
       summary: typeof doc.summary === 'string' ? doc.summary : '',
       notes: typeof doc.notes === 'string' ? doc.notes : '',
       location: typeof doc.location === 'string' ? doc.location : '',
