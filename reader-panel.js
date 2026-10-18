@@ -8,7 +8,8 @@
   let activeUrl = null;
   let host, root, view;
   let open = false;
-  let scheduled = false;
+  let syncTimer = null;
+  let visit = 0;
   let theme = 'system';
   const systemTheme = window.matchMedia('(prefers-color-scheme: dark)');
   let position = null; // This tab only, shared across videos; reload returns to the corner.
@@ -75,7 +76,7 @@
     document_changed: 'The matched document changed. Refresh and review it before deleting. Your draft is kept.',
     invalid_delete: 'Deletion was not sent. Reopen the confirmation for this document.',
     not_found: 'This Reader document was deleted or no longer matches this video. Your draft is kept. Refresh to find it again.',
-    invalid_sender: 'The video changed. Reopen the panel on this video and try again.',
+    invalid_sender: 'This tab is still changing videos. Try Refresh in a moment. Your draft is kept.',
     ambiguous: 'Multiple Reader documents match. Open Reader to choose the correct document.',
     storage_error: 'Extension storage is unavailable. Your draft is kept in this tab.',
     runtime_error: 'The extension reloaded or is unavailable. Reload this tab after copying any draft.',
@@ -93,12 +94,19 @@
   };
   const dismiss = (restoreFocus = false) => {
     endDrag();
+    clearTimeout(current()?.retryTimer);
     if (current()) current().deleteConfirm = null;
     open = false;
     render();
     if (restoreFocus && host?.isConnected) view.toggle.focus();
   };
+  const sameVideo = () => {
+    if (C.canonical(location.href) === activeUrl) return true;
+    sync();
+    return false; // A click on the previous document must never mutate the next one.
+  };
   const selectTab = (tab, focus = false) => {
+    if (!sameVideo()) return;
     const s = current();
     if (!s || (tab === 'note' && !s.doc && !s.dirty)) return;
     s.tab = tab;
@@ -203,9 +211,13 @@
     });
     header.addEventListener('lostpointercapture', endDrag);
     settings.addEventListener('click', () => void send({ type: 'open-options' }));
-    tagToggle.addEventListener('click', () => { const s = current(); if (s) { s.tagsOpen = !s.tagsOpen; render(); } });
+    tagToggle.addEventListener('click', () => { if (!sameVideo()) return; const s = current(); if (s) { s.tagsOpen = !s.tagsOpen; render(); } });
+    link.addEventListener('click', event => { if (!sameVideo()) event.preventDefault(); });
     toggle.addEventListener('click', () => {
-      if (open) { dismiss(); return; }
+      const changed = C.canonical(location.href) !== activeUrl;
+      sync(false); // Bind before opening, even if YouTube's event is still pending.
+      if (!host.isConnected) return;
+      if (open && !changed) { dismiss(); return; }
       open = true; render();
       (current()?.doc || current()?.dirty ? (current().tab === 'note' ? noteTab : summaryTab) : close).focus();
       if (!current()?.loaded) void load();
@@ -305,15 +317,27 @@
     view.remote.textContent = s.conflict?.notes || '(Empty note)';
     placePopover();
   };
-  const load = async (nextPage = false) => {
+  const load = async (nextPage = false, retried = false) => {
+    if (!sameVideo()) return;
     const url = activeUrl, s = current();
     if (!s || s.busy || s.deleteConfirm) return;
+    clearTimeout(s.retryTimer);
     clearFeedback(s); s.statusKind = 'info'; s.action = 'read';
     s.busy = true; s.status = 'Checking Reader…'; render();
-    const request = ++s.request;
-    const response = await send({ type: 'reader-panel-get', pageUrl: url, cursor: nextPage ? s.cursor : null });
+    const request = ++s.request, readingVisit = visit;
+    const response = await send({ type: 'reader-panel-get', pageUrl: url, cursor: nextPage ? s.cursor : null, visit: readingVisit });
+    sameVideo();
     if (s.request !== request) return;
-    s.busy = false; s.loaded = true;
+    s.busy = false; s.loaded = response.code !== 'invalid_sender';
+    // Browser tab metadata can briefly lag a committed SPA URL. Retry this read
+    // once only; never retry a mutation or keep looping on navigation/errors.
+    if (response.code === 'invalid_sender' && !retried && open && url === activeUrl && visit === readingVisit) {
+      s.status = 'Checking Reader…';
+      s.retryTimer = setTimeout(() => {
+        if (open && visit === readingVisit && activeUrl === url && s.request === request && !s.busy) void load(nextPage, true);
+      }, 250);
+      render(); return;
+    }
     if (response.ok && response.document) {
       C.receive(s, response.document); s.cursor = null;
       s.status = s.conflict ? 'Reader changed. Review the note conflict before saving.' : '';
@@ -327,12 +351,14 @@
     if (url === activeUrl) render();
   };
   const saveNote = async () => {
+    if (!sameVideo()) return;
     const url = activeUrl, s = current();
     if (!s?.doc || s.busy || !s.dirty || s.conflict || s.deleteConfirm) return;
     clearFeedback(s); s.statusKind = 'info'; s.action = 'save';
     const id = s.doc.id, sent = s.value, request = ++s.request;
     s.busy = true; s.status = 'Checking Reader before saving…'; render();
     const response = await send({ type: 'reader-panel-save-note', pageUrl: url, id, notes: sent, baseNotes: s.base });
+    sameVideo();
     if (s.request !== request) return;
     s.busy = false;
     if (response.ok && response.id === id && s.doc?.id === id) {
@@ -347,6 +373,7 @@
     if (url === activeUrl) render();
   };
   const requestDeletion = () => {
+    if (!sameVideo()) return;
     const s = current();
     if (!s?.doc || s.busy || C.canonical(location.href) !== activeUrl) return;
     clearFeedback(s);
@@ -359,6 +386,7 @@
     s.deleteConfirm = null; render(); view.trash.focus();
   };
   const deleteDocument = async () => {
+    if (!sameVideo()) return;
     const url = activeUrl, s = current(), confirmation = s?.deleteConfirm;
     if (!confirmation || s.busy || confirmation.url !== url || C.canonical(location.href) !== url || s.doc?.id !== confirmation.id) return;
     const id = confirmation.id, request = ++s.request;
@@ -366,6 +394,7 @@
     render(); view.trash.blur();
     const response = await send({ type: 'reader-panel-delete', pageUrl: url, id, confirmed: true,
       title: confirmation.title, baseNotes: confirmation.baseNotes, updatedAt: confirmation.updatedAt });
+    sameVideo();
     if (s.request !== request) return;
     s.busy = false;
     if (response.ok && response.id === id && C.removed(s, id)) {
@@ -382,6 +411,7 @@
     if (url === activeUrl) { render(); if (open) view.close.focus(); }
   };
   const resolveConflict = (keep) => {
+    if (!sameVideo()) return;
     const s = current();
     if (!s?.conflict || s.busy) return;
     const value = s.value;
@@ -391,19 +421,34 @@
     s.status = keep ? 'Draft kept. Save note will check Reader again before replacing it.' : 'Using the note from Reader.';
     render();
   };
-  const sync = () => {
-    scheduled = false;
+  const sync = (readIfOpen = true) => {
+    clearTimeout(syncTimer); syncTimer = null;
     const url = C.canonical(location.href);
     const supported = url && !/^\/(embed|shorts)\//.test(location.pathname);
-    if (url !== activeUrl) { clearFeedback(current()); if (current()) current().deleteConfirm = null; activeUrl = url; dismiss(); }
+    const changed = url !== activeUrl;
+    if (changed) {
+      const previous = current();
+      clearFeedback(previous); clearTimeout(previous?.retryTimer);
+      if (previous) {
+        previous.deleteConfirm = null;
+        if (previous.busy && previous.action === 'read') { previous.request++; previous.busy = false; }
+      }
+      activeUrl = url; visit++; endDrag();
+      const nextState = current();
+      if (nextState) {
+        nextState.loaded = false; nextState.cursor = null; nextState.deleteConfirm = null;
+        if (!nextState.busy) { nextState.status = ''; nextState.statusKind = 'info'; }
+      }
+    }
     if (!enabled || !supported || document.fullscreenElement) { dismiss(); host?.remove(); return; }
     if (!host) createView();
     if (host.parentElement !== document.documentElement) document.documentElement.append(host);
     view.note.mount(); applyTheme();
     render();
+    if (changed && open && readIfOpen && !current()?.busy) void load();
   };
   const schedule = () => {
-    if (!scheduled) { scheduled = true; setTimeout(sync, 150); }
+    if (syncTimer === null) syncTimer = setTimeout(sync, 150);
   };
   chrome.storage.local.get({ showReaderPanel: false, readerPanelTheme: 'system' }, data => {
     enabled = data.showReaderPanel === true;
@@ -416,7 +461,7 @@
     if (changes.readerPanelTheme) { theme = ['light', 'dark'].includes(changes.readerPanelTheme.newValue) ? changes.readerPanelTheme.newValue : 'system'; applyTheme(); }
     if (changes.showReaderPanel) { enabled = changes.showReaderPanel.newValue === true; schedule(); }
     if (changes.readerToken) {
-      for (const s of states.values()) { clearFeedback(s); s.deleteConfirm = null; s.loaded = false; s.doc = null; s.conflict = null; s.request++; s.busy = false; }
+      for (const s of states.values()) { clearTimeout(s.retryTimer); clearFeedback(s); s.deleteConfirm = null; s.loaded = false; s.doc = null; s.conflict = null; s.request++; s.busy = false; }
       render();
     }
     // Storage changes never drive API reads. Invalidate a removed/replaced identity
@@ -439,7 +484,8 @@
     }
   });
   new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true });
-  document.addEventListener('yt-navigate-finish', schedule);
+  document.addEventListener('yt-navigate-finish', () => sync());
+  document.addEventListener('yt-page-data-updated', () => sync());
   document.addEventListener('fullscreenchange', schedule);
   document.addEventListener('pointerdown', event => {
     if (open && !event.composedPath().includes(host)) dismiss();
@@ -465,7 +511,7 @@
   }, true);
   window.addEventListener('pointercancel', endDrag);
   window.addEventListener('resize', () => { endDrag(); placePopover(); });
-  window.addEventListener('popstate', schedule);
+  window.addEventListener('popstate', () => sync());
   window.addEventListener('beforeunload', event => {
     if ([...states.values()].some(s => s.dirty)) { event.preventDefault(); event.returnValue = ''; }
   });

@@ -1,5 +1,12 @@
 /* Shared identity and draft rules. No Reader credentials or page HTML. */
 (() => {
+  const youtubeOrigin = (value) => {
+    try {
+      const u = new URL(value);
+      return u.protocol === 'https:' && !u.username && !u.password && !u.port &&
+        ['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com'].includes(u.hostname) ? u.origin : null;
+    } catch { return null; }
+  };
   const canonical = (value) => {
     try {
       const u = new URL(value);
@@ -47,7 +54,7 @@
     if (!state.dirty) state.value = state.base = '';
     return true;
   };
-  const api = { canonical, validId, readerUrl, cleanDocument, draft, edit, receive, saved, removed };
+  const api = { youtubeOrigin, canonical, validId, readerUrl, cleanDocument, draft, edit, receive, saved, removed };
   globalThis.MVSReaderCore = api;
   if (typeof module !== 'undefined') module.exports = api;
 })();

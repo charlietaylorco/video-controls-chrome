@@ -69,12 +69,11 @@ async function fixture({ enabled = true, width = 1100, height = 1100, theme = 's
   const panel = page.locator('#mvs-reader-panel');
   const editor = panel.frameLocator('iframe[title="Document Note"]').locator('textarea');
   const open = async (tab) => {
-    await panel.locator('.toggle').click();
+    if (await panel.locator('.toggle').getAttribute('aria-expanded') === 'false') await panel.locator('.toggle').click();
     if (tab === 'note' && await panel.getByRole('tab', { name: /^Note/ }).isVisible() && await panel.getByRole('tab', { name: /^Note/ }).isEnabled()) await panel.getByRole('tab', { name: /^Note/ }).click();
   };
   const navigate = async url => {
     await page.evaluate(url => { history.pushState({}, '', url); document.dispatchEvent(new Event('yt-navigate-finish')); }, url);
-    await page.waitForFunction(() => !document.querySelector('#mvs-reader-panel') || document.querySelector('#mvs-reader-panel').shadowRoot.querySelector('.toggle').getAttribute('aria-expanded') === 'false');
   };
   return { page, panel, editor, open, navigate, errors, close: () => context.close() };
 }
@@ -92,6 +91,28 @@ test('launcher is opt-in, collapsed, and opens without creating a Reader documen
   assert.equal(await f.panel.locator('a').getAttribute('href'), 'https://read.readwise.io/read/doc-a');
   assert.deepEqual(f.errors, []);
   await f.close();
+});
+
+test('SPA navigation: a closed panel opens on the current URL before the finish event', async () => {
+  const f = await fixture(); await f.open(); await f.panel.getByRole('button', { name: 'Close Reader', exact: true }).click();
+  await f.page.evaluate(url => history.pushState({}, '', url), B); await f.open();
+  const request = await f.page.evaluate(() => mock.messages.at(-1));
+  assert.equal(request.type, 'reader-panel-get'); assert.equal(request.pageUrl, B);
+  assert.equal(await f.panel.locator('a[aria-label="Open in Reader"]').getAttribute('href'), 'https://read.readwise.io/read/doc-b');
+  assert.deepEqual(f.errors, []); await f.close();
+});
+
+test('SPA navigation: an open panel rebinds without closing and late replies cannot replace its next video', async () => {
+  const f = await fixture(); await f.open('note'); await f.editor.fill('Draft A');
+  await f.page.evaluate(() => { mock.defer = true; });
+  await f.panel.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await f.navigate(B); assert.equal(await f.panel.locator('.toggle').getAttribute('aria-expanded'), 'true');
+  await f.page.evaluate(() => { mock.release(); mock.release(); mock.defer = false; });
+  assert.equal(await f.panel.locator('a[aria-label="Open in Reader"]').getAttribute('href'), 'https://read.readwise.io/read/doc-b');
+  await f.navigate(A); await f.panel.getByRole('tab', { name: /^Note/ }).click(); assert.equal(await f.editor.inputValue(), 'Draft A');
+  const count = await f.page.evaluate(() => mock.messages.length);
+  await f.navigate(A + '&t=12#chapter'); assert.equal(await f.page.evaluate(() => mock.messages.length), count);
+  assert.deepEqual(f.errors, []); await f.close();
 });
 
 test('dirty drafts survive refresh, collapse, SPA navigation and late responses', async () => {
