@@ -60,11 +60,12 @@ The extension reads only that player's available renditions and matching post me
 
 ## Reader panel on YouTube
 
-In **Extension options → Reader**, enable **Reader panel on YouTube**. It defaults to off. On a YouTube watch/live page, click the collapsed **Reader** row below the video details to see its existing Reader summary, tags, and Document Note. The playback overlay and its one-click save work independently. No new permissions are required.
+In **Extension options → Reader**, enable **Reader panel on YouTube**. It defaults to off. On a YouTube watch/live page, click the compact **Reader** launcher at the top right to open a popover with **Summary** and **Note** views and shared tag chips. It shows the existing Reader summary and Document Note. The playback overlay and its one-click save work independently. No new permissions are required.
 
 - **Refresh** fetches the current Reader document. Missing summaries mean no summary has been returned yet; Reader may still be processing the video or automatic summaries may be disabled. This extension does not generate summaries or invoke Ghostreader.
+- Close with **Escape**, the close button, or an outside click. Keyboard users can use arrow keys/Home/End to switch views; Escape/Close returns focus to the launcher. The popover fits the viewport and does not move the page content.
 - **Save note** explicitly replaces the Document Note. Saving an empty note clears it. Tags are display-only. Reader content is shown as plain text, including any Markdown/HTML markup.
-- Unsaved drafts are retained per video in this tab through YouTube navigation, collapse, metadata remounts, refresh, and pending requests. Edits typed during a save remain unsaved after that save completes. Drafts are held in memory: copy or save them before a full page reload, tab close, browser crash, or extension reload. The tab requests the browser's leave-page warning when drafts are dirty; the browser controls whether that warning is shown.
+- Unsaved drafts are retained per video in this tab through YouTube navigation, dismissal, switching Summary/Note views, remounts, refresh, and pending requests. Edits typed during a save remain unsaved after that save completes. Drafts are held in memory: copy or save them before a full page reload, tab close, browser crash, or extension reload. The tab requests the browser's leave-page warning when drafts are dirty; the browser controls whether that warning is shown.
 - Every save first re-reads the captured Reader document, verifies its source video, and compares its note with the editing baseline. If it changed, compare the Reader note and choose **Use Reader note** or **Keep my draft for next save**, then save explicitly. Reader's public API has no atomic conditional update: another client can still change the note between this check and the PATCH. Concurrent saves through this extension are serialized.
 - Newly saved videos retain a canonical video URL → Reader document ID mapping. Existing/externally saved videos are matched by source URL in one page of up to 100 Reader `video` documents per explicit action. **Search next 100 videos** continues manually. There is no automatic full-library scan or save on navigation/panel open. Older videos can require multiple clicks; documents Reader classified outside `video` are found only if their ID was retained by this extension. Deleted/stale IDs are verified and discarded before discovery.
 - Panel reads are capped locally below Reader's list limit. HTTP 429 cooldowns honor `Retry-After` (at least one minute) and survive service-worker restarts; there are no automatic retries. A failed or timed-out note write may have reached Reader: the draft stays intact, and **Refresh** checks the actual note before another attempt.
@@ -73,7 +74,7 @@ In **Extension options → Reader**, enable **Reader panel on YouTube**. It defa
 
 The preview uses a mock YouTube layout and mock Reader data.
 
-The panel currently targets standard desktop/mobile watch and live pages. Shorts, embeds, and layouts without a stable video-details surface retain the existing save/playback controls. Summary polling, tag editing, transcript/highlights, and Ghostreader chat are outside this version.
+The panel currently targets standard desktop/mobile watch and live pages, and hides during fullscreen playback. Shorts and embeds retain the existing save/playback controls. Summary polling, tag editing, transcript/highlights, and Ghostreader chat are outside this version.
 
 ### Development checks
 
@@ -93,4 +94,4 @@ npx playwright install chromium
 node --test tests/reader-panel.browser.cjs
 ```
 
-An existing Playwright module/browser can be supplied with `PLAYWRIGHT_MODULE` and `PLAYWRIGHT_CHROMIUM_EXECUTABLE`. Browser checks cover SPA drafts, late fetch/save responses, external note conflicts, explicit clearing, inert remote HTML, metadata remounts, light/dark/mobile flow layout, and existing playback/one-click save. Fixture screenshots are written under `output/playwright/`. These checks do not validate YouTube's live DOM or Reader's live authenticated responses; a manual smoke test in a separate test profile is still needed before release.
+An existing Playwright module/browser can be supplied with `PLAYWRIGHT_MODULE` and `PLAYWRIGHT_CHROMIUM_EXECUTABLE`. Browser checks cover SPA drafts, late fetch/save responses, external note conflicts, explicit clearing, inert remote HTML, remounts, dismissal/focus/keyboard tabs, viewport bounds in light/dark/mobile/short windows, and existing playback/one-click save. Fixture screenshots are written under `output/playwright/`. These checks do not validate YouTube's live DOM or Reader's live authenticated responses; a manual smoke test in a separate test profile is still needed before release.

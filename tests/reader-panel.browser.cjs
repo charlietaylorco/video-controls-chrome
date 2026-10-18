@@ -12,12 +12,12 @@ const B = 'https://www.youtube.com/watch?v=beta';
 const root = path.resolve(__dirname, '..');
 before(async () => { browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined }); });
 after(async () => { await browser?.close(); });
-async function fixture({ enabled = true, width = 1100 } = {}) {
-  const context = await browser.newContext({ viewport: { width, height: 1100 } });
+async function fixture({ enabled = true, width = 1100, height = 1100 } = {}) {
+  const context = await browser.newContext({ viewport: { width, height } });
   // Block every real network request, including Reader and YouTube.
   await context.route('**/*', route => route.fulfill({ contentType: 'text/html', body: `<!doctype html><meta charset="utf-8">
     <style>body{font-family:Arial,sans-serif;margin:0;padding:24px;background:#fafafa;color:#171717}main{max-width:850px;margin:auto}video{width:100%;height:290px;background:#1e252b;border-radius:12px}h1{font-size:22px}#above-the-fold>p{color:#777;font-size:13px}.fixture{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#777}</style>
-    <main><p class="fixture">Mock YouTube layout · Reader fixtures only</p><video muted></video><ytd-watch-metadata><div id="above-the-fold"><h1>How attention shapes the way we learn</h1><p>Example channel &nbsp; · &nbsp; Like &nbsp; Share &nbsp; Save</p></div></ytd-watch-metadata></main>` }));
+    <button id="outside" type="button">Outside control</button><main><p class="fixture">Mock YouTube layout · Reader fixtures only</p><video muted></video><ytd-watch-metadata><div id="above-the-fold"><h1>How attention shapes the way we learn</h1><p>Example channel &nbsp; · &nbsp; Like &nbsp; Share &nbsp; Save</p></div></ytd-watch-metadata></main>` }));
   const page = await context.newPage();
   page.setDefaultTimeout(5000);
   const errors = []; page.on('pageerror', e => errors.push(e.message));
@@ -63,7 +63,10 @@ async function fixture({ enabled = true, width = 1100 } = {}) {
   await page.goto(A);
   for (const file of ['reader-core.js', 'reader-panel.js']) await page.addScriptTag({ path: path.join(root, file) });
   const panel = page.locator('#mvs-reader-panel');
-  const open = () => panel.locator('.toggle').click();
+  const open = async (tab) => {
+    await panel.locator('.toggle').click();
+    if (tab === 'note' && await panel.getByRole('tab', { name: /^Note/ }).isVisible()) await panel.getByRole('tab', { name: /^Note/ }).click();
+  };
   const navigate = async url => {
     await page.evaluate(url => { history.pushState({}, '', url); document.dispatchEvent(new Event('yt-navigate-finish')); }, url);
     await page.waitForFunction(() => !document.querySelector('#mvs-reader-panel') || document.querySelector('#mvs-reader-panel').shadowRoot.querySelector('.toggle').getAttribute('aria-expanded') === 'false');
@@ -71,7 +74,7 @@ async function fixture({ enabled = true, width = 1100 } = {}) {
   return { page, panel, open, navigate, errors, close: () => context.close() };
 }
 
-test('panel is opt-in, collapsed, and opens without creating a Reader document', async () => {
+test('launcher is opt-in, collapsed, and opens without creating a Reader document', async () => {
   const f = await fixture({ enabled: false });
   assert.equal(await f.panel.count(), 0);
   await f.page.evaluate(() => mock.change({ showReaderPanel: true }));
@@ -87,42 +90,44 @@ test('panel is opt-in, collapsed, and opens without creating a Reader document',
 });
 
 test('dirty drafts survive refresh, collapse, SPA navigation and late responses', async () => {
-  const f = await fixture(); await f.open();
+  const f = await fixture(); await f.open('note');
   await f.panel.locator('textarea').fill('Draft for A');
   await f.panel.getByText('Refresh', { exact: true }).click();
   assert.equal(await f.panel.locator('textarea').inputValue(), 'Draft for A');
   await f.page.evaluate(() => { mock.defer = true; });
   await f.panel.getByText('Refresh', { exact: true }).click();
-  await f.navigate(B); await f.open();
+  await f.navigate(B); await f.open('note');
   await f.page.evaluate(() => { mock.release(); mock.release(); mock.defer = false; });
+  await f.panel.getByRole('tab', { name: /^Note/ }).click();
   assert.equal(await f.panel.locator('textarea').inputValue(), 'A useful observation to revisit.');
   await f.panel.locator('textarea').fill('Draft for B');
-  await f.navigate(A); await f.open();
+  await f.navigate(A); await f.open('note');
   assert.equal(await f.panel.locator('textarea').inputValue(), 'Draft for A');
-  await f.navigate(B); await f.open();
+  await f.navigate(B); await f.open('note');
   assert.equal(await f.panel.locator('textarea').inputValue(), 'Draft for B');
   assert.deepEqual(f.errors, []); await f.close();
 });
 
 test('late save stays on its captured video and preserves edits made while saving', async () => {
-  const f = await fixture(); await f.open();
+  const f = await fixture(); await f.open('note');
   await f.panel.locator('textarea').fill('Sent A');
   await f.page.evaluate(() => { mock.defer = true; });
   await f.panel.getByText('Save note', { exact: true }).click();
   await f.panel.locator('textarea').fill('Newer A draft');
-  await f.navigate(B); await f.open();
+  await f.navigate(B); await f.open('note');
   await f.page.evaluate(() => { mock.release(); mock.release(); mock.defer = false; });
+  await f.panel.getByRole('tab', { name: /^Note/ }).click();
   assert.equal(await f.panel.locator('textarea').inputValue(), 'A useful observation to revisit.');
   const saves = await f.page.evaluate(() => mock.messages.filter(m => m.type === 'reader-panel-save-note'));
   assert.equal(saves.length, 1); assert.equal(saves[0].pageUrl, A); assert.equal(saves[0].id, 'doc-a'); assert.equal(saves[0].notes, 'Sent A');
-  await f.navigate(A); await f.open();
+  await f.navigate(A); await f.open('note');
   assert.equal(await f.panel.locator('textarea').inputValue(), 'Newer A draft');
   assert.match(await f.panel.locator('.footer').innerText(), /Unsaved draft/);
   assert.deepEqual(f.errors, []); await f.close();
 });
 
 test('refresh while typing does not replace the draft and external changes require resolution', async () => {
-  const f = await fixture(); await f.open();
+  const f = await fixture(); await f.open('note');
   await f.page.evaluate(() => { mock.defer = true; mock.notes = 'Changed elsewhere'; });
   await f.panel.getByText('Refresh', { exact: true }).click();
   await f.panel.locator('textarea').fill('Typed while loading');
@@ -138,7 +143,7 @@ test('refresh while typing does not replace the draft and external changes requi
 });
 
 test('save conflicts keep draft, offer Reader note, and clear note only with explicit Save', async () => {
-  const f = await fixture(); await f.open();
+  const f = await fixture(); await f.open('note');
   await f.panel.locator('textarea').fill('Local draft');
   await f.page.evaluate(() => { mock.conflict = true; });
   await f.panel.getByText('Save note', { exact: true }).click();
@@ -179,10 +184,11 @@ test('not-found pagination and errors stay explicit and never trigger automatic 
   assert.deepEqual(f.errors, []); await f.close();
 });
 
-test('panel remounts after YouTube replaces metadata and leaves nonvideo pages unobstructed', async () => {
-  const f = await fixture(); await f.open();
+test('floating UI survives metadata changes and remounts without losing drafts', async () => {
+  const f = await fixture(); await f.open('note');
   await f.panel.locator('textarea').fill('Preserved after remount');
   await f.page.evaluate(() => { const el = document.querySelector('#above-the-fold'); el.replaceChildren(); });
+  await f.page.evaluate(() => document.querySelector('#mvs-reader-panel').remove());
   await f.panel.waitFor();
   assert.equal(await f.panel.locator('textarea').inputValue(), 'Preserved after remount');
   await f.navigate('https://www.youtube.com/');
@@ -190,17 +196,27 @@ test('panel remounts after YouTube replaces metadata and leaves nonvideo pages u
   assert.deepEqual(f.errors, []); await f.close();
 });
 
-test('light, dark and mobile panel layouts stay below the video without horizontal overflow', async () => {
+test('compact launcher and popover fit light, dark, mobile and short viewports without page reflow', async () => {
   fs.mkdirSync(path.join(root, 'output/playwright'), { recursive: true });
-  for (const [name, width, dark] of [['reader-desktop-light', 1100, false], ['reader-desktop-dark', 1100, true], ['reader-mobile', 390, false]]) {
-    const f = await fixture({ width });
-    if (dark) await f.page.addStyleTag({ content: 'body{background:#0f0f0f;color:#f1f1f1;--yt-spec-base-background:#0f0f0f;--yt-spec-text-primary:#f1f1f1;--yt-spec-text-secondary:#aaa;--yt-spec-10-percent-layer:#333;--yt-spec-badge-chip-background:#272727}' });
+  for (const [name, width, height, dark] of [['reader-desktop-light', 1100, 900, false], ['reader-desktop-dark', 1100, 900, true], ['reader-mobile', 390, 800, false], ['reader-short', 320, 240, false]]) {
+    const f = await fixture({ width, height });
+    if (dark) await f.page.addStyleTag({ content: 'html{--yt-spec-base-background:#0f0f0f;--yt-spec-text-primary:#f1f1f1;--yt-spec-text-secondary:#aaa;--yt-spec-10-percent-layer:#333;--yt-spec-badge-chip-background:#272727}body{background:#0f0f0f;color:#f1f1f1}' });
+    const before = await f.page.locator('h1').boundingBox();
+    const launcher = await f.panel.locator('.toggle').boundingBox();
+    assert.ok(launcher.width < 130);
+    assert.ok(launcher.x >= 0 && launcher.x + launcher.width <= width);
     await f.open();
-    const video = await f.page.locator('video').boundingBox();
-    const panel = await f.panel.boundingBox();
-    assert.ok(panel.y >= video.y + video.height);
+    const dialog = await f.panel.getByRole('dialog').boundingBox();
+    assert.ok(dialog.width <= 390);
+    assert.ok(dialog.x >= 0 && dialog.x + dialog.width <= width, name);
+    assert.ok(dialog.y >= 0 && dialog.y + dialog.height <= height, name);
+    assert.deepEqual(await f.page.locator('h1').boundingBox(), before);
     assert.ok(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
-    await f.page.screenshot({ path: path.join(root, `output/playwright/${name}.png`), fullPage: true });
+    await f.page.screenshot({ path: path.join(root, `output/playwright/${name}.png`) });
+    await f.panel.getByRole('tab', { name: /^Note/ }).click();
+    const noteDialog = await f.panel.getByRole('dialog').boundingBox();
+    assert.ok(noteDialog.y + noteDialog.height <= height);
+    if (height > 240) await f.page.screenshot({ path: path.join(root, `output/playwright/${name}-note.png`) });
     assert.deepEqual(f.errors, []); await f.close();
   }
 });
@@ -222,7 +238,7 @@ test('existing playback speed and one-click save still operate with the Reader p
 
 
 test('credential changes invalidate late note-save replies without rebasing the draft', async () => {
-  const f = await fixture(); await f.open();
+  const f = await fixture(); await f.open('note');
   await f.panel.locator('textarea').fill('Draft from previous connection');
   await f.page.evaluate(() => { mock.defer = true; });
   await f.panel.getByText('Save note', { exact: true }).click();
@@ -230,5 +246,91 @@ test('credential changes invalidate late note-save replies without rebasing the 
   assert.equal(await f.panel.locator('textarea').inputValue(), 'Draft from previous connection');
   assert.equal(await f.panel.getByText('Save note', { exact: true }).isDisabled(), true);
   assert.match(await f.panel.locator('.footer').innerText(), /Unsaved draft/);
+  assert.deepEqual(f.errors, []); await f.close();
+});
+
+
+test('Escape, close button, outside click and outside focus dismiss without losing the note', async () => {
+  const f = await fixture(); await f.open('note');
+  await f.panel.locator('textarea').fill('Kept through dismissal');
+  await f.page.keyboard.press('Escape');
+  assert.equal(await f.panel.locator('.toggle').getAttribute('aria-expanded'), 'false');
+  assert.equal(await f.panel.locator('.toggle').evaluate(el => el.getRootNode().activeElement === el), true);
+  await f.open('note');
+  assert.equal(await f.panel.locator('textarea').inputValue(), 'Kept through dismissal');
+  await f.panel.getByRole('button', { name: 'Close Reader', exact: true }).click();
+  assert.equal(await f.panel.locator('.toggle').evaluate(el => el.getRootNode().activeElement === el), true);
+  await f.open('note');
+  await f.page.locator('#outside').click();
+  assert.equal(await f.panel.locator('.toggle').getAttribute('aria-expanded'), 'false');
+  assert.equal(await f.page.locator('#outside').evaluate(el => document.activeElement === el), true);
+  await f.open('note');
+  await f.page.locator('#outside').focus();
+  assert.equal(await f.panel.locator('.toggle').getAttribute('aria-expanded'), 'false');
+  await f.open('note');
+  assert.equal(await f.panel.locator('textarea').inputValue(), 'Kept through dismissal');
+  assert.equal(await f.panel.getByRole('tab', { name: /^Note/ }).getAttribute('aria-label'), 'Note, unsaved draft');
+  assert.deepEqual(f.errors, []); await f.close();
+});
+
+test('Summary is first and keyboard tab switching preserves drafts and visible tags', async () => {
+  const f = await fixture(); await f.open();
+  const summary = f.panel.getByRole('tab', { name: 'Summary', exact: true });
+  const note = f.panel.getByRole('tab', { name: /^Note/ });
+  assert.equal(await summary.getAttribute('aria-selected'), 'true');
+  assert.equal(await f.panel.locator('textarea').isVisible(), false);
+  await summary.focus(); await f.page.keyboard.press('ArrowRight');
+  assert.equal(await note.getAttribute('aria-selected'), 'true');
+  assert.equal(await note.evaluate(el => el.getRootNode().activeElement === el), true);
+  await f.panel.locator('textarea').fill('Draft across views');
+  await note.focus(); await f.page.keyboard.press('Home');
+  assert.equal(await summary.getAttribute('aria-selected'), 'true');
+  assert.equal(await f.panel.locator('.tags').isVisible(), true);
+  await f.page.keyboard.press('End');
+  assert.equal(await f.panel.locator('textarea').inputValue(), 'Draft across views');
+  assert.equal(await f.panel.locator('.tags').isVisible(), true);
+  assert.deepEqual(f.errors, []); await f.close();
+});
+
+test('dismissal during pending fetch and save never reopens the popover or loses later edits', async () => {
+  const f = await fixture();
+  await f.page.evaluate(() => { mock.defer = true; }); await f.open();
+  await f.page.keyboard.press('Escape');
+  await f.page.evaluate(() => { mock.release(); mock.defer = false; });
+  assert.equal(await f.panel.locator('.toggle').getAttribute('aria-expanded'), 'false');
+  await f.open('note');
+  await f.panel.locator('textarea').fill('Sent draft');
+  await f.page.evaluate(() => { mock.defer = true; });
+  await f.panel.getByText('Save note', { exact: true }).click();
+  await f.panel.locator('textarea').fill('Newer draft');
+  await f.page.keyboard.press('Escape');
+  await f.page.evaluate(() => { mock.release(); mock.defer = false; });
+  assert.equal(await f.panel.locator('.toggle').getAttribute('aria-expanded'), 'false');
+  await f.open('note');
+  assert.equal(await f.panel.locator('textarea').inputValue(), 'Newer draft');
+  assert.match(await f.panel.locator('.footer').innerText(), /Unsaved draft/);
+  assert.deepEqual(f.errors, []); await f.close();
+});
+
+
+test('fullscreen hides the launcher and resizing keeps the restored draft inside the viewport', async () => {
+  const f = await fixture(); await f.open('note');
+  await f.panel.locator('textarea').fill('Kept during fullscreen');
+  await f.page.evaluate(() => {
+    Object.defineProperty(document, 'fullscreenElement', { configurable: true, value: document.querySelector('video') });
+    document.dispatchEvent(new Event('fullscreenchange'));
+  });
+  await f.panel.waitFor({ state: 'detached' });
+  await f.page.evaluate(() => {
+    Object.defineProperty(document, 'fullscreenElement', { configurable: true, value: null });
+    document.dispatchEvent(new Event('fullscreenchange'));
+  });
+  await f.panel.waitFor(); await f.open('note');
+  assert.equal(await f.panel.locator('textarea').inputValue(), 'Kept during fullscreen');
+  await f.page.setViewportSize({ width: 280, height: 210 });
+  const bounds = await f.panel.getByRole('dialog').boundingBox();
+  assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 280);
+  assert.ok(bounds.y >= 0 && bounds.y + bounds.height <= 210);
+  assert.equal(await f.page.evaluate(() => mock.messages.filter(m => m.type === 'reader-panel-get').length), 1);
   assert.deepEqual(f.errors, []); await f.close();
 });
