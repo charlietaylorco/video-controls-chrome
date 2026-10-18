@@ -470,3 +470,11 @@ document.getElementById("save-raindrop-token").addEventListener("click", saveRai
 raindropTokenInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") { event.preventDefault(); saveRaindropToken(); }
 });
+
+const showReaderPanelInput = document.getElementById("show-reader-panel");
+chrome.storage.local.get(["showReaderPanel"], ({ showReaderPanel }) => {
+  showReaderPanelInput.checked = showReaderPanel === true;
+});
+showReaderPanelInput.addEventListener("change", () => {
+  saveToggle("showReaderPanel", showReaderPanelInput.checked, "Reader panel visibility saved");
+});

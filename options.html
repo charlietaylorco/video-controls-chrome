@@ -685,18 +685,23 @@
       <section class="settings-section" aria-labelledby="reader-heading">
         <div class="section-heading">
           <h2 id="reader-heading">Reader</h2>
-          <p>Connect Readwise Reader to save pages from the overlay.</p>
+          <p>Connect Readwise Reader to save videos and read their summary and notes.</p>
         </div>
         <div class="setting-row">
           <div class="setting-copy">
             <label for="reader-token">API token</label>
-            <span class="setting-hint">Used to save the current page from the video overlay.</span>
+            <span class="setting-hint">Used only by the extension to save videos and access Reader.</span>
           </div>
           <div class="token-row">
             <input class="token-input" id="reader-token" type="password" spellcheck="false" autocomplete="off">
             <button class="save-button" id="save-token" type="button">Save</button>
           </div>
         </div>
+        <label class="toggle-item" for="show-reader-panel">
+          <span><span class="setting-title">Reader panel on YouTube</span>
+          <span class="setting-hint">Show a collapsed panel below video details for summary, tags, and Document Note. Opens only when clicked.</span></span>
+          <input class="toggle-input" id="show-reader-panel" type="checkbox">
+        </label>
         <div class="hint">Get your token from <a href="https://readwise.io/access_token" target="_blank" rel="noreferrer">Readwise</a>.</div>
       </section>
 

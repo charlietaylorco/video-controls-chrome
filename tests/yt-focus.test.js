@@ -218,3 +218,14 @@ test('options retain legacy focus settings and defaults when nothing was saved l
   const fresh = harness('options.js');
   assert.equal(fresh.input('hide-feed-videos').checked, false);
 });
+
+test('Reader panel defaults to off and options persist explicit opt-in', () => {
+  const app = harness('options.js');
+  const toggle = app.input('show-reader-panel');
+  assert.equal(toggle.checked, false);
+  toggle.checked = true;
+  toggle.events.change();
+  assert.equal(app.data.showReaderPanel, true);
+  const reloaded = harness('options.js', { showReaderPanel: true });
+  assert.equal(reloaded.input('show-reader-panel').checked, true);
+});

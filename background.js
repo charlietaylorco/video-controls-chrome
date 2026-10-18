@@ -1,4 +1,7 @@
-importScripts("x-video-download.js");
+importScripts("x-video-download.js", "reader-core.js", "reader-service.js");
+
+let readerPanelService;
+const getReaderPanelService = () => readerPanelService ||= MVSReaderService.create({ storage: chrome.storage.local, fetch });
 
 const DOWNIE_PREFIX = "downie://XUOpenLink?url=";
 const READER_SAVE_URL = "https://readwise.io/api/v3/save/";
@@ -482,6 +485,17 @@ const pickTargetUrl = (message, sender) => {
 };
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (["reader-panel-get", "reader-panel-save-note"].includes(message?.type)) {
+    if (sender.id !== chrome.runtime.id || !Number.isInteger(sender.tab?.id) || sender.frameId !== 0 ||
+        !MVSReaderCore.canonical(sender.url) ||
+        MVSReaderCore.canonical(sender.url) !== MVSReaderCore.canonical(message.pageUrl)) {
+      sendResponse({ ok: false, code: "invalid_sender" });
+      return undefined;
+    }
+    getReaderPanelService().handle(message).then(sendResponse);
+    return true;
+  }
+
   if (message?.type === "download-x-video") {
     if (sender.id !== chrome.runtime.id || !Number.isInteger(sender.tab?.id) ||
         !XVideoDownload.isXPage(sender.url)) {
@@ -669,6 +683,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
 
       await markReaderUrlSaved(targetUrl, result?.url);
+      // Keep save successful even if the optional panel's identity cache cannot be written.
+      try { await getReaderPanelService().remember(targetUrl, result?.id); } catch { /* retry lookup in panel */ }
 
       sendResponse({
         ok: true,
