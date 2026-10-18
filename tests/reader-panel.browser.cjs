@@ -29,14 +29,15 @@ async function fixture({ enabled = true, width = 1100, height = 1100, theme = 's
     const data = { showReaderPanel: enabled, showReader: true, readerPanelTheme: theme };
     window.mock = { messages: [], callbacks: [], defer: false, notes: 'A useful observation to revisit.',
       summary: 'Attention is a limited resource. This video explores how deliberate practice, fewer distractions, and time for reflection can help us learn.\n\nThe key idea: make space for what matters before adding more information.',
-      tags: ['Learning', 'Ideas to try'], conflict: false, empty: false, error: null, saveError: null, deleteError: null, deleted: [],
+      tags: ['Learning', 'Ideas to try'], conflict: false, empty: false, error: null, saveError: null, deleteError: null, deleteReply: null, deleted: [], ids: {},
       change(values) {
+        const changed = Object.fromEntries(Object.entries(values).map(([key, value]) => [key, { oldValue: data[key], newValue: value }]));
         Object.assign(data, values);
-        changes.forEach(fn => fn(Object.fromEntries(Object.entries(values).map(([key, value]) => [key, { newValue: value }])), 'local'));
+        changes.forEach(fn => fn(changed, 'local'));
       },
       release() { const [callback, response] = this.callbacks.shift(); callback(response); },
     };
-    const documentFor = message => ({ id: message.pageUrl.includes('beta') ? 'doc-b' : 'doc-a',
+    const documentFor = message => ({ id: mock.ids[message.pageUrl] || (message.pageUrl.includes('beta') ? 'doc-b' : 'doc-a'),
       videoUrl: message.pageUrl, title: 'How attention shapes the way we learn', updatedAt: 'v1', summary: mock.summary, notes: mock.notes, tags: mock.tags });
     window.chrome = {
       runtime: { lastError: null,
@@ -49,7 +50,7 @@ async function fixture({ enabled = true, width = 1100, height = 1100, theme = 's
             response = mock.saveError ? { ok: false, code: mock.saveError } : mock.conflict ? { ok: false, code: 'conflict', document: { ...documentFor(message), notes: 'External Reader note' } }
               : { ok: true, id: message.id, notes: message.notes };
           } else if (message.type === 'reader-panel-delete') {
-            response = mock.deleteError ? { ok: false, code: mock.deleteError } : { ok: true, id: message.id };
+            response = mock.deleteReply || (mock.deleteError ? { ok: false, code: mock.deleteError } : { ok: true, id: message.id });
             if (response.ok) mock.deleted.push(message.pageUrl);
           } else if (message.type === 'save-to-reader') response = { ok: true, url: 'https://read.readwise.io/read/doc-a' };
           else response = { ok: true, saved: false };
@@ -546,6 +547,117 @@ test('header controls and editor/summary text selection never initiate a drag', 
 async function noteGeometry(f) {
   return { editor: await f.panel.locator('.editor').boundingBox(), popover: await f.panel.getByRole('dialog').boundingBox(), save: await f.panel.getByText('Save note', { exact: true }).boundingBox() };
 }
+
+test('Delete browser: confirmation is inert text, focuses Cancel and restores note geometry on cancel/Escape at narrow widths', async () => {
+  for (const width of [280, 390]) {
+    const f = await fixture({ width, height: 520 }); await f.open('note');
+    await f.editor.fill('Preserved local draft');
+    const before = await noteGeometry(f), videoBefore = await f.page.locator('video').boundingBox();
+    await f.panel.getByRole('button', { name: 'Delete from Reader', exact: true }).click();
+    const confirmation = f.panel.getByRole('alertdialog');
+    assert.match(await confirmation.innerText(), /How attention shapes the way we learn/);
+    assert.match(await confirmation.innerText(), /alpha.*doc-a/);
+    assert.match(await confirmation.innerText(), /highlights and their notes.*cannot undo deletion/s);
+    assert.match(await confirmation.innerText(), /unsaved local note will stay in this tab/);
+    assert.equal(await confirmation.getByRole('button', { name: 'Cancel', exact: true }).evaluate(el => el.getRootNode().activeElement === el), true);
+    await f.page.keyboard.press('Tab');
+    assert.equal(await confirmation.getByRole('button', { name: 'Delete document', exact: true }).evaluate(el => el.getRootNode().activeElement === el), true);
+    await f.page.keyboard.press('Tab');
+    assert.equal(await confirmation.getByRole('button', { name: 'Cancel', exact: true }).evaluate(el => el.getRootNode().activeElement === el), true);
+    const bounds = await f.panel.getByRole('dialog').boundingBox();
+    assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width && bounds.y + bounds.height <= 520);
+    assert.deepEqual(await f.page.locator('video').boundingBox(), videoBefore);
+    assert.equal(await f.page.evaluate(() => mock.messages.filter(m => m.type === 'reader-panel-delete').length), 0);
+    await confirmation.getByRole('button', { name: 'Cancel', exact: true }).click();
+    assert.equal(await f.editor.inputValue(), 'Preserved local draft'); assert.deepEqual(await noteGeometry(f), before);
+    await f.panel.getByRole('button', { name: 'Delete from Reader', exact: true }).click();
+    await f.page.keyboard.press('Escape');
+    assert.equal(await confirmation.isVisible(), false); assert.equal(await f.panel.getByRole('dialog').isVisible(), true);
+    assert.deepEqual(await noteGeometry(f), before); assert.deepEqual(f.errors, []); await f.close();
+  }
+});
+
+test('Delete browser: dirty success preserves newer text without layout shifts and clean success becomes unsaved without auto-save', async () => {
+  const f = await fixture(); await f.open('note'); await f.editor.fill('Before deletion');
+  const before = await noteGeometry(f);
+  await f.panel.getByRole('button', { name: 'Delete from Reader', exact: true }).click();
+  await f.page.evaluate(() => { mock.defer = true; });
+  await f.panel.getByRole('button', { name: 'Delete document', exact: true }).click();
+  assert.deepEqual(await noteGeometry(f), before);
+  await f.editor.fill('Typed while deletion pending');
+  await f.page.evaluate(() => { mock.release(); mock.defer = false; });
+  assert.match(await f.panel.locator('.status').innerText(), /Deleted from Reader.*unsaved note is kept/s);
+  assert.equal(await f.editor.inputValue(), 'Typed while deletion pending'); assert.deepEqual(await noteGeometry(f), before);
+  assert.equal(await f.panel.getByRole('button', { name: 'Save note', exact: true }).isDisabled(), true);
+  assert.equal(await f.panel.getByRole('button', { name: 'Delete from Reader', exact: true }).isDisabled(), true);
+  assert.deepEqual(await f.page.evaluate(() => mock.messages.map(m => m.type)), ['reader-panel-get', 'reader-panel-delete']);
+  assert.deepEqual(f.errors, []); await f.close();
+  const clean = await fixture(); await clean.open();
+  await clean.panel.getByRole('button', { name: 'Delete from Reader', exact: true }).click();
+  await clean.panel.getByRole('button', { name: 'Delete document', exact: true }).click();
+  assert.match(await clean.panel.locator('.status').innerText(), /^Deleted from Reader/);
+  assert.equal(await clean.panel.locator('.summary').isVisible(), false);
+  assert.equal(await clean.panel.locator('a[aria-label="Open in Reader"]').getAttribute('href'), null);
+  assert.deepEqual(await clean.page.evaluate(() => mock.messages.map(m => m.type)), ['reader-panel-get', 'reader-panel-delete']);
+  assert.deepEqual(clean.errors, []); await clean.close();
+});
+
+test('Delete browser: navigation and replacement identity cancel confirmation, including before SPA synchronization', async () => {
+  const f = await fixture(); await f.open('note'); await f.editor.fill('Draft A');
+  await f.panel.getByRole('button', { name: 'Delete from Reader', exact: true }).click();
+  await f.page.evaluate(url => history.pushState({}, '', url), B);
+  await f.panel.getByRole('button', { name: 'Delete document', exact: true }).click();
+  assert.equal(await f.page.evaluate(() => mock.messages.filter(m => m.type === 'reader-panel-delete').length), 0);
+  await f.navigate(B); await f.open('note');
+  assert.equal(await f.panel.getByRole('alertdialog').isVisible(), false); assert.equal(await f.editor.inputValue(), 'A useful observation to revisit.');
+  await f.navigate(A); await f.open('note'); assert.equal(await f.editor.inputValue(), 'Draft A');
+  await f.page.evaluate(url => mock.change({ readerDocuments: { [url]: { id: 'doc-a' } } }), A);
+  await f.panel.getByRole('button', { name: 'Delete from Reader', exact: true }).click();
+  await f.page.evaluate(url => { mock.ids[url] = 'replacement'; mock.change({ readerDocuments: { [url]: { id: 'replacement' } } }); }, A);
+  assert.equal(await f.panel.getByRole('alertdialog').isVisible(), false);
+  assert.equal(await f.panel.getByRole('button', { name: 'Delete from Reader', exact: true }).isDisabled(), true);
+  assert.equal(await f.editor.inputValue(), 'Draft A');
+  assert.equal(await f.page.evaluate(() => mock.messages.filter(m => m.type === 'reader-panel-delete').length), 0);
+  assert.deepEqual(f.errors, []); await f.close();
+});
+
+test('Delete browser: a late response stays bound to its video and cannot change the next editor', async () => {
+  const f = await fixture(); await f.open('note'); await f.editor.fill('Draft for deleted A');
+  await f.panel.getByRole('button', { name: 'Delete from Reader', exact: true }).click();
+  await f.page.evaluate(() => { mock.defer = true; });
+  await f.panel.getByRole('button', { name: 'Delete document', exact: true }).click();
+  await f.navigate(B); await f.open();
+  await f.page.evaluate(() => { mock.release(); mock.release(); mock.defer = false; });
+  await f.panel.getByRole('tab', { name: /^Note/ }).click();
+  assert.equal(await f.editor.inputValue(), 'A useful observation to revisit.');
+  assert.equal(await f.panel.getByRole('button', { name: 'Delete from Reader', exact: true }).isEnabled(), true);
+  assert.doesNotMatch(await f.panel.locator('.status').textContent(), /Deleted from Reader/);
+  const sent = await f.page.evaluate(() => mock.messages.find(m => m.type === 'reader-panel-delete'));
+  assert.equal(sent.pageUrl, A); assert.equal(sent.id, 'doc-a');
+  await f.navigate(A); await f.open('note'); assert.equal(await f.editor.inputValue(), 'Draft for deleted A');
+  assert.equal(await f.panel.getByRole('button', { name: 'Save note', exact: true }).isDisabled(), true);
+  assert.deepEqual(f.errors, []); await f.close();
+});
+
+test('Delete browser: errors and uncertain outcomes keep the draft and geometry; already absent is distinct', async () => {
+  const f = await fixture(); await f.open('note'); await f.editor.fill('Keep on failure');
+  const before = await noteGeometry(f);
+  for (const code of ['unauthorized', 'rate_limited', 'network_error', 'delete_uncertain', 'delete_cache_error', 'document_changed']) {
+    await f.page.evaluate(code => { mock.deleteError = code; }, code);
+    await f.panel.getByRole('button', { name: 'Delete from Reader', exact: true }).click();
+    await f.panel.getByRole('button', { name: 'Delete document', exact: true }).click();
+    assert.equal(await f.panel.locator('.status').getAttribute('data-kind'), 'error');
+    assert.doesNotMatch(await f.panel.locator('.status').innerText(), /^Deleted from Reader/);
+    assert.equal(await f.editor.inputValue(), 'Keep on failure'); assert.deepEqual(await noteGeometry(f), before);
+  }
+  await f.page.evaluate(() => { mock.deleteReply = { ok: true, id: 'doc-a', alreadyDeleted: true }; });
+  await f.panel.getByRole('button', { name: 'Delete from Reader', exact: true }).click();
+  await f.panel.getByRole('button', { name: 'Delete document', exact: true }).click();
+  assert.match(await f.panel.locator('.status').innerText(), /already absent/);
+  assert.equal(await f.editor.inputValue(), 'Keep on failure'); assert.deepEqual(await noteGeometry(f), before);
+  assert.equal(await f.page.evaluate(() => mock.messages.filter(m => m.type === 'reader-panel-delete').length), 7);
+  assert.deepEqual(f.errors, []); await f.close();
+});
 
 test('save feedback is beside Save, expires, and never shifts editor or popover geometry', async () => {
   const f = await fixture(); await f.open('note'); await f.page.clock.install();
