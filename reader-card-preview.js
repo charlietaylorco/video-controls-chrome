@@ -50,6 +50,10 @@
       missing_token: 'Add your Reader token in Extension options.', unauthorized: 'Reader rejected the token. Check Extension options.',
       invalid_sender: 'This card changed. Hover its Reader icon again.', document_changed: 'The Reader document changed. Refresh and review it before deleting.',
       delete_uncertain: 'Deletion could not be confirmed. Refresh to check Reader before trying again.',
+      delete_target_missing: 'The matched Reader document was not found. No DELETE was sent. Refresh to find the current document.',
+      delete_not_confirmed: 'Reader did not confirm deletion of this document. Refresh to find its current state.',
+      delete_still_present: 'Reader accepted DELETE but still returns this document. Refresh to check its current state; deletion has not been verified.',
+      delete_unverified: 'The extension did not verify deletion. Refresh to check Reader before trying again.',
       delete_cache_error: 'Reader confirmed deletion, but local saved indicators could not be cleared. Refresh to check.',
       auth_changed: 'Reader credentials changed. Refresh before continuing.', network_error: 'Reader could not be reached. Try Refresh when connected.',
       runtime_error: 'The extension is unavailable. Copy any unsaved notes before reloading.',
@@ -115,7 +119,7 @@
     };
     const load = async s => {
       if (!valid(s) || s.busy || s.confirm) return;
-      s.started = true; s.busy = true; s.action = 'read'; s.error = false; s.text = 'Loading Reader summary…'; render();
+      s.started = true; s.busy = true; s.action = 'read'; s.error = false; s.deleted = false; s.text = 'Loading Reader summary…'; render();
       const cached = cache.get(s.url);
       const reply = cached?.expires > now() ? cached.reply : await send({ type: 'reader-card-get', pageUrl: s.page, targetUrl: s.url, lease: s.lease });
       if (!valid(s)) { if (session === s) close(); return; }
@@ -141,14 +145,15 @@
       cache.delete(s.url);
       if (!valid(s)) { if (session === s) close(); return; }
       s.busy = false;
-      if (reply.ok && reply.id === doc.id) {
-        s.doc = null; s.deleted = true; s.text = reply.alreadyDeleted ? 'This document is already absent from Reader.' : 'Deleted from Reader.';
+      if (reply.ok && reply.id === doc.id && reply.targetUrl === s.url && reply.deleted === true &&
+          reply.deleteStatus === 204 && reply.verifiedAbsent === true) {
+        s.doc = null; s.deleted = true; s.text = 'Deleted from Reader.';
         onDeleted(s.url);
       } else {
-        s.error = true;
+        s.error = true; s.doc = null; s.deleted = false;
         if (reply.code === 'delete_conflict') {
-          s.doc = null; s.text = 'Reader changed since the confirmation. Refresh and review the document before choosing Delete again.';
-        } else s.text = errorText(reply);
+          s.text = 'Reader changed since the confirmation. Refresh and review the document before choosing Delete again.';
+        } else s.text = errorText(reply.ok ? { code: 'delete_unverified' } : reply);
       }
       render();
     };

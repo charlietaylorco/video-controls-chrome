@@ -47,7 +47,8 @@ function fixture({ saved = true, width = 1100, height = 700 } = {}) {
     chrome: { runtime: { id: 'extension', lastError: null, onMessage: { addListener(fn) { validators.push(fn); } },
       sendMessage(message, callback) {
         messages.push(message);
-        const normal = () => message.type === 'reader-card-delete' ? { ok: true, id: message.id }
+        const normal = () => message.type === 'reader-card-delete' ? { ok: true, id: message.id, targetUrl: message.targetUrl,
+          deleted: true, deleteStatus: 204, verifiedAbsent: true }
           : { ok: true, document: { id: `doc-${new URL(message.targetUrl).searchParams.get('v')}`, videoUrl: message.targetUrl,
             title: 'A saved video', summary: `Summary ${message.targetUrl}`, notes: 'Saved note', updatedAt: 'v1' } };
         Promise.resolve(responder ? responder(message, normal) : normal()).then(callback);
@@ -75,6 +76,67 @@ function fixture({ saved = true, width = 1100, height = 700 } = {}) {
     async hover() { button.hover = true; button.fire('pointerenter'); run(300); await tick(); },
   };
 }
+
+// Exercise the actual isolated UI -> worker guards -> service -> fetch route.
+// Both extension contexts and all Reader responses remain synthetic.
+function connectWorker(f, responder) {
+  const data = { readerToken: 'fixture-only', readerDocuments: { [B]: { id: 'doc-beta', at: 1 } }, readerSavedUrls: { [B]: 1 } };
+  const requests = [], challenges = [];
+  let listener;
+  const worker = vm.createContext({ URL, Date, AbortSignal, console, chrome: {
+    runtime: { id: 'extension', lastError: null, getURL: s => s, onMessage: { addListener(fn) { listener = fn; } } },
+    storage: { local: { get(defaults, cb) { cb({ ...defaults, ...data }); }, set(values, cb) {
+      const changes = Object.fromEntries(Object.entries(values).map(([key, value]) => [key, { oldValue: structuredClone(data[key]), newValue: structuredClone(value) }]));
+      Object.assign(data, structuredClone(values)); f.change(changes); cb?.();
+    } } }, action: { onClicked: { addListener() {} } }, tabs: {
+      get(id, cb) { cb({ id, url: PAGE }); },
+      sendMessage(id, message, options, cb) { challenges.push({ message, options }); cb(f.validate(message)); },
+    },
+  }, fetch: async (url, options) => {
+    requests.push({ url, ...options });
+    const result = responder(url, options, requests);
+    return { status: result.status || 200, ok: !result.status || (result.status >= 200 && result.status < 300),
+      headers: { get: () => null }, json: async () => result };
+  } });
+  worker.importScripts = (...files) => files.filter(name => name.startsWith('reader-')).forEach(name =>
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '..', name), 'utf8'), worker));
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../background.js'), 'utf8'), worker);
+  f.responder = message => new Promise(resolve => listener(message,
+    { id: 'extension', frameId: 0, documentId: 'fixture-document', url: PAGE, tab: { id: 1, url: PAGE } }, resolve));
+  return { data, requests, challenges };
+}
+
+test('real hover controller and background transport require exact DELETE 204 plus absence before displaying success', async () => {
+  const f = fixture(); let present = true;
+  const worker = connectWorker(f, (url, init) => {
+    if (init.method === 'DELETE') { present = false; return { status: 204 }; }
+    return { results: present ? [{ id: 'doc-beta', source_url: B, title: 'Fixture video', summary: 'Fixture summary', notes: 'Saved note', updated_at: 'v1' }] : [] };
+  });
+  await f.hover(); f.findButton('Delete from Reader').click(); f.findButton('Delete document').click(); await tick();
+  assert.deepEqual(worker.requests.map(r => [r.url, r.method]), [
+    ['https://readwise.io/api/v3/list/?id=doc-beta', undefined],
+    ['https://readwise.io/api/v3/list/?id=doc-beta', undefined],
+    ['https://readwise.io/api/v3/delete/doc-beta/', 'DELETE'],
+    ['https://readwise.io/api/v3/list/?id=doc-beta', undefined],
+  ]);
+  assert.equal(worker.requests[2].body, undefined); assert.ok(worker.requests.every(r => r.cache === 'no-store'));
+  assert.ok(worker.challenges.every(c => c.options.documentId === 'fixture-document' && c.message.targetUrl === B));
+  assert.equal(f.deleted, 1); assert.match(f.byClass('summary').textContent, /^Deleted from Reader/);
+  assert.equal(worker.data.readerSavedUrls[B], undefined); assert.equal(worker.data.readerDeletedVideos[B].id, 'doc-beta');
+});
+
+test('real hover route never displays success for a missing preflight target or a document still returned after DELETE', async () => {
+  for (const failure of ['missing', 'still-present']) {
+    const f = fixture();
+    const worker = connectWorker(f, (url, init, requests) => init.method === 'DELETE' ? { status: 204 }
+      : { results: failure === 'missing' && requests.length > 1 ? []
+        : [{ id: 'doc-beta', source_url: B, title: 'Fixture video', summary: 'Fixture summary', notes: 'Saved note', updated_at: 'v1' }] });
+    await f.hover(); f.findButton('Delete from Reader').click(); f.findButton('Delete document').click(); await tick();
+    assert.equal(f.deleted, 0); assert.equal(worker.data.readerSavedUrls[B], 1); assert.equal(worker.data.readerDeletedVideos?.[B], undefined);
+    assert.equal(worker.requests.filter(r => r.method === 'DELETE').length, failure === 'missing' ? 0 : 1);
+    assert.match(f.byClass('summary').textContent, failure === 'missing' ? /No DELETE was sent/ : /still returns this document/);
+  }
+});
 
 test('hover intent is saved-only, cancellable, deduplicated and never saves an unsaved card', async () => {
   const f = fixture({ saved: false }); await f.hover(); assert.equal(f.messages.length, 0); assert.equal(f.host, undefined);
@@ -156,6 +218,33 @@ test('confirmed delete uses captured id/video/notes and reconciles only known su
   const uncertain = fixture(); uncertain.responder = (message, normal) => message.type === 'reader-card-delete' ? { ok: false, code: 'delete_uncertain' } : normal();
   await uncertain.hover(); uncertain.findButton('Delete from Reader').click(); uncertain.findButton('Delete document').click(); await tick(); uncertain.run(300);
   assert.equal(uncertain.deleted, 0); assert.equal(uncertain.messages.length, 2); assert.match(uncertain.byClass('summary').textContent, /could not be confirmed/);
+});
+
+test('a generic ok/already-absent reply without a verified DELETE receipt never produces hover deletion success', async () => {
+  const f = fixture(); f.responder = (message, normal) => message.type === 'reader-card-delete' ? { ok: true, id: message.id, alreadyDeleted: true } : normal();
+  await f.hover(); f.findButton('Delete from Reader').click(); f.findButton('Delete document').click(); await tick();
+  assert.equal(f.deleted, 0); assert.doesNotMatch(f.byClass('summary').textContent, /^Deleted from Reader/);
+  assert.match(f.byClass('summary').className, /error/);
+  assert.equal(f.findButton('Delete from Reader').disabled, true);
+});
+
+test('hover rejects missing or mismatched deletion receipts and requires Refresh before another confirmation', async () => {
+  for (const patch of [{ id: 'wrong-id' }, { targetUrl: A }, { deleteStatus: 200 }, { verifiedAbsent: false }, { deleted: false }]) {
+    const f = fixture(); f.responder = (message, normal) => ({ ...normal(), ...(message.type === 'reader-card-delete' ? patch : {}) });
+    await f.hover(); f.findButton('Delete from Reader').click(); f.findButton('Delete document').click(); await tick();
+    assert.equal(f.deleted, 0); assert.match(f.byClass('summary').textContent, /did not verify deletion/);
+    assert.equal(f.findButton('Delete from Reader').disabled, true);
+    f.findButton('Refresh summary').click(); await tick();
+    assert.equal(f.findButton('Delete from Reader').disabled, false); assert.match(f.byClass('summary').textContent, /beta/);
+  }
+});
+
+test('Refresh after a successful hover deletion removes stale success when Reader returns a saved document', async () => {
+  const f = fixture(); await f.hover(); f.findButton('Delete from Reader').click(); f.findButton('Delete document').click(); await tick();
+  assert.equal(f.deleted, 1);
+  f.findButton('Refresh summary').click(); await tick();
+  assert.equal(f.byClass('popover').children.at(-1).textContent, 'Saved in Reader');
+  assert.match(f.byClass('summary').textContent, /beta/);
 });
 
 test('recycled card during confirmation or pending deletion cannot delete the replacement or display late success', async () => {

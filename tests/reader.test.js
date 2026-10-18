@@ -69,6 +69,29 @@ const cardStored = { readerDocuments: { [B]: { id: 'doc-b', at: 1 } }, readerSav
 const cardDoc = () => doc('doc-b', B);
 const cardDelete = extra => cardMessage('reader-card-delete', { id: 'doc-b', title: 'A Reader video', updatedAt: '', baseNotes: 'Original', confirmed: true, ...extra });
 
+test('hover delete must not report success or clear saved flags when its preflight issues no DELETE', async () => {
+  const app = harness({ stored: cardStored, responder: () => ({ results: [] }) });
+  const result = await app.message(cardDelete());
+  assert.equal(app.requests.filter(r => r.method === 'DELETE').length, 0);
+  assert.equal(result.ok, false); assert.equal(result.code, 'delete_target_missing');
+  assert.equal(app.data.readerSavedUrls[B], 1); assert.equal(app.data.readerDeletedVideos?.[B], undefined);
+});
+
+test('hover delete proves exact DELETE transport and uncached post-delete absence before changing local state', async () => {
+  let present = true;
+  const app = harness({ stored: cardStored, responder: (url, init) => {
+    if (init.method === 'DELETE') { present = false; return { status: 204 }; }
+    return { results: present ? [cardDoc()] : [] };
+  } });
+  const result = await app.message(cardDelete());
+  assert.equal(result.ok, true); assert.equal(result.deleted, true); assert.equal(result.deleteStatus, 204); assert.equal(result.verifiedAbsent, true); assert.equal(result.targetUrl, B);
+  assert.deepEqual(app.requests.map(r => [r.url, r.method]), [
+    ['https://readwise.io/api/v3/list/?id=doc-b', undefined], ['https://readwise.io/api/v3/delete/doc-b/', 'DELETE'],
+    ['https://readwise.io/api/v3/list/?id=doc-b', undefined]]);
+  assert.ok(app.requests.every(r => r.cache === 'no-store')); assert.equal(app.requests[1].body, undefined);
+  assert.equal(app.data.readerSavedUrls[B], undefined); assert.equal(app.data.readerDeletedVideos[B].id, 'doc-b');
+});
+
 test('card requests target the hovered video on Home/subscriptions/search/channel/watch while watch guards stay strict', async () => {
   for (const pageUrl of ['https://www.youtube.com/', 'https://www.youtube.com/feed/subscriptions',
     'https://www.youtube.com/results?search_query=learn', 'https://www.youtube.com/@example/videos', A]) {
@@ -114,12 +137,16 @@ test('card lease, source page, frame, origin and live-card validation reject uns
 });
 
 test('a card deletion requires the exact linked id and confirmation; successful deletion clears only that video', async () => {
+  let present = true;
   const app = harness({ stored: { readerDocuments: { ...cardStored.readerDocuments, [A]: { id: 'doc-a', at: 1 } }, readerSavedUrls: { [A]: 1, [B]: 1 } },
-    responder: (url, init) => init.method === 'DELETE' ? { status: 204 } : { results: [cardDoc()] } });
+    responder: (url, init) => {
+      if (init.method === 'DELETE') { present = false; return { status: 204 }; }
+      return { results: present ? [cardDoc()] : [] };
+    } });
   for (const values of [{ confirmed: false }, { id: 'doc-a' }]) assert.equal((await app.message(cardDelete(values))).ok, false);
   assert.equal(app.requests.length, 0);
   assert.equal((await app.message(cardDelete())).ok, true);
-  assert.deepEqual(app.requests.map(r => r.method), [undefined, 'DELETE']);
+  assert.deepEqual(app.requests.map(r => r.method), [undefined, 'DELETE', undefined]);
   assert.ok(app.requests[1].url.endsWith('delete/doc-b/'));
   assert.equal(app.data.readerDocuments[B], undefined); assert.equal(app.data.readerSavedUrls[B], undefined);
   assert.equal(app.data.readerDocuments[A].id, 'doc-a'); assert.equal(app.data.readerSavedUrls[A], 1);
@@ -150,8 +177,44 @@ test('card source mismatch, changed notes, offline, 429, absent and uncertain de
   assert.equal((await uncertain.message(cardDelete())).code, 'delete_uncertain'); assert.equal(uncertain.requests.length, 2);
   assert.equal(uncertain.data.readerSavedUrls[B], 1);
   const absent = harness({ stored: cardStored, responder: () => ({ results: [] }) });
-  assert.equal((await absent.message(cardDelete())).alreadyDeleted, true); assert.equal(absent.requests.length, 1);
-  assert.equal(absent.data.readerSavedUrls[B], undefined);
+  assert.equal((await absent.message(cardDelete())).code, 'delete_target_missing'); assert.equal(absent.requests.length, 1);
+  assert.equal(absent.data.readerSavedUrls[B], 1);
+});
+
+test('hover DELETE rejections and unexpected success statuses cannot clear flags or create deletion history', async () => {
+  for (const [status, expected] of [[200, 'delete_uncertain'], [202, 'delete_uncertain'], [404, 'delete_not_confirmed'],
+    [401, 'unauthorized'], [429, 'rate_limited'], [500, 'delete_uncertain']]) {
+    const app = harness({ stored: cardStored, responder: (url, init) => init.method === 'DELETE' ? { status } : { results: [cardDoc()] } });
+    const result = await app.message(cardDelete());
+    assert.equal(result.ok, false, `HTTP ${status}`); assert.equal(result.code, expected);
+    assert.equal(app.requests.length, 2); assert.equal(app.data.readerSavedUrls[B], 1);
+    assert.equal(app.data.readerDeletedVideos?.[B], undefined);
+  }
+});
+
+test('hover DELETE 204 with a still-present document or failed verification stays unconfirmed without retries', async () => {
+  for (const [verification, expected] of [[{ results: [cardDoc()] }, 'delete_still_present'],
+    [{ results: [doc()] }, 'delete_uncertain'], [new Error('offline'), 'delete_uncertain'],
+    [{ status: 429 }, 'delete_uncertain']]) {
+    let reads = 0;
+    const app = harness({ stored: cardStored, responder: (url, init) => init.method === 'DELETE' ? { status: 204 }
+      : ++reads === 1 ? { results: [cardDoc()] } : verification });
+    assert.equal((await app.message(cardDelete())).code, expected);
+    assert.equal(app.requests.length, 3); assert.equal(app.requests.filter(r => r.method === 'DELETE').length, 1);
+    assert.equal(app.data.readerSavedUrls[B], 1); assert.equal(app.data.readerDocuments[B].id, 'doc-b');
+    assert.equal(app.data.readerDeletedVideos?.[B], undefined);
+  }
+});
+
+test('hover verification accepts exact-id deletion records or HTTP 404 after a confirmed DELETE', async () => {
+  for (const verification of [{ results: [{ ...cardDoc(), is_deleted: true }] }, { status: 404 }]) {
+    let reads = 0;
+    const app = harness({ stored: cardStored, responder: (url, init) => init.method === 'DELETE' ? { status: 204 }
+      : ++reads === 1 ? { results: [cardDoc()] } : verification });
+    assert.equal((await app.message(cardDelete())).verifiedAbsent, true);
+    assert.equal(app.requests.length, 3); assert.equal(app.data.readerSavedUrls[B], undefined);
+    assert.equal(app.data.readerDeletedVideos[B].id, 'doc-b');
+  }
 });
 
 test('document projection excludes highlights and foreign videos and uses safe Reader links', () => {
