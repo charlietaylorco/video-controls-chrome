@@ -19,7 +19,7 @@
     if (!doc || !validId(doc.id) || doc.is_deleted || doc.parent_id || canonical(doc.source_url) !== videoUrl) return null;
     const tags = Array.isArray(doc.tags) ? doc.tags : Object.entries(doc.tags || {}).map(([key, tag]) =>
       typeof tag?.name === 'string' ? tag.name : key);
-    return { id: doc.id, videoUrl, url: readerUrl(doc.id),
+    return { id: doc.id, videoUrl, url: readerUrl(doc.id), title: typeof doc.title === 'string' ? doc.title : '',
       summary: typeof doc.summary === 'string' ? doc.summary : '',
       notes: typeof doc.notes === 'string' ? doc.notes : '',
       tags: tags.filter(tag => typeof tag === 'string').slice(0, 100),
@@ -39,7 +39,15 @@
     state.dirty = state.value !== sent;
     state.conflict = null;
   };
-  const api = { canonical, validId, readerUrl, cleanDocument, draft, edit, receive, saved };
+  const removed = (state, id) => {
+    if (state.doc?.id !== id) return false;
+    state.doc = null; state.conflict = null;
+    // Keep dirty text, including edits made while deletion was in flight. A later
+    // replacement document must go through receive()'s explicit conflict review.
+    if (!state.dirty) state.value = state.base = '';
+    return true;
+  };
+  const api = { canonical, validId, readerUrl, cleanDocument, draft, edit, receive, saved, removed };
   globalThis.MVSReaderCore = api;
   if (typeof module !== 'undefined') module.exports = api;
 })();

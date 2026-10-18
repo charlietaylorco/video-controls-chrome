@@ -485,7 +485,7 @@ const pickTargetUrl = (message, sender) => {
 };
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (["reader-panel-get", "reader-panel-save-note"].includes(message?.type)) {
+  if (["reader-panel-get", "reader-panel-save-note", "reader-panel-delete"].includes(message?.type)) {
     if (sender.id !== chrome.runtime.id || !Number.isInteger(sender.tab?.id) || sender.frameId !== 0 ||
         !MVSReaderCore.canonical(sender.url) ||
         MVSReaderCore.canonical(sender.url) !== MVSReaderCore.canonical(message.pageUrl)) {
@@ -682,9 +682,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         result = null;
       }
 
-      await markReaderUrlSaved(targetUrl, result?.url);
-      // Keep save successful even if the optional panel's identity cache cannot be written.
-      try { await getReaderPanelService().remember(targetUrl, result?.id); } catch { /* retry lookup in panel */ }
+      // Serialize flags with panel deletion invalidation. Saving stays successful
+      // if the optional document index is unavailable.
+      try { await getReaderPanelService().remember(targetUrl, result?.id, () => markReaderUrlSaved(targetUrl, result?.url)); }
+      catch { await markReaderUrlSaved(targetUrl, result?.url); }
 
       sendResponse({
         ok: true,

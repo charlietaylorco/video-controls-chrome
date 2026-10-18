@@ -7,7 +7,7 @@ const C = require('../reader-core.js');
 const A = 'https://www.youtube.com/watch?v=alpha';
 const B = 'https://www.youtube.com/watch?v=beta';
 const doc = (id = 'doc-a', source_url = A, notes = 'Original') => ({
-  id, source_url, notes, summary: 'Summary from Reader', tags: { science: { name: 'Science' } }, parent_id: null,
+  id, source_url, notes, title: 'A Reader video', summary: 'Summary from Reader', tags: { science: { name: 'Science' } }, parent_id: null,
 });
 function harness({ stored = {}, responder } = {}) {
   const data = { readerToken: 'fixture-token', ...structuredClone(stored) };
@@ -39,6 +39,8 @@ function harness({ stored = {}, responder } = {}) {
   return { data, requests, context, service, advance(ms) { clock += ms; },
     get: (pageUrl = A, cursor) => service.handle({ type: 'reader-panel-get', pageUrl, cursor }),
     note: (values = {}) => service.handle({ type: 'reader-panel-save-note', pageUrl: A, id: 'doc-a', notes: 'Edited', baseNotes: 'Original', ...values }),
+    delete: (values = {}) => service.handle({ type: 'reader-panel-delete', pageUrl: A, id: 'doc-a', confirmed: true,
+      title: 'A Reader video', baseNotes: 'Original', updatedAt: '', ...values }),
     message: (message, sender = { id: 'extension', frameId: 0, url: A, tab: { id: 1, url: A } }) =>
       new Promise(resolve => listener(message, sender, resolve)),
   };
@@ -122,6 +124,13 @@ test('duplicate matches are reported rather than silently selecting a note', asy
   const app = harness({ responder: () => ({ results: [doc(), doc('duplicate')] }) });
   assert.equal((await app.get()).code, 'ambiguous');
   assert.equal(app.data.readerDocuments?.[A], undefined);
+});
+
+test('refresh clears flags for verified missing ids and deleted list records never enter the index', async () => {
+  const app = harness({ stored: { readerDocuments: { [A]: { id: 'doc-a', at: 1 } }, readerSavedUrls: { [A]: 1 } },
+    responder: url => url.includes('?id=') ? { results: [] } : { results: [{ ...doc(), is_deleted: true }] } });
+  assert.equal((await app.get()).document, null);
+  assert.equal(app.data.readerSavedUrls[A], undefined); assert.equal(app.data.readerDocuments[A], undefined);
 });
 
 test('simultaneous lookups coalesce and concurrent identity writes are preserved', async () => {
@@ -270,4 +279,125 @@ test('late deletion lookup cannot erase an id retained by a newer save', async (
   await app.service.remember(A, 'newly-saved');
   release(); await loading;
   assert.equal(app.data.readerDocuments[A].id, 'newly-saved');
+});
+
+test('confirmed deletion verifies exact source then DELETEs only the captured id and clears matching flags', async () => {
+  const alias = 'https://youtu.be/alpha?t=12';
+  const app = harness({ stored: { readerDocuments: { [A]: { id: 'doc-a', at: 1 }, [B]: { id: 'doc-b', at: 1 } },
+    readerSavedUrls: { [A]: 1, [alias]: 2, [B]: 3, 'https://read.readwise.io/new/read/doc-a': 4 } },
+    responder: (url, init) => init.method === 'DELETE' ? { status: 204 } : { results: [doc()] } });
+  const result = await app.delete();
+  assert.equal(result.ok, true); assert.equal(result.alreadyDeleted, false); assert.equal(result.id, 'doc-a');
+  assert.deepEqual(app.requests.map(r => [r.url, r.method]), [
+    ['https://readwise.io/api/v3/list/?id=doc-a', undefined], ['https://readwise.io/api/v3/delete/doc-a/', 'DELETE']]);
+  assert.equal(app.requests[1].body, undefined);
+  assert.equal(app.data.readerDocuments[A], undefined); assert.equal(app.data.readerDocuments[B].id, 'doc-b');
+  assert.deepEqual({ ...app.data.readerSavedUrls }, { [B]: 3 });
+});
+
+test('delete rejects missing confirmation, invalid identity and untrusted senders before API use', async () => {
+  const app = harness();
+  for (const values of [{ confirmed: false }, { confirmed: undefined }, { id: '../escape' }, { pageUrl: B + '/bad' },
+    { pageUrl: 'https://evil.test' }, { title: null }, { updatedAt: null }, { baseNotes: null }]) {
+    assert.equal((await app.delete(values)).code, 'invalid_delete');
+  }
+  assert.equal((await app.message({ type: 'reader-panel-delete', pageUrl: A },
+    { id: 'extension', frameId: 0, url: B, tab: { id: 1 } })).code, 'invalid_sender');
+  assert.equal(app.requests.length, 0);
+});
+
+test('changed source, highlights, replacement mapping or changed document stop deletion', async () => {
+  for (const changed of [doc('doc-a', B), { ...doc(), parent_id: 'parent' }]) {
+    const app = harness({ responder: () => ({ results: [changed] }) });
+    assert.equal((await app.delete()).code, 'document_changed');
+    assert.equal(app.requests.length, 1);
+  }
+  for (const changed of [{ notes: 'New Reader note' }, { title: 'Renamed' }, { updated_at: 'later' }]) {
+    const app = harness({ responder: () => ({ results: [{ ...doc(), ...changed }] }) });
+    const result = await app.delete();
+    assert.equal(result.code, 'delete_conflict'); assert.equal(result.document.id, 'doc-a');
+    assert.equal(app.requests.length, 1);
+  }
+  const replacement = harness({ stored: { readerDocuments: { [A]: { id: 'new', at: 1 } } } });
+  assert.equal((await replacement.delete()).code, 'document_changed'); assert.equal(replacement.requests.length, 0);
+});
+
+test('already missing/deleted and DELETE 404 clear stale identity without claiming a new deletion', async () => {
+  for (const response of [{ results: [] }, { status: 404 }, { results: [{ ...doc(), is_deleted: true }] }, null]) {
+    const app = harness({ stored: { readerDocuments: { [A]: { id: 'doc-a', at: 1 } }, readerSavedUrls: { [A]: 1 } },
+      responder: (url, init) => init.method === 'DELETE' ? { status: 404 } : response || { results: [doc()] } });
+    const result = await app.delete();
+    assert.equal(result.ok, true); assert.equal(result.alreadyDeleted, true);
+    assert.equal(app.data.readerDocuments[A], undefined); assert.equal(app.data.readerSavedUrls[A], undefined);
+    assert.equal(app.requests.length, response ? 1 : 2);
+  }
+});
+
+test('delete authentication, rate limits, network and unexpected success responses never report success or clear flags', async () => {
+  for (const [response, expected] of [[{ status: 401 }, 'unauthorized'], [{ status: 403 }, 'unauthorized'],
+    [{ status: 429, retryAfter: '120' }, 'rate_limited'], [new Error('secret error'), 'delete_uncertain'],
+    [{ status: 500 }, 'delete_uncertain'], [{ status: 200 }, 'delete_uncertain']]) {
+    const app = harness({ stored: { readerDocuments: { [A]: { id: 'doc-a', at: 1 } }, readerSavedUrls: { [A]: 1 } },
+      responder: (url, init) => init.method === 'DELETE' ? response : { results: [doc()] } });
+    const result = await app.delete();
+    assert.equal(result.ok, false); assert.equal(result.code, expected);
+    assert.equal(app.requests.length, 2); assert.equal(app.data.readerDocuments[A].id, 'doc-a');
+    assert.equal(app.data.readerSavedUrls[A], 1); assert.ok(!JSON.stringify(result).includes('secret'));
+    if (expected === 'rate_limited') {
+      assert.equal((await app.delete()).code, 'rate_limited'); assert.equal(app.requests.length, 2);
+    }
+  }
+  const missing = harness({ stored: { readerToken: '' } });
+  assert.equal((await missing.delete()).code, 'missing_token'); assert.equal(missing.requests.length, 0);
+});
+
+test('delete preflight rechecks credentials and a replacement saved during GET', async () => {
+  const auth = harness({ responder: (url, init, data) => { data.readerToken = 'another-account'; return { results: [doc()] }; } });
+  assert.equal((await auth.delete()).code, 'auth_changed'); assert.equal(auth.requests.length, 1);
+  let release;
+  const app = harness({ responder: async () => { await new Promise(r => { release = r; }); return { results: [doc()] }; } });
+  const deleting = app.delete(); await new Promise(setImmediate);
+  await app.service.remember(A, 'replacement'); release();
+  assert.equal((await deleting).code, 'document_changed'); assert.equal(app.requests.length, 1);
+});
+
+test('a newer save during DELETE keeps its mapping and timestamp flags', async () => {
+  let release;
+  const app = harness({ stored: { readerDocuments: { [A]: { id: 'doc-a', at: 1 } }, readerSavedUrls: { [A]: 1 } },
+    responder: async (url, init) => {
+      if (init.method !== 'DELETE') return { results: [doc()] };
+      await new Promise(r => { release = r; }); return { status: 204 };
+    } });
+  const deleting = app.delete(); await new Promise(setImmediate);
+  await app.service.remember(A, 'replacement', () => { app.data.readerSavedUrls = { [A]: 200 }; });
+  release(); assert.equal((await deleting).ok, true);
+  assert.equal(app.data.readerDocuments[A].id, 'replacement'); assert.equal(app.data.readerSavedUrls[A], 200);
+});
+
+test('delete budgets survive restart and local cache errors do not become a false success', async () => {
+  const limited = harness({ stored: { readerPanelBudget: { delete: Array(18).fill(100000) } } });
+  assert.equal((await limited.delete()).code, 'rate_limited'); assert.equal(limited.requests.length, 1);
+  const app = harness({ responder: (url, init) => {
+    if (init.method === 'DELETE') { app.context.chrome.storage.local.set = (data, cb) => {
+      app.context.chrome.runtime.lastError = { message: 'storage unavailable' }; cb?.();
+      app.context.chrome.runtime.lastError = null;
+    }; return { status: 204 }; }
+    return { results: [doc()] };
+  } });
+  assert.equal((await app.delete()).code, 'delete_cache_error');
+  assert.equal(app.requests.filter(r => r.method === 'DELETE').length, 1);
+});
+
+test('deletion clears clean notes, preserves dirty and newer drafts, and cannot clear a replacement', () => {
+  for (const value of [null, 'Unsaved before deletion', 'Typed while pending', '']) {
+    const state = C.draft(); C.receive(state, C.cleanDocument(doc(), A));
+    if (value !== null) C.edit(state, value);
+    assert.equal(C.removed(state, 'doc-b'), false); assert.equal(state.doc.id, 'doc-a');
+    assert.equal(C.removed(state, 'doc-a'), true); assert.equal(state.doc, null);
+    assert.equal(state.value, value === null ? '' : value); assert.equal(state.dirty, value !== null);
+    if (value !== null) {
+      C.receive(state, C.cleanDocument(doc('replacement'), A));
+      assert.equal(state.conflict.id, 'replacement'); assert.equal(state.value, value);
+    }
+  }
 });

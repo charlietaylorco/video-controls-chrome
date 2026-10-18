@@ -478,3 +478,14 @@ chrome.storage.local.get(["showReaderPanel"], ({ showReaderPanel }) => {
 showReaderPanelInput.addEventListener("change", () => {
   saveToggle("showReaderPanel", showReaderPanelInput.checked, "Reader panel visibility saved");
 });
+
+const readerPanelThemeInput = document.getElementById("reader-panel-theme");
+const normalizeReaderPanelTheme = value => ["light", "dark"].includes(value) ? value : "system";
+chrome.storage.local.get(["readerPanelTheme"], ({ readerPanelTheme }) => {
+  readerPanelThemeInput.value = normalizeReaderPanelTheme(readerPanelTheme);
+});
+readerPanelThemeInput.addEventListener("change", () => {
+  chrome.storage.local.set({ readerPanelTheme: normalizeReaderPanelTheme(readerPanelThemeInput.value) }, () => {
+    showStatus(chrome.runtime.lastError ? "Could not save Reader theme" : "Reader theme saved");
+  });
+});

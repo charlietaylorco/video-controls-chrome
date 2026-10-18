@@ -60,6 +60,7 @@
       ],
       "js": [
         "reader-core.js",
+        "reader-editor.js",
         "reader-panel.js"
       ],
       "run_at": "document_idle"
