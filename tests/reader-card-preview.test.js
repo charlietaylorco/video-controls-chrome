@@ -21,6 +21,8 @@ function fixture({ saved = true, width = 1100, height = 700, nativeEvents = fals
     click() { if (!this.disabled && !this.hidden) this.fire('click'); }
     get hidden() { return this._hidden; }
     set hidden(value) { this._hidden = value; if (nativeEvents && value && active && this.contains(active)) focusNode(null); }
+    get disabled() { return this._disabled; }
+    set disabled(value) { this._disabled = value; if (nativeEvents && value && active === this) focusNode(null); }
     contains(node) { for (let n = node; n; n = n.parentElement) if (n === this) return true; return false; }
     getRootNode() { for (let n = this; n; n = n.parentElement) if (n.tagName === 'shadow' || !n.parentElement) return n; }
     focus() { if (nativeEvents) focusNode(this); else { active = this; this.fire('focusin'); } }
@@ -208,6 +210,50 @@ test('explicit dismissal or a recycled card during slow preflight still revokes 
     assert.equal(f.host.hidden, true, dismissal); assert.equal(f.deleted, 0);
     assert.equal(worker.requests.filter(r => r.method === 'DELETE').length, 0, dismissal);
     assert.equal(worker.data.readerSavedUrls[B], 1);
+  }
+});
+
+test('native pointer Refresh keeps its session through a disabled-control blur and shows the updated result or error', async () => {
+  for (const fail of [false, true]) {
+    const f = fixture({ nativeEvents: true }); let reads = 0, release;
+    const raw = summary => ({ id: 'doc-beta', source_url: B, title: 'Fixture video', summary, notes: 'Saved note', updated_at: 'v1' });
+    const worker = connectWorker(f, () => ++reads === 2 ? new Promise(resolve => {
+      release = () => resolve(fail ? { status: 401 } : { results: [raw('Updated Reader summary')] });
+    }) : { results: [raw('Original Reader summary')] });
+    await f.hover(); f.host.fire('pointerenter'); f.userClick(f.findButton('Refresh summary')); await tick();
+    f.host.fire('pointerleave'); f.run(180); const dismissed = f.host.hidden;
+    release(); await tick();
+    assert.equal(dismissed, false, 'disabling focused Refresh must not dismiss the pending explicit read');
+    assert.equal(f.host.hidden, false); assert.equal(f.findButton('Refresh summary').disabled, false);
+    assert.match(f.byClass('summary').textContent, fail ? /Reader rejected the token/ : /Updated Reader summary/);
+    assert.equal(worker.requests.length, 2); assert.ok(worker.requests.every(r => !r.method)); assert.equal(f.deleted, 0);
+  }
+});
+
+test('keyboard Refresh retains errors through focus departure while hover-only reads still dismiss normally', async () => {
+  const f = fixture({ nativeEvents: true }); let release, reads = 0;
+  f.responder = (message, normal) => ++reads === 2 ? new Promise(resolve => { release = () => resolve({ ok: false, code: 'network_error' }); }) : normal();
+  await f.hover(); f.keyboardActivate(f.findButton('Refresh summary')); f.active.blur(); f.host.fire('pointerleave'); f.run(180);
+  assert.equal(f.host.hidden, false); release(); await tick(); assert.match(f.byClass('summary').textContent, /could not be reached/);
+  assert.equal(f.messages.length, 2); assert.equal(f.findButton('Refresh summary').disabled, false);
+  const passive = fixture({ nativeEvents: true }); let finish;
+  passive.responder = (message, normal) => new Promise(resolve => { finish = () => resolve(normal()); });
+  passive.button.fire('pointerenter'); passive.run(300); passive.button.fire('pointerleave'); passive.run(180);
+  assert.equal(passive.host.hidden, true); finish(); await tick(); assert.equal(passive.host.hidden, true);
+});
+
+test('explicit dismissal, recycling and navigation still suppress late Refresh replies', async () => {
+  for (const dismissal of ['close', 'escape', 'outside', 'recycle', 'navigate']) {
+    const f = fixture({ nativeEvents: true }); let release, reads = 0;
+    f.responder = (message, normal) => ++reads === 2 ? new Promise(resolve => { release = () => resolve(normal()); }) : normal();
+    await f.hover(); f.userClick(f.findButton('Refresh summary'));
+    if (dismissal === 'close') f.userClick(f.findButton('Close summary'));
+    if (dismissal === 'escape') f.event('keydown', { key: 'Escape', composedPath: () => [f.host] });
+    if (dismissal === 'outside') f.event('pointerdown');
+    if (dismissal === 'recycle') f.setTarget({ videoUrl: A });
+    if (dismissal === 'navigate') f.navigate('https://www.youtube.com/');
+    release(); await tick(); assert.equal(f.host.hidden, true, dismissal); assert.equal(f.deleted, 0);
+    assert.equal(f.messages.filter(m => m.type === 'reader-card-get').length, 2);
   }
 });
 

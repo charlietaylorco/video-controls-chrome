@@ -85,7 +85,10 @@
       const cancel = node('button', 'Cancel', buttons, { class: 'small', type: 'button' });
       const confirm = node('button', 'Delete document', buttons, { class: 'small destructive', type: 'button' });
       const status = node('footer', '', box, { role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' });
-      refresh.addEventListener('click', () => { if (session) { cache.delete(session.url); void load(session); } });
+      refresh.addEventListener('click', () => {
+        const s = session; if (!s || s.busy || s.confirm) return;
+        cache.delete(s.url); void load(s, true);
+      });
       trash.addEventListener('click', () => {
         const s = session; if (!s?.doc || s.busy || !valid(s)) { close(); return; }
         s.confirm = true; render(); cancel.focus();
@@ -117,13 +120,21 @@
       if (ui.status.textContent !== status) ui.status.textContent = status;
       place();
     };
-    const load = async s => {
+    const startRequest = (s, action, text, interactive) => {
+      s.busy = true; s.action = action; s.holdRequest = interactive; s.error = false; s.text = text;
+      // Explicit actions disable/hide the clicked control. Move focus before
+      // rendering so native blur cannot turn that request into a hover dismissal.
+      // Initial hover reads retain their ordinary leave/cancellation behavior.
+      if (interactive) { ui.body.focus({ preventScroll: true }); clearTimeout(leave); }
+    };
+    const load = async (s, interactive = false) => {
       if (!valid(s) || s.busy || s.confirm) return;
-      s.started = true; s.busy = true; s.action = 'read'; s.error = false; s.deleted = false; s.text = 'Loading Reader summary…'; render();
+      s.started = true; s.deleted = false;
+      startRequest(s, 'read', 'Loading Reader summary…', interactive); render();
       const cached = cache.get(s.url);
       const reply = cached?.expires > now() ? cached.reply : await send({ type: 'reader-card-get', pageUrl: s.page, targetUrl: s.url, lease: s.lease });
       if (!valid(s)) { if (session === s) close(); return; }
-      s.busy = false;
+      s.busy = false; s.holdRequest = false;
       if (!reply.ok) { s.error = true; s.doc = null; s.text = errorText(reply); }
       else {
         s.doc = reply.document && reply.document.videoUrl === s.url && C.validId(reply.document.id) ? reply.document : null;
@@ -140,16 +151,13 @@
       if (!s || s.busy) return; // A repeated activation must not cancel the accepted request.
       if (!s.confirm || !s.doc || !valid(s)) { close(); return; }
       const doc = s.doc;
-      // Hiding the clicked confirmation otherwise blurs it to the page. That
-      // focusout starts the hover-close timer and invalidates the card lease
-      // before a slow preflight can send DELETE. Keep focus on a stable node.
-      ui.body.focus({ preventScroll: true }); clearTimeout(leave);
-      s.confirm = false; s.busy = true; s.action = 'delete'; s.text = 'Checking Reader before deleting…'; s.error = false; render();
+      startRequest(s, 'delete', 'Checking Reader before deleting…', true);
+      s.confirm = false; render();
       const reply = await send({ type: 'reader-card-delete', pageUrl: s.page, targetUrl: s.url, lease: s.lease,
         id: doc.id, confirmed: true, title: doc.title, baseNotes: doc.notes, updatedAt: doc.updatedAt });
       cache.delete(s.url);
       if (!valid(s)) { if (session === s) close(); return; }
-      s.busy = false;
+      s.busy = false; s.holdRequest = false;
       if (reply.ok && reply.id === doc.id && reply.targetUrl === s.url && reply.deleted === true &&
           reply.deleteStatus === 204 && reply.verifiedAbsent === true) {
         s.doc = null; s.deleted = true; s.text = 'Deleted from Reader.';
@@ -165,10 +173,10 @@
     const scheduleClose = () => {
       clearTimeout(intent); clearTimeout(leave);
       leave = setTimeout(() => {
-        // Implicit hover/focus departure cannot revoke an accepted mutation.
+        // Implicit departure cannot revoke an accepted control action.
         // Explicit dismissal, navigation, recycled cards and credential changes
         // still close the session and retain all background identity guards.
-        if (session?.busy && session.action === 'delete') return;
+        if (session?.busy && session.holdRequest) return;
         if (session && !root?.activeElement && button.getRootNode().activeElement !== button) close();
       }, 180);
     };

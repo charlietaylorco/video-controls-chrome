@@ -22,6 +22,7 @@ const html = `<!doctype html><meta charset="utf-8">
 const PAGE = 'https://www.youtube.com/feed/subscriptions', VIDEO = 'https://www.youtube.com/watch?v=fixture_hover_delete';
 const delay = Math.min(2000, Math.max(0, Number(new URL(window.location.href).searchParams.get('delay')) || 800));
 const outcome = new URL(window.location.href).searchParams.get('outcome') || 'success';
+const action = new URL(window.location.href).searchParams.get('action') || 'delete';
 const started = performance.now(), listeners = [], storageListeners = [];
 const trace = text => { const li = document.createElement('li'); li.textContent = Math.round(performance.now() - started) + 'ms ' + text; document.querySelector('#events').append(li); };
 const data = { readerToken: 'fixture-only-not-a-real-token', readerDocuments: { [VIDEO]: { id: 'fixture-doc', at: 1 } }, readerSavedUrls: { [VIDEO]: 1 } };
@@ -35,6 +36,9 @@ window.fetch = async (url, init) => {
   if (init.method === 'DELETE') {
     if (outcome === 'unauthorized') status = 401;
     else { status = 204; if (outcome !== 'still-present') present = false; }
+  } else if (action === 'refresh' && reads > 1) {
+    if (outcome === 'unauthorized') status = 401;
+    else result = { results: [{ ...raw(), summary: 'Updated Reader summary after refresh.' }] };
   } else result = { results: present ? [raw()] : [] };
   trace('Mock HTTP ' + status + (result ? ' · records ' + result.results.length : ''));
   return { status, ok: status >= 200 && status < 300, headers: { get: () => null }, json: async () => result };
@@ -76,7 +80,7 @@ ${source('reader-card-preview.js')}
 })();
 const bookmark = document.querySelector('#bookmark'), card = document.querySelector('#card');
 MVSReaderCardPreview.create({ button: bookmark, getTarget: () => ({ source: card, videoUrl: VIDEO, title: 'Mock studio video', saved: true }), onDeleted: () => trace('VERIFIED DELETION SUCCESS'), onClose: () => trace('POPOVER CLOSED') });
-trace('Ready. Focus bookmark and press ArrowDown, then click trash and Delete document. Preflight delay ' + delay + 'ms.');
+trace('Ready. Focus bookmark and press ArrowDown, then ' + (action === 'refresh' ? 'click Refresh.' : 'click trash and Delete document.') + ' Slow request delay ' + delay + 'ms.');
 </script>`;
 fs.writeFileSync(path.join(destination, 'hover.html'), html);
 console.log(path.join(destination, 'hover.html'));
