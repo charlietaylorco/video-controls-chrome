@@ -65,16 +65,17 @@ ${source('background.js')}
 seeded = (async () => {
   await new Promise((resolve, reject) => { const r = indexedDB.deleteDatabase('mvs-watch-offline-fixture'); r.onsuccess = resolve; r.onerror = reject; });
   const store = getReaderWatchStore();
-  if (mode !== 'empty') for (let i = 0; i < 27; i++) {
+  if (mode !== 'empty') for (let i = mode === 'layout' ? 24 : 0; i < (mode === 'layout' ? 26 : 27); i++) {
     const videoUrl = 'https://www.youtube.com/watch?v=mock_watch_' + i, id = 'mock-' + i;
     const titles = ['A quieter way to plan your week', 'What makes a small business work', 'Designing a useful daily practice', 'Learning to see the bigger picture', 'The craft behind a good decision'];
     const doc = { id, source_url: videoUrl, title: titles[i % titles.length] + ' · ' + (i + 1), author: 'Mock channel ' + (i % 4 + 1),
+      tags: i === 3 ? ['<img src=x onerror=alert(1)>'] : i % 5 === 0 ? [] : ['Creativity', 'Learning'],
       location: i % 7 === 0 ? 'archive' : i % 3 === 0 ? 'shortlist' : i % 5 === 0 ? 'new' : 'later',
       summary: i === 3 ? '<img src=x onerror=alert(1)> is inert fixture text.' : i % 11 === 0 ? '' : 'A saved idea worth returning to. This mock summary explores practical ways to make room for focused work, thoughtful decisions, and a little more curiosity.\\n\\nThe useful takeaway: start with one small change you can actually try.',
       notes: 'Private fixture note', updated_at: 'v1' };
     documents.set(id, doc); data.readerSavedUrls[videoUrl] = fixtureClock; data.readerDocuments[videoUrl] = { id, at: fixtureClock };
     await store.recordSave(videoUrl, mode === 'unlinked' ? null : id, { title: doc.title, author: doc.author });
-    if (mode !== 'unlinked' && i % 2 === 0) await store.verify(videoUrl, MVSReaderCore.cleanDocument(doc, videoUrl));
+    if (mode !== 'unlinked' && (i % 2 === 0 || mode === 'layout')) await store.verify(videoUrl, MVSReaderCore.cleanDocument(doc, videoUrl));
   }
   report('Fixture ready. No real Reader data.');
 })();
@@ -83,11 +84,12 @@ document.getElementById('fixture-add').addEventListener('click', async () => {
   for (const fn of listeners) fn({ type: 'save-to-reader', pageUrl: 'https://www.youtube.com/watch?v=mock_added_' + (added + 1), title: 'A newly saved mock video', author: 'Mock channel' },
     { id: 'extension', frameId: 0, url: 'https://www.youtube.com/', tab: { id: 2 } }, reply => report('New save recorded: ' + reply.ok));
 });
+document.getElementById('fixture-auth').addEventListener('click', () => chrome.storage.local.set({ readerToken: 'fixture-token-' + Date.now() }));
 document.addEventListener('click', event => { if (event.target.closest('a')) { event.preventDefault(); report('Fixture blocked link navigation'); } }, true);
 `;
 let html = fs.readFileSync(path.join(root, 'watch.html'), 'utf8').replace(/<script[^>]*src="[^"]+"[^>]*><\/script>/g, '');
 html = html.replace('<head>', '<head><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\' \'unsafe-inline\'; style-src \'self\' \'unsafe-inline\'; img-src data:; connect-src \'none\'">');
-const tools = '<aside style="font:11px system-ui;padding:10px 20px;background:#e5e8df;color:#25301d"><strong>Mock data only · isolated native browser check</strong> · <span id="fixture-count">Mock Reader requests: 0</span> <button id="fixture-add" type="button">Add a mock save</button> <label><input type="checkbox" id="fixture-slow"> Slow responses</label> <label><input type="checkbox" id="fixture-fail"> Reject Reader requests</label><details><summary>Mock trace</summary><ol id="fixture-log"></ol></details></aside>';
+const tools = '<aside style="font:11px system-ui;padding:10px 20px;background:#e5e8df;color:#25301d"><strong>Mock data only · isolated native browser check</strong> · <span id="fixture-count">Mock Reader requests: 0</span> <button id="fixture-add" type="button">Add a mock save</button> <button id="fixture-auth" type="button">Change mock connection</button> <label><input type="checkbox" id="fixture-slow"> Slow responses</label> <label><input type="checkbox" id="fixture-fail"> Reject Reader requests</label><details><summary>Mock trace</summary><ol id="fixture-log"></ol></details></aside>';
 html = html.replace('<body>', '<body>' + tools).replace('</body>', '<script>' + bootstrap + '</script><script src="watch.js"></script></body>');
 fs.writeFileSync(path.join(destination, 'index.html'), html);
 for (const file of ['watch.css', 'watch.js']) fs.copyFileSync(path.join(root, file), path.join(destination, file));

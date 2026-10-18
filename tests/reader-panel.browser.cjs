@@ -446,7 +446,7 @@ test('location and overflow menus fit narrow viewports and keep the Note draft a
     await f.page.keyboard.press('ArrowDown');
     assert.equal(await f.panel.getByRole('menuitem', { name: 'Open in Reader', exact: true }).evaluate(el => el.getRootNode().activeElement === el), true);
     await f.page.keyboard.press('End');
-    assert.equal(await f.panel.getByRole('menuitem', { name: 'Watch list', exact: true }).evaluate(el => el.getRootNode().activeElement === el), true);
+    assert.equal(await f.panel.getByRole('menuitem', { name: 'Recent saves', exact: true }).evaluate(el => el.getRootNode().activeElement === el), true);
     await f.page.keyboard.press('Escape'); assert.equal(await f.panel.locator('#reader-more-menu').isVisible(), false);
     assert.equal(await f.panel.getByRole('dialog').isVisible(), true);
     assert.deepEqual(f.errors, []); await f.close();

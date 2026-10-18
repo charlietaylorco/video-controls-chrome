@@ -4,6 +4,7 @@
   const PAGE_SIZE = 12, CACHE_SIZE = 200, SUMMARY_LIMIT = 64000;
   const filters = Object.freeze({ watch: 'To watch', later: 'Later', shortlist: 'Shortlist', archive: 'Archive', all: 'All saves' });
   const text = (value, limit) => typeof value === 'string' ? value.slice(0, limit) : '';
+  const tags = value => Array.isArray(value) ? value.filter(tag => typeof tag === 'string' && tag.trim()).slice(0, 100).map(tag => text(tag, 200)) : [];
   const decorate = row => ({ ...row, active: row.status === 'deleted' ? 0 : 1,
     queue: !['deleted', 'missing'].includes(row.status) && !['archive', 'feed'].includes(row.location) ? 1 : 0,
     filterLocation: row.status === 'saved' ? row.location : '' });
@@ -26,7 +27,7 @@
     : Object.hasOwn(filters, filter) ? ['locationRecent', filter] : null;
   const cursor = row => [row.savedAt, row.videoUrl];
   const validCursor = value => value == null || Array.isArray(value) && value.length === 2 && Number.isFinite(value[0]) && value[0] > 0 && C.canonical(value[1]) === value[1];
-  const api = { PAGE_SIZE, CACHE_SIZE, SUMMARY_LIMIT, filters, text, decorate, seeds, indexFor, cursor, validCursor };
+  const api = { PAGE_SIZE, CACHE_SIZE, SUMMARY_LIMIT, filters, text, tags, decorate, seeds, indexFor, cursor, validCursor };
   globalThis.MVSReaderWatchCore = api;
   if (typeof module !== 'undefined') module.exports = api;
 })();

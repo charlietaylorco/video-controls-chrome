@@ -2129,7 +2129,7 @@ async function handleSaveToReadwise(item, button) {
 
     if (result.status === 'saved') {
       setReaderButtonState(button, 'saved');
-      showToast(result.historyWarning ? 'Saved to Reader, but Watch list storage could not be updated.' : `Saved "${item.title}" to Reader.`);
+      showToast(result.historyWarning ? 'Saved to Reader, but Recent saves storage could not be updated.' : `Saved "${item.title}" to Reader.`);
       item.isSavedToReader = true;
       scheduleReaderButtonReset(button);
       renderLists();
@@ -2138,7 +2138,7 @@ async function handleSaveToReadwise(item, button) {
 
     if (result.status === 'exists') {
       setReaderButtonState(button, 'exists');
-      showToast(result.historyWarning ? 'Already in Reader, but Watch list storage could not be updated.' : 'This video is already in Reader.');
+      showToast(result.historyWarning ? 'Already in Reader, but Recent saves storage could not be updated.' : 'This video is already in Reader.');
       item.isSavedToReader = true;
       scheduleReaderButtonReset(button);
       renderLists();

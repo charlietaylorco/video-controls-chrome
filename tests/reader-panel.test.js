@@ -334,7 +334,7 @@ test('location control follows Note and precedes tags; overflow contains readabl
   assert.equal(f.button('Extension options').textContent, 'Options');
   f.button('Extension options').click(); await tick();
   assert.equal(f.messages.at(-1).type, 'open-options'); assert.equal(f.byId('reader-more-menu').hidden, true);
-  f.button('More Reader actions').click(); f.button('Watch list').click(); await tick();
+  f.button('More Reader actions').click(); f.button('Recent saves').click(); await tick();
   assert.equal(f.messages.at(-1).type, 'open-watch-list'); assert.equal(f.byId('reader-more-menu').hidden, true);
 });
 
@@ -350,7 +350,7 @@ test('location and overflow menus support arrow/Home/End, Escape, Tab and outsid
   f.byClass('location').click(); menu.fire('keydown', { key: 'Tab' });
   assert.equal(menu.hidden, true); assert.equal(f.active, f.button('Refresh'));
   f.button('More Reader actions').fire('keydown', { key: 'ArrowUp' });
-  assert.equal(f.active, f.button('Watch list'));
+  assert.equal(f.active, f.button('Recent saves'));
   f.event('pointerdown'); assert.equal(f.byId('reader-more-menu').hidden, true);
   assert.equal(f.byClass('body').hidden, true);
 });

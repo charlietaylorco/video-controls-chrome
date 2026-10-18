@@ -224,7 +224,7 @@
     icon(link, ['M14 3h7v7', 'M10 14 21 3', 'M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5']);
     const settings = element('button', 'Options', moreMenu, { class: 'menu-item', role: 'menuitem', type: 'button', title: 'Options', 'aria-label': 'Extension options', tabindex: '-1' });
     icon(settings, ['M10 2h4l.6 2.7L17 6.1l2.6-.8 2 3.4-2 1.9v2.8l2 1.9-2 3.4-2.6-.8-2.4 1.4L14 22h-4l-.6-2.7L7 17.9l-2.6.8-2-3.4 2-1.9v-2.8l-2-1.9 2-3.4 2.6.8 2.4-1.4L10 2Z', 'M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0']);
-    const watchList = element('button', 'Watch list', moreMenu, { class: 'menu-item', role: 'menuitem', type: 'button', tabindex: '-1' });
+    const watchList = element('button', 'Recent saves', moreMenu, { class: 'menu-item', role: 'menuitem', type: 'button', tabindex: '-1' });
     const close = element('button', '', actions, { class: 'icon close', type: 'button', title: 'Close', 'aria-label': 'Close Reader' });
     icon(close, ['m6 6 12 12', 'M6 18 18 6']);
     const content = element('div', '', body, { class: 'content' });

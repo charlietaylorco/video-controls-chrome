@@ -79,6 +79,7 @@
       return { ...previous, videoUrl, readerId: C.validId(id) ? id : previous?.status === 'saved' ? previous.readerId : null,
         savedAt: openExisting && previous ? previous.savedAt : at, firstSavedAt: previous?.firstSavedAt || at,
         title: W.text(metadata.title, 500) || previous?.title || '', author: W.text(metadata.author, 300) || previous?.author || '',
+        tags: previous?.readerId === id && previous.status === 'saved' ? previous.tags : null,
         location: previous?.readerId === id && previous.status === 'saved' ? previous.location : '',
         checkedAt: previous?.readerId === id && previous.status === 'saved' ? previous.checkedAt : 0, status: 'saved', provenance: 'extension' };
     });
@@ -87,7 +88,7 @@
       const at = now(), summary = W.text(doc.summary, W.SUMMARY_LIMIT);
       return update(videoUrl, previous => !previous || previous.status === 'deleted' || previous.readerId && previous.readerId !== doc.id && previous.status !== 'missing' ? null : {
         ...previous, readerId: doc.id, title: W.text(doc.title, 500) || previous.title, author: W.text(doc.author, 300) || previous.author,
-        location: W.text(doc.location, 100), status: 'saved', checkedAt: at,
+        tags: W.tags(doc.tags), location: W.text(doc.location, 100), status: 'saved', checkedAt: at,
       }, { videoUrl, id: doc.id, summary, truncated: typeof doc.summary === 'string' && doc.summary.length > summary.length, checkedAt: at });
     };
     const mark = (videoUrl, id, status) => update(videoUrl, previous => previous?.readerId === id && !(previous.status === 'deleted' && status === 'missing')

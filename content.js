@@ -2307,7 +2307,7 @@
 
   const getReaderFeedback = (response, error) => {
     if (response?.ok && !error) {
-      if (response.historyWarning) return { kind: "error", message: "Saved to Reader; Watch list storage could not be updated.", linkUrl: response.url };
+      if (response.historyWarning) return { kind: "error", message: "Saved to Reader; Recent saves storage could not be updated.", linkUrl: response.url };
       if (response.alreadyExists) {
         return {
           kind: "success",

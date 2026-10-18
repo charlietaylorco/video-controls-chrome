@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const path = require('node:path');
 const { IDBFactory, IDBKeyRange, IDBObjectStore } = require('fake-indexeddb');
 const A = 'https://www.youtube.com/watch?v=alpha', B = 'https://www.youtube.com/watch?v=beta';
-const raw = (id = 'doc-a', source_url = A, location = 'later') => ({ id, source_url, location, title: 'Saved video', author: 'A channel', summary: 'Reader summary', notes: 'Private saved note', updated_at: 'v1' });
+const raw = (id = 'doc-a', source_url = A, location = 'later') => ({ id, source_url, location, title: 'Saved video', author: 'A channel', summary: 'Reader summary', tags: { category: { name: 'Learning' } }, notes: 'Private saved note', updated_at: 'v1' });
 const scope = { scope: 'watch-document', isCurrent: () => true };
 function app({ stored = {}, responder } = {}) {
   const data = { readerToken: 'fixture-token', ...structuredClone(stored) }, requests = [], reads = [], notifications = [], storageListeners = [];
@@ -251,4 +251,17 @@ test('absence discovered after confirmation marks a missing match without claimi
   const reply = await a.call('watch-list-delete', { token: ticket.token, confirmed: true });
   assert.equal(reply.code, 'delete_target_missing'); assert.equal(a.requests.filter(r => r.method === 'DELETE').length, 0);
   assert.equal((await a.store.get(A)).status, 'missing'); assert.equal((await a.store.page()).items.length, 0); assert.ok(!a.data.readerDeletedVideos[A]);
+});
+
+test('tags are retained only from verified Reader metadata, bounded, and reset for a replacement document', async () => {
+  const a = app(); await a.record(); assert.equal((await a.store.page()).items[0].tags, null);
+  await a.call('watch-list-refresh', { videoUrl: A });
+  assert.deepEqual(Array.from((await a.store.page()).items[0].tags), ['Learning']);
+  assert.equal(a.requests.length, 1); // Same exact-ID document read supplies summary, tags and location.
+  await a.record(A, 'doc-a', {}, { openExisting: true }); assert.deepEqual(Array.from((await a.store.get(A)).tags), ['Learning']);
+  const tags = ['<img src=x onerror=alert(1)>', '', null, 'x'.repeat(300), ...Array.from({ length: 110 }, (_, i) => `Tag ${i}`)];
+  await a.store.verify(A, { id: 'doc-a', videoUrl: A, summary: 'Summary', location: 'later', tags });
+  let row = (await a.store.page()).items[0]; assert.equal(row.tags.length, 100); assert.equal(row.tags[0], tags[0]); assert.equal(row.tags[1].length, 200);
+  await a.record(A, 'replacement'); row = (await a.store.page()).items[0]; assert.equal(row.tags, null); assert.equal(row.summary, null);
+  assert.equal(a.requests.length, 1);
 });

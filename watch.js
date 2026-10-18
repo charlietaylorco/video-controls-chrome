@@ -28,12 +28,12 @@
     delete_uncertain: 'Deletion could not be confirmed. Refresh to check Reader before trying again.',
     delete_unverified: 'The extension did not verify deletion. Refresh before trying again.',
     delete_cache_error: 'Reader confirmed deletion, but local indicators could not be updated. Refresh to check.',
-    watch_storage_error: 'Local Watch list storage is unavailable or full. Reader may already have changed; check Reader before retrying. Free storage and reopen this page.',
+    watch_storage_error: 'Local Recent saves storage is unavailable or full. Reader may already have changed; check Reader before retrying. Free storage and reopen this page.',
     network_error: 'Reader could not be reached. Cached videos are still available.', location_conflict: 'Reader’s location changed. Review its current location before moving again.',
     location_not_applied: 'Reader kept a different location. That destination may not be enabled in your Library.',
     location_uncertain: 'The move could not be confirmed. Refresh before moving again.', location_cache_error: 'Reader changed, but the local list could not be updated. Refresh to check.',
-    auth_changed: 'Reader credentials changed. Refresh before continuing.', invalid_sender: 'This extension page is no longer current. Reopen Watch list.',
-    request_uncertain: 'The request could not be confirmed. Refresh before trying again.', runtime_error: 'The extension is unavailable. Reload the extension and reopen Watch list.'
+    auth_changed: 'Reader credentials changed. Refresh before continuing.', invalid_sender: 'This extension page is no longer current. Reopen Recent saves.',
+    request_uncertain: 'The request could not be confirmed. Refresh before trying again.', runtime_error: 'The extension is unavailable. Reload the extension and reopen Recent saves.'
   })[result.code] || (result.code === 'rate_limited' ? `Reader rate limit reached. Try after ${new Date(result.retryAt || Date.now() + 60000).toLocaleTimeString()}.` : 'Reader could not complete this request. Try Refresh.');
   const announce = (text, error = false) => { status.textContent = text; status.dataset.error = String(error); };
   const node = (tag, text, parent, className) => { const n = document.createElement(tag); if (text) n.textContent = text; if (className) n.className = className; parent?.append(n); return n; };
@@ -47,25 +47,35 @@
   };
   const makeRow = item => {
     const card = node('article', '', null, 'video'); card.dataset.url = item.videoUrl;
-    const head = node('div', '', card, 'video-head'), thumbnailLink = node('a', '', head);
+    const thumbnailLink = node('a', '', card, 'thumbnail-link');
     thumbnailLink.href = item.videoUrl; thumbnailLink.target = '_blank'; thumbnailLink.rel = 'noopener noreferrer'; thumbnailLink.tabIndex = -1;
-    const image = node('img', '', thumbnailLink, 'thumbnail'); image.alt = ''; image.loading = 'lazy'; image.decoding = 'async'; image.width = 112; image.height = 63;
+    const image = node('img', '', thumbnailLink, 'thumbnail'); image.alt = ''; image.loading = 'lazy'; image.decoding = 'async'; image.width = 480; image.height = 270;
     image.referrerPolicy = 'no-referrer'; image.src = `https://i.ytimg.com/vi/${encodeURIComponent(new URL(item.videoUrl).searchParams.get('v'))}/mqdefault.jpg`;
-    const copy = node('div', '', head), heading = node('h2', '', copy), link = node('a', '', heading);
+    const copy = node('div', '', card, 'video-copy'), heading = node('h2', '', copy), link = node('a', '', heading);
     link.href = item.videoUrl; link.target = '_blank'; link.rel = 'noopener noreferrer';
-    const metadata = node('p', '', copy, 'metadata'), location = node('span', '', copy, 'location-label');
-    const preview = node('p', '', card, 'summary-preview'), details = node('details', '', card, 'summary-box');
-    node('summary', 'Read summary', details); const summary = node('p', '', details, 'summary-text');
-    const actions = node('div', '', card, 'video-actions'), move = node('select', '', actions);
-    move.setAttribute('aria-label', 'Move Reader document');
-    const placeholder = node('option', 'Move to…', move); placeholder.value = '';
+    const metadata = node('dl', '', copy, 'metadata');
+    const field = label => { const group = node('div', '', metadata); node('dt', label, group); return node('dd', '', group); };
+    const channel = field('Channel'), tags = field('Tags'), date = field('Saved date');
+    const locationRow = node('div', '', copy, 'location-row'), locationLabel = node('label', 'Saved location', locationRow);
+    const move = node('select', '', locationLabel);
+    const placeholder = node('option', 'Not checked', move); placeholder.value = ''; placeholder.disabled = true;
     for (const [value, label] of Object.entries(C.locations)) { const option = node('option', label, move); option.value = value; }
-    const readerLink = node('a', 'Open Reader', actions); readerLink.target = '_blank'; readerLink.rel = 'noopener noreferrer';
-    const trash = node('button', 'Trash', actions, 'trash'); trash.type = 'button';
-    const note = node('p', '', card, 'row-status'); note.setAttribute('role', 'status');
-    move.addEventListener('change', () => { const destination = move.value; move.value = ''; if (destination) void mutate(item.videoUrl, destination); });
-    trash.addEventListener('click', () => void prepareDelete(item.videoUrl));
-    return { card, link, metadata, location, preview, summary, details, move, readerLink, trash, note };
+    const removeGroup = node('optgroup', '', move); removeGroup.label = 'Remove document';
+    const trash = node('option', 'Trash…', removeGroup, 'trash-option'); trash.value = 'trash';
+    const readerLink = node('a', 'Open Reader ↗', locationRow); readerLink.target = '_blank'; readerLink.rel = 'noopener noreferrer';
+    const summary = node('p', '', copy, 'summary-text');
+    const footer = node('div', '', copy, 'card-footer'), note = node('p', '', footer, 'row-status'); note.setAttribute('role', 'status');
+    const refresh = node('button', '', footer, 'card-refresh'); refresh.type = 'button';
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('d', 'M20 7v5h-5M20 12a8 8 0 1 0-2.3 5.7'); svg.append(path); refresh.append(svg);
+    move.addEventListener('change', () => {
+      const destination = move.value, current = items.find(row => row.videoUrl === item.videoUrl);
+      move.value = current && Object.hasOwn(C.locations, current.location) ? current.location : '';
+      if (destination === 'trash') void prepareDelete(item.videoUrl);
+      else if (destination) void mutate(item.videoUrl, destination);
+    });
+    refresh.addEventListener('click', () => void refreshCard(item.videoUrl));
+    return { card, link, channel, tags, date, placeholder, summary, move, readerLink, refresh, note };
   };
   const render = () => {
     const order = items.map(item => item.videoUrl);
@@ -74,14 +84,22 @@
     for (const item of items) {
       let row = rows.get(item.videoUrl); if (!row) { row = makeRow(item); rows.set(item.videoUrl, row); }
       row.link.textContent = item.title || `YouTube video · ${new URL(item.videoUrl).searchParams.get('v')}`;
-      row.metadata.textContent = [item.author, `Saved ${new Date(item.savedAt).toLocaleDateString()}`].filter(Boolean).join(' · ');
-      row.location.textContent = item.status === 'missing' ? 'Not found in Reader' : item.checkedAt ? C.locationLabel(item.location) : 'Location not checked';
-      const text = item.summary == null ? 'Summary not fetched. Refresh this page when you want to check Reader.' : item.summary || 'Summary not available yet. Reader may still be processing it.';
-      row.preview.textContent = text; row.summary.textContent = text + (item.summaryTruncated ? '\n\nCached excerpt. Open Reader for the full summary.' : '');
-      row.details.hidden = !item.summary;
-      row.move.disabled = row.trash.disabled = pending.has(item.videoUrl) || refreshing || !item.readerId || item.status !== 'saved';
-      row.move.setAttribute('aria-label', `Move ${item.title || 'video'} in Reader`);
-      row.trash.setAttribute('aria-label', `Trash ${item.title || 'video'} from Reader`);
+      row.channel.textContent = item.author || 'Not retained';
+      const tags = Array.isArray(item.tags) ? W.tags(item.tags) : null;
+      row.tags.textContent = tags ? tags.length ? tags.slice(0, 3).join(' · ') + (tags.length > 3 ? ` +${tags.length - 3}` : '') : 'None' : 'Not fetched';
+      row.tags.title = tags?.join(' · ') || '';
+      row.date.textContent = new Date(item.savedAt).toLocaleDateString();
+      row.placeholder.textContent = item.status === 'missing' ? 'Not found in Reader' : item.checkedAt ? C.locationLabel(item.location) : 'Not checked';
+      row.placeholder.hidden = Object.hasOwn(C.locations, item.location) && item.status === 'saved';
+      row.move.value = Object.hasOwn(C.locations, item.location) && item.status === 'saved' ? item.location : '';
+      const text = item.summary == null ? 'Summary not fetched. Refresh this card to check Reader.' : item.summary || 'Summary not available yet. Reader may still be processing it. Refresh this card to check again.';
+      row.summary.textContent = text + (item.summaryTruncated ? '\n\nCached excerpt. Open Reader for the full summary.' : '');
+      row.summary.dataset.empty = String(!item.summary);
+      row.move.disabled = pending.size > 0 || refreshing || Boolean(deletion) || !item.readerId || item.status !== 'saved' || !loaded;
+      row.refresh.disabled = pending.size > 0 || refreshing || Boolean(deletion) || !item.readerId || item.status === 'deleted' || !loaded;
+      row.move.setAttribute('aria-label', `Saved location for ${item.title || 'video'}`);
+      row.refresh.setAttribute('aria-label', `Refresh ${item.title || 'video'} from Reader`); row.refresh.title = 'Refresh this card from Reader';
+      row.card.setAttribute('aria-busy', String(pending.has(item.videoUrl) || refreshing));
       row.readerLink.hidden = !item.readerId; if (item.readerId) row.readerLink.href = C.readerUrl(item.readerId);
       row.note.textContent = pending.has(item.videoUrl) ? 'Working…' : errors.get(item.videoUrl) || (!item.readerId ? 'Reader ID not retained; open the video page to link it.' : item.checkedAt ? `Checked ${new Date(item.checkedAt).toLocaleString()}` : 'Saved locally · not yet checked with Reader');
       row.note.dataset.error = String(errors.has(item.videoUrl)); cards.push(row.card);
@@ -90,33 +108,49 @@
     grid.hidden = loaded && items.length === 0; $('empty').hidden = !loaded || items.length > 0;
     grid.setAttribute('aria-busy', String(!loaded)); controls();
   };
-  const load = async ({ announceDefault = false } = {}) => {
+  const load = async ({ clearStatus = false } = {}) => {
     const request = ++pageRequest, result = await send({ type: 'watch-list-page', filter, cursor: cursors.at(-1) });
     if (request !== pageRequest) return;
     if (!result.ok) { announce(messageFor(result), true); controls(); return; }
     items = result.items.filter(item => C.canonical(item.videoUrl) === item.videoUrl && (!item.readerId || C.validId(item.readerId)));
     hasNext = result.hasNext; nextCursor = result.nextCursor; loaded = true; render();
-    if (announceDefault && !refreshing && pending.size === 0 && !deletion) announce('Newest saves first. Browse cached summaries or refresh this page.');
+    if (clearStatus && !refreshing && pending.size === 0 && !deletion) announce('');
   };
   const reloadLocal = () => { clearTimeout(reloadTimer); reloadTimer = setTimeout(() => { if (!refreshing && !pending.size && !deletion) void load(); }, 100); };
-  const changePage = () => { refreshRequest++; refreshing = false; loaded = false; render(); void load({ announceDefault: true }); };
+  const changePage = () => { refreshRequest++; refreshing = false; loaded = false; render(); void load({ clearStatus: true }); };
+  const refreshCard = async url => {
+    const item = items.find(row => row.videoUrl === url);
+    if (!item?.readerId || !loaded || refreshing || pending.size || deletion) return;
+    const request = refreshRequest, id = item.readerId;
+    pending.add(url); errors.delete(url); render();
+    const reply = await send({ type: 'watch-list-refresh', videoUrl: url, id });
+    pending.delete(url);
+    if (request !== refreshRequest || !items.some(row => row.videoUrl === url && row.readerId === id)) { render(); return; }
+    if (!reply.ok) rememberError(url, messageFor(reply));
+    await load(); announce(reply.ok ? 'Card updated from Reader.' : messageFor(reply), !reply.ok);
+  };
   const mutate = async (url, destination) => {
     const item = items.find(row => row.videoUrl === url); if (!item || pending.has(url)) return;
+    const request = refreshRequest;
     pending.add(url); errors.delete(url); render();
     const reply = await send({ type: 'watch-list-move', videoUrl: url, id: item.readerId, location: destination, baseLocation: item.location });
-    pending.delete(url); if (!reply.ok) rememberError(url, messageFor(reply));
+    pending.delete(url);
+    if (request !== refreshRequest) { render(); return; }
+    if (!reply.ok) rememberError(url, messageFor(reply));
     await load(); announce(reply.ok ? `Moved to ${C.locationLabel(destination)}.` : messageFor(reply), !reply.ok);
   };
   const prepareDelete = async url => {
     const item = items.find(row => row.videoUrl === url); if (!item || pending.has(url)) return;
+    const request = refreshRequest;
     pending.add(url); errors.delete(url); render();
     const reply = await send({ type: 'watch-list-prepare-delete', videoUrl: url, id: item.readerId });
     pending.delete(url); render();
+    if (request !== refreshRequest) return;
     if (!reply.ok) { rememberError(url, messageFor(reply)); render(); announce(messageFor(reply), true); return; }
     deletion = reply; $('delete-title').textContent = reply.title || 'Untitled Reader video';
     $('delete-identity').textContent = `${reply.videoUrl} · Reader ID: ${reply.id}`;
     $('delete-status').textContent = ''; $('delete-status').dataset.error = 'false'; $('confirm-delete').disabled = false; $('cancel-delete').disabled = false;
-    $('deletion').showModal(); $('cancel-delete').focus(); controls();
+    $('deletion').showModal(); $('cancel-delete').focus(); render();
   };
   const closeDelete = () => { if (deleting) return; $('deletion').close(); deletion = null; controls(); void load(); };
   $('cancel-delete').addEventListener('click', closeDelete);
@@ -166,5 +200,5 @@
       render(); announce('Reader connection changed. Refresh to check current data.');
     }
   });
-  void load({ announceDefault: true });
+  void load({ clearStatus: true });
 })();
