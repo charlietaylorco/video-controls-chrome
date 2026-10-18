@@ -81,7 +81,7 @@
       let response;
       try {
         response = await request(`https://readwise.io/api/v3/${path}`, {
-          ...init, signal: AbortSignal.timeout(15000), redirect: 'error', credentials: 'omit',
+          ...init, cache: 'no-store', signal: AbortSignal.timeout(15000), redirect: 'error', credentials: 'omit',
           headers: { Authorization: `Token ${readerToken.trim()}`, 'Content-Type': 'application/json' }
         });
       } catch { throw error(init.method === 'PATCH' ? 'save_uncertain' : init.method === 'DELETE' ? 'delete_uncertain' : 'network_error'); }
@@ -159,7 +159,7 @@
       }
       return { ok: true, id: doc.id, notes: message.notes };
     };
-    const deleteDocument = async (message) => {
+    const deleteDocument = async (message, { requireDelete = false } = {}) => {
       const url = C.canonical(message.pageUrl), id = message.id;
       if (!url || !C.validId(id) || message.confirmed !== true || typeof message.baseNotes !== 'string' ||
           typeof message.title !== 'string' || typeof message.updatedAt !== 'string') throw error('invalid_delete');
@@ -171,6 +171,12 @@
       catch (e) { if (e.code !== 'not_found') throw e; }
       const raw = data?.results.find(item => item.id === id);
       if (!raw || raw.is_deleted) {
+        if (requireDelete) {
+          // A stale hover identity is not evidence that this click deleted
+          // anything. Retain saved flags so it can be explicitly re-linked.
+          await forget(url, id);
+          throw error('delete_target_missing');
+        }
         await forgetDeleted(url, id);
         return { ok: true, id, alreadyDeleted: true };
       }
@@ -184,10 +190,25 @@
       if (latest && latest !== id) throw error('document_changed');
       let alreadyDeleted = false;
       try { await api(`delete/${encodeURIComponent(id)}/`, { method: 'DELETE' }); }
-      catch (e) { if (e.code !== 'not_found') throw e; alreadyDeleted = true; }
+      catch (e) {
+        if (e.code !== 'not_found') throw e;
+        if (requireDelete) { await forget(url, id); throw error('delete_not_confirmed'); }
+        alreadyDeleted = true;
+      }
+      if (requireDelete) {
+        // Only a transport-confirmed DELETE plus an uncached read of the same
+        // id can produce a hover success receipt. Never retry a mutation.
+        let verification;
+        try { verification = await api(`list/?id=${encodeURIComponent(id)}`); }
+        catch (e) { if (e.code !== 'not_found') throw error('delete_uncertain', { retryAt: e.retryAt }); }
+        const remaining = verification?.results.find(item => item.id === id);
+        if (remaining && !remaining.is_deleted) throw error('delete_still_present');
+        if (verification?.results.length && !remaining) throw error('delete_uncertain');
+      }
       try { await forgetDeleted(url, id, !alreadyDeleted); }
       catch { throw error('delete_cache_error'); }
-      return { ok: true, id, alreadyDeleted };
+      return requireDelete ? { ok: true, id, targetUrl: url, deleted: true, deleteStatus: 204, verifiedAbsent: true }
+        : { ok: true, id, alreadyDeleted };
     };
     const getCard = async (message) => {
       const url = C.canonical(message.targetUrl);
@@ -213,7 +234,7 @@
       await storageQueue;
       if (!url || !C.validId(message.id) || (await read({ [KEY]: {} }))[KEY]?.[url]?.id !== message.id)
         throw error('document_changed');
-      return deleteDocument({ ...message, pageUrl: url });
+      return deleteDocument({ ...message, pageUrl: url }, { requireDelete: true });
     };
     const handle = (message, { isCurrent = () => true, scope = null } = {}) => {
       // Never share a rejected/stale visit's reply with a new visit or another tab.

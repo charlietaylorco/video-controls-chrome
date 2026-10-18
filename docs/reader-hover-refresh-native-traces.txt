@@ -1,0 +1,59 @@
+=== REFRESH BASELINE — SYNTHETIC READER DATA ONLY ===
+1ms Ready. Focus bookmark and press ArrowDown, then click trash and Delete document. Preflight delay 800ms.
+6208ms UI reader-card-get
+6210ms Native focusin: Close summary
+6212ms Live card validation true
+6212ms Live card validation true
+6212ms GET list/?id=fixture-doc
+6212ms Mock HTTP 200 · records 1
+6212ms Reply {"ok":true,"document":{"id":"fixture-doc","videoUrl":"https://www.youtube.com/watch?v=fixture_hover_delete","url":"https://read.readwise.io/read/fixture-doc","title":"Mock studio video","summary":"Mock Reader summary. No real library data.","notes":"Fixture note","tags":[],"updatedAt":"v1"}}
+6322ms Native focusout:  -> none
+6323ms Native focusin: Refresh summary
+6325ms UI reader-card-get
+6325ms Live card validation true
+6325ms Live card validation true
+6326ms GET list/?id=fixture-doc
+6327ms Native focusout:  -> none
+6509ms POPOVER CLOSED
+7127ms Mock HTTP 200 · records 1
+7128ms Reply {"ok":true,"document":{"id":"fixture-doc","videoUrl":"https://www.youtube.com/watch?v=fixture_hover_delete","url":"https://read.readwise.io/read/fixture-doc","title":"Mock studio video","summary":"Updated Reader summary after refresh.","notes":"Fixture note","tags":[],"updatedAt":"v1"}}
+
+=== REFRESH FIXED — SYNTHETIC READER DATA ONLY ===
+0ms Ready. Focus bookmark and press ArrowDown, then click trash and Delete document. Preflight delay 800ms.
+6612ms UI reader-card-get
+6613ms Native focusin: Close summary
+6614ms Live card validation true
+6614ms Live card validation true
+6615ms GET list/?id=fixture-doc
+6615ms Mock HTTP 200 · records 1
+6615ms Reply {"ok":true,"document":{"id":"fixture-doc","videoUrl":"https://www.youtube.com/watch?v=fixture_hover_delete","url":"https://read.readwise.io/read/fixture-doc","title":"Mock studio video","summary":"Mock Reader summary. No real library data.","notes":"Fixture note","tags":[],"updatedAt":"v1"}}
+6678ms Native focusout:  -> none
+6679ms Native focusin: Refresh summary
+6680ms Native focusout:  -> Mock studio videoMock Rea
+6681ms Native focusin: body
+6681ms UI reader-card-get
+6681ms Live card validation true
+6681ms Live card validation true
+6682ms GET list/?id=fixture-doc
+7483ms Mock HTTP 200 · records 1
+7483ms Reply {"ok":true,"document":{"id":"fixture-doc","videoUrl":"https://www.youtube.com/watch?v=fixture_hover_delete","url":"https://read.readwise.io/read/fixture-doc","title":"Mock studio video","summary":"Updated Reader summary after refresh.","notes":"Fixture note","tags":[],"updatedAt":"v1"}}
+
+=== REFRESH ERROR — SYNTHETIC READER DATA ONLY ===
+1ms Ready. Focus bookmark and press ArrowDown, then click trash and Delete document. Preflight delay 800ms.
+53ms UI reader-card-get
+54ms Native focusin: Close summary
+55ms Live card validation true
+55ms Live card validation true
+55ms GET list/?id=fixture-doc
+55ms Mock HTTP 200 · records 1
+55ms Reply {"ok":true,"document":{"id":"fixture-doc","videoUrl":"https://www.youtube.com/watch?v=fixture_hover_delete","url":"https://read.readwise.io/read/fixture-doc","title":"Mock studio video","summary":"Mock Reader summary. No real library data.","notes":"Fixture note","tags":[],"updatedAt":"v1"}}
+127ms Native focusout:  -> none
+127ms Native focusin: Refresh summary
+131ms Native focusout:  -> Mock studio videoMock Rea
+131ms Native focusin: body
+132ms UI reader-card-get
+132ms Live card validation true
+132ms Live card validation true
+133ms GET list/?id=fixture-doc
+935ms Mock HTTP 401
+936ms Reply {"ok":false,"code":"unauthorized"}
