@@ -8,6 +8,7 @@
   let activeUrl = null;
   let host, root, view;
   let open = false;
+  let peek, menu = null;
   let syncTimer = null;
   let visit = 0;
   let theme = 'system';
@@ -23,6 +24,9 @@
   const clearFeedback = (s) => {
     if (!s) return;
     clearTimeout(s.feedbackTimer);
+    clearTimeout(s.moveTimer);
+    if (s.moveFeedback && s.status === s.moveFeedback) s.status = '';
+    s.moveFeedback = '';
     s.feedback = null;
   };
   const confirmSave = (s, url, id, request, sent) => {
@@ -75,6 +79,9 @@
     delete_cache_error: 'Reader confirmed deletion, but the local saved indicator could not be cleared. Refresh to check Reader. Your draft is kept.',
     document_changed: 'The matched document changed. Refresh and review it before deleting. Your draft is kept.',
     invalid_delete: 'Deletion was not sent. Reopen the confirmation for this document.',
+    invalid_location: 'Choose Later, Shortlist or Archive from the location menu.',
+    location_uncertain: 'The location change could not be confirmed. Refresh to check Reader before trying again. Your note draft is kept.',
+    location_cache_error: 'Reader was updated, but other panels could not be notified. Refresh to confirm its location.',
     not_found: 'This Reader document was deleted or no longer matches this video. Your draft is kept. Refresh to find it again.',
     invalid_sender: 'This tab is still changing videos. Try Refresh in a moment. Your draft is kept.',
     ambiguous: 'Multiple Reader documents match. Open Reader to choose the correct document.',
@@ -93,12 +100,52 @@
     return node;
   };
   const dismiss = (restoreFocus = false) => {
+    closeMenu(); peek?.close();
     endDrag();
     clearTimeout(current()?.retryTimer);
     if (current()) current().deleteConfirm = null;
     open = false;
     render();
     if (restoreFocus && host?.isConnected) view.toggle.focus();
+  };
+  const closeMenu = (focus = false) => {
+    const kind = menu?.kind; menu = null;
+    if (!view) return;
+    view.locationMenu.hidden = view.moreMenu.hidden = true;
+    view.location.setAttribute('aria-expanded', 'false'); view.more.setAttribute('aria-expanded', 'false');
+    if (focus) (kind === 'location' ? view.location : view.more).focus();
+  };
+  const menuItems = () => (menu?.kind === 'location' ? view.locationItems : [view.link, view.settings])
+    .filter(item => !item.disabled && item.getAttribute('aria-disabled') !== 'true');
+  const openMenu = (kind, last = false) => {
+    if (!open || !sameVideo() || (kind === 'location' ? view.location.disabled : view.more.disabled)) return;
+    if (menu?.kind === kind) { closeMenu(true); return; }
+    closeMenu();
+    const s = current(); menu = { kind, url: activeUrl, id: s?.doc?.id, baseLocation: s?.doc?.location || '' };
+    render(); const items = menuItems(); items[last ? items.length - 1 : 0]?.focus();
+  };
+  const positionMenu = () => {
+    if (!menu) return;
+    const trigger = menu.kind === 'location' ? view.location : view.more;
+    const popup = menu.kind === 'location' ? view.locationMenu : view.moreMenu;
+    const r = trigger.getBoundingClientRect(), box = popup.getBoundingClientRect();
+    popup.style.left = `${Math.max(8, Math.min(r.left, innerWidth - box.width - 8))}px`;
+    const below = r.top + r.height + 4;
+    popup.style.top = `${Math.max(8, Math.min(below, innerHeight - box.height - 8))}px`;
+  };
+  const menuKey = event => {
+    if (!menu) return;
+    const items = menuItems(), index = items.indexOf(root.activeElement);
+    if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+      event.preventDefault(); event.stopPropagation();
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+      items[next]?.focus();
+    } else if (event.key === 'Tab') {
+      event.preventDefault(); event.stopPropagation();
+      const kind = menu.kind; closeMenu();
+      (event.shiftKey ? (kind === 'location' ? view.location : view.more) : kind === 'location' ? view.refresh : view.close).focus();
+    }
+    else if (event.key === ' ' && root.activeElement === view.link) { event.preventDefault(); view.link.click(); }
   };
   const sameVideo = () => {
     if (C.canonical(location.href) === activeUrl) return true;
@@ -131,15 +178,16 @@
       *{box-sizing:border-box}[hidden]{display:none!important}button,a,textarea{font:inherit}button,a{color:inherit}button{cursor:pointer}svg{display:block;width:17px;height:17px;flex-shrink:0}
       .launch-row{display:flex;justify-content:flex-end}.toggle{pointer-events:auto;position:relative;display:grid;place-items:center;width:36px;height:36px;border:1px solid var(--reader-border);border-top:0;border-right:0;border-radius:0 0 0 11px;padding:0;background:var(--reader-bg);box-shadow:0 2px 8px #00000010}.toggle svg{width:20px;height:20px}.toggle .draft-dot{position:absolute;top:5px;right:5px}
       .draft-dot{width:5px;height:5px;border-radius:50%;background:#c5912e}.body{pointer-events:auto;margin-top:4px;max-height:min(680px,calc(100dvh - 40px));overflow:auto;overscroll-behavior:contain;border:1px solid var(--reader-border);border-radius:12px 0 12px 12px;background:var(--reader-bg);box-shadow:0 10px 36px var(--reader-shadow)}
-      .header{cursor:grab;touch-action:none;user-select:none;display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:6px;align-items:center;padding:6px 6px 0;position:sticky;top:0;background:var(--reader-bg);z-index:1;border-bottom:1px solid var(--reader-border)}.header[data-dragging="true"]{cursor:grabbing}.tabs{grid-column:1;display:flex;gap:8px;white-space:nowrap}.tab{display:flex;align-items:center;gap:4px;height:32px;padding:0 2px;background:transparent;border:0;border-bottom:2px solid transparent;font-size:12px;color:var(--reader-muted)}.tab[aria-selected="true"]{color:var(--reader-text);border-bottom-color:currentColor;font-weight:600}
-      .actions{grid-column:3;display:flex;gap:2px;align-items:center}.icon{display:grid;place-items:center;width:28px;height:28px;flex-shrink:0;padding:0;border:0;border-radius:6px;background:transparent;text-decoration:none}.icon[aria-disabled="true"]{opacity:.4;pointer-events:none}
-      .tag-toggle{grid-column:2;display:flex;align-items:center;gap:4px;justify-self:start;min-width:0;max-width:100%;height:25px;padding:0 6px;border:0;border-radius:6px;font-size:11px;background:var(--reader-chip)}.tag-toggle svg{width:12px;height:12px}.tag-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tag-count{flex-shrink:0;font-size:10px;color:var(--reader-muted)}.tag-total{display:none}.tags{display:flex;gap:5px;flex-wrap:wrap;max-height:130px;overflow:auto;margin:0 0 10px}.tag{font-size:11px;padding:2px 8px;border-radius:6px;background:var(--reader-chip);overflow-wrap:anywhere;max-width:100%}
+      .header{cursor:grab;touch-action:none;user-select:none;display:grid;grid-template-columns:auto auto minmax(0,1fr) auto;gap:6px;align-items:center;padding:6px 6px 0;position:sticky;top:0;background:var(--reader-bg);z-index:1;border-bottom:1px solid var(--reader-border)}.header[data-dragging="true"]{cursor:grabbing}.tabs{grid-column:1;display:flex;gap:8px;white-space:nowrap}.tab{display:flex;align-items:center;gap:4px;height:32px;padding:0 2px;background:transparent;border:0;border-bottom:2px solid transparent;font-size:12px;color:var(--reader-muted)}.tab[aria-selected="true"]{color:var(--reader-text);border-bottom-color:currentColor;font-weight:600}
+      .actions{grid-column:4;display:flex;gap:2px;align-items:center}.icon{display:grid;place-items:center;width:28px;height:28px;flex-shrink:0;padding:0;border:0;border-radius:6px;background:transparent;text-decoration:none}.icon[aria-disabled="true"]{opacity:.4;pointer-events:none}
+      .location{grid-column:2;display:flex;align-items:center;gap:2px;width:86px;height:25px;padding:0 5px;background:var(--reader-chip);border:0;border-radius:6px;font-size:11px}.location-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.location svg{width:12px;height:12px;margin-left:auto}.popup-menu{pointer-events:auto;position:fixed;z-index:5;width:180px;max-height:calc(100dvh - 16px);overflow:auto;padding:4px;background:var(--reader-bg);border:1px solid var(--reader-border);border-radius:9px;box-shadow:0 5px 20px var(--reader-shadow)}.menu-item{display:flex;align-items:center;gap:7px;width:100%;min-height:32px;padding:5px 9px;border:0;border-radius:5px;background:transparent;text-decoration:none;text-align:left;font-size:12px}.menu-item[aria-checked="true"]{font-weight:600;background:var(--reader-chip)}.menu-item[aria-disabled="true"]{opacity:.4;pointer-events:none}.peek{pointer-events:auto;position:absolute;top:40px;right:0;width:100%;height:min(260px,calc(100dvh - 48px));overflow:auto;overscroll-behavior:contain;padding:12px;border:1px solid var(--reader-border);border-radius:12px 0 12px 12px;background:var(--reader-bg);box-shadow:0 8px 28px var(--reader-shadow)}.peek-label{font-size:11px;color:var(--reader-muted);margin-bottom:7px}.peek-summary{white-space:pre-wrap;overflow-wrap:anywhere;user-select:text}
+      .tag-toggle{grid-column:3;display:flex;align-items:center;gap:4px;justify-self:start;min-width:0;max-width:100%;height:25px;padding:0 6px;border:0;border-radius:6px;font-size:11px;background:var(--reader-chip)}.tag-toggle svg{width:12px;height:12px}.tag-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tag-count{flex-shrink:0;font-size:10px;color:var(--reader-muted)}.tag-total{display:none}.tags{display:flex;gap:5px;flex-wrap:wrap;max-height:130px;overflow:auto;margin:0 0 10px}.tag{font-size:11px;padding:2px 8px;border-radius:6px;background:var(--reader-chip);overflow-wrap:anywhere;max-width:100%}
       button:hover,a:hover{background:var(--reader-hover)}.toggle:hover,.toggle:active{background:var(--reader-hover);color:var(--reader-text)}button:disabled{opacity:.5;cursor:default}button:focus-visible,a:focus-visible,textarea:focus-visible{outline:2px solid var(--reader-focus);outline-offset:-2px}
       .content{padding:12px;position:relative}.content[data-empty="true"]{min-height:160px}.content[data-empty="true"] .status{max-height:100px}.content[data-empty="true"] > .small{position:absolute;bottom:12px;left:12px}.summary{white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;line-height:1.75}.editor{height:160px;min-height:160px;max-height:320px;resize:vertical;overflow:hidden;border:1px solid var(--reader-border);border-radius:9px}.editor iframe{display:block;width:100%;height:100%;border:0}.note-view{position:relative}
       .footer{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:center;height:32px;margin-top:9px}.footer .muted{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.footer [data-kind="error"]{color:var(--reader-error)}.footer [data-kind="success"]{color:var(--reader-success)}.save{border:0;border-radius:18px;background:#e9be61;color:#211b10;font-weight:600;padding:6px 13px}.muted,.status{font-size:12px;color:var(--reader-muted)}.status{position:absolute;top:8px;left:12px;right:12px;z-index:3;margin:0;padding:9px 10px;max-height:130px;overflow:auto;overflow-wrap:anywhere;border:1px solid var(--reader-border);border-radius:8px;background:var(--reader-bg);box-shadow:0 3px 12px var(--reader-shadow)}.status[data-kind="error"]{color:var(--reader-error)}.status[data-kind="warning"]{color:var(--reader-warning)}.small{padding:5px 9px;border:1px solid var(--reader-border);border-radius:18px;background:transparent;font-size:12px}
       .conflict{position:absolute;left:0;right:0;bottom:41px;z-index:3;max-height:145px;overflow:auto;background:var(--reader-bg);border:1px solid var(--reader-border);border-left:3px solid var(--reader-warning);border-radius:8px;box-shadow:0 3px 12px var(--reader-shadow);padding:8px 10px;font-size:12px}.remote{white-space:pre-wrap;max-height:65px;overflow:auto;overflow-wrap:anywhere;margin-bottom:8px}.conflict button{margin:4px 3px 0 0}
       .delete-confirm{font-size:12px;overflow-wrap:anywhere}.delete-confirm h2{font-size:15px;margin:0 0 8px}.delete-confirm p{margin:8px 0}.delete-title{font-weight:600;white-space:pre-wrap;max-height:90px;overflow:auto}.delete-identity{color:var(--reader-muted);font-size:11px;user-select:text}.delete-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}.destructive{color:var(--reader-error);border-color:currentColor}
-      @media(max-width:360px){.tag-name,.tag-count{display:none}.tag-total{display:inline}.tag-toggle{padding:0 5px}.header{gap:4px;padding-left:5px;padding-right:5px}.tabs{gap:5px}.tab{font-size:11px}.actions{gap:0}}
+      @media(max-width:360px){.tag-name,.tag-count,.tag-toggle svg{display:none}.tag-total{display:inline}.tag-toggle{padding:0 4px}.location{width:68px;padding:0 3px}.header{gap:4px;padding-left:5px;padding-right:5px}.tabs{gap:5px}.tab{font-size:11px}.actions{gap:0}}
     `;
     const row = element('div', '', root, { class: 'launch-row' });
     const toggle = element('button', '', row, { class: 'toggle', type: 'button', title: 'Reader summary and note', 'aria-label': 'Reader summary and note', 'aria-haspopup': 'dialog', 'aria-expanded': 'false', 'aria-controls': 'reader-body' });
@@ -152,6 +200,9 @@
     const summaryTab = element('button', 'Summary', tabs, { class: 'tab', id: 'reader-summary-tab', type: 'button', role: 'tab', 'aria-controls': 'reader-summary-view' });
     const noteTab = element('button', 'Note', tabs, { class: 'tab', id: 'reader-note-tab', type: 'button', role: 'tab', 'aria-controls': 'reader-note-view' });
     const noteDot = element('span', '', noteTab, { class: 'draft-dot', 'aria-hidden': 'true' });
+    const locationButton = element('button', '', header, { class: 'location', type: 'button', 'aria-label': 'Reader location', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-controls': 'reader-location-menu' });
+    const locationLabel = element('span', '', locationButton, { class: 'location-label' });
+    icon(locationButton, ['m7 10 5 5 5-5']);
     const tagToggle = element('button', '', header, { class: 'tag-toggle', type: 'button', 'aria-label': 'Show tags', 'aria-expanded': 'false', 'aria-controls': 'reader-tags' });
     icon(tagToggle, ['m20 13-7 7L3 10V3h7l10 10Z', 'M7 7h.01']);
     const tagName = element('span', '', tagToggle, { class: 'tag-name' });
@@ -160,11 +211,18 @@
     const actions = element('div', '', header, { class: 'actions' });
     const refresh = element('button', '', actions, { class: 'icon', type: 'button', title: 'Refresh', 'aria-label': 'Refresh' });
     icon(refresh, ['M20 7v5h-5', 'M20 12a8 8 0 1 0-2 5', 'M20 7v5']);
-    const link = element('a', '', actions, { class: 'icon', title: 'Open in Reader', 'aria-label': 'Open in Reader', target: '_blank', rel: 'noopener noreferrer' });
+    const more = element('button', '', actions, { class: 'icon', type: 'button', title: 'More Reader actions', 'aria-label': 'More Reader actions', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-controls': 'reader-more-menu' });
+    icon(more, ['M5 12h.01', 'M12 12h.01', 'M19 12h.01']);
+    const locationMenu = element('div', '', root, { class: 'popup-menu', role: 'menu', id: 'reader-location-menu', 'aria-label': 'Reader location' }); locationMenu.hidden = true;
+    const locationItems = Object.entries(C.locations).map(([value, label]) => {
+      const item = element('button', label, locationMenu, { class: 'menu-item', type: 'button', role: 'menuitemradio', 'data-location': value, tabindex: '-1' });
+      item.addEventListener('click', () => selectLocation(value)); return item;
+    });
+    const trash = element('button', 'Trash', locationMenu, { class: 'menu-item destructive', type: 'button', role: 'menuitem', 'aria-label': 'Delete from Reader', tabindex: '-1' }); locationItems.push(trash);
+    const moreMenu = element('div', '', root, { class: 'popup-menu', role: 'menu', id: 'reader-more-menu', 'aria-label': 'More Reader actions' }); moreMenu.hidden = true;
+    const link = element('a', 'Open in Reader', moreMenu, { class: 'menu-item', role: 'menuitem', title: 'Open in Reader', 'aria-label': 'Open in Reader', target: '_blank', rel: 'noopener noreferrer', tabindex: '-1' });
     icon(link, ['M14 3h7v7', 'M10 14 21 3', 'M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5']);
-    const trash = element('button', '', actions, { class: 'icon', type: 'button', title: 'Delete from Reader', 'aria-label': 'Delete from Reader' });
-    icon(trash, ['M3 6h18', 'M9 6V3h6v3', 'm5 6 1 15h12l1-15', 'M10 10v7', 'M14 10v7']);
-    const settings = element('button', '', actions, { class: 'icon', type: 'button', title: 'Options', 'aria-label': 'Extension options' });
+    const settings = element('button', 'Options', moreMenu, { class: 'menu-item', role: 'menuitem', type: 'button', title: 'Options', 'aria-label': 'Extension options', tabindex: '-1' });
     icon(settings, ['M10 2h4l.6 2.7L17 6.1l2.6-.8 2 3.4-2 1.9v2.8l2 1.9-2 3.4-2.6-.8-2.4 1.4L14 22h-4l-.6-2.7L7 17.9l-2.6.8-2-3.4 2-1.9v-2.8l-2-1.9 2-3.4 2.6.8 2.4-1.4L10 2Z', 'M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0']);
     const close = element('button', '', actions, { class: 'icon close', type: 'button', title: 'Close', 'aria-label': 'Close Reader' });
     icon(close, ['m6 6 12 12', 'M6 18 18 6']);
@@ -210,14 +268,27 @@
       header.setPointerCapture(event.pointerId);
     });
     header.addEventListener('lostpointercapture', endDrag);
-    settings.addEventListener('click', () => void send({ type: 'open-options' }));
+    settings.addEventListener('click', () => { closeMenu(); void send({ type: 'open-options' }); });
+    more.addEventListener('click', () => openMenu('more'));
+    locationButton.addEventListener('click', () => openMenu('location'));
+    for (const [button, kind] of [[more, 'more'], [locationButton, 'location']]) button.addEventListener('keydown', event => {
+      if (['ArrowDown', 'ArrowUp'].includes(event.key)) { event.preventDefault(); event.stopPropagation(); openMenu(kind, event.key === 'ArrowUp'); }
+    });
+    moreMenu.addEventListener('keydown', menuKey); locationMenu.addEventListener('keydown', menuKey);
     tagToggle.addEventListener('click', () => { if (!sameVideo()) return; const s = current(); if (s) { s.tagsOpen = !s.tagsOpen; render(); } });
-    link.addEventListener('click', event => { if (!sameVideo()) event.preventDefault(); });
+    link.addEventListener('click', event => { if (!sameVideo() || link.getAttribute('aria-disabled') === 'true') event.preventDefault(); closeMenu(); });
     toggle.addEventListener('click', () => {
       const changed = C.canonical(location.href) !== activeUrl;
       sync(false); // Bind before opening, even if YouTube's event is still pending.
       if (!host.isConnected) return;
       if (open && !changed) { dismiss(); return; }
+      const cached = peek?.cachedDoc(activeUrl), state = current();
+      peek?.close();
+      if (cached && !state.busy && cached.at > (state.fetchedAt || 0)) {
+        C.receive(state, cached.document); state.loaded = true; state.fetchedAt = cached.at; state.locationUncertain = false;
+        state.cursor = null; state.status = state.conflict ? 'Reader changed. Review the note conflict before saving.' : '';
+        state.statusKind = state.conflict ? 'warning' : 'info';
+      }
       open = true; render();
       (current()?.doc || current()?.dirty ? (current().tab === 'note' ? noteTab : summaryTab) : close).focus();
       if (!current()?.loaded) void load();
@@ -232,7 +303,7 @@
       selectTab(tab, true);
     });
     refresh.addEventListener('click', () => void load());
-    trash.addEventListener('click', requestDeletion);
+    trash.addEventListener('click', () => selectLocation('trash'));
     cancelDelete.addEventListener('click', cancelDeletion);
     confirmDelete.addEventListener('click', () => void deleteDocument());
     deletion.addEventListener('keydown', event => {
@@ -245,8 +316,13 @@
     save.addEventListener('click', () => void saveNote());
     useRemote.addEventListener('click', () => resolveConflict(false));
     keepDraft.addEventListener('click', () => resolveConflict(true));
-    view = { header, content, toggle, dot, body, close, refresh, link, trash, status, next, details, summary, tags, tagToggle, tagName, tagCount, tagTotal, summaryTab, noteTab, noteDot, summaryView, noteView, note, conflict, remote, save, dirty,
+    view = { header, content, toggle, dot, body, close, refresh, link, trash, settings, more, moreMenu, location: locationButton, locationLabel, locationMenu, locationItems, status, next, details, summary, tags, tagToggle, tagName, tagCount, tagTotal, summaryTab, noteTab, noteDot, summaryView, noteView, note, conflict, remote, save, dirty,
       deletion, deleteTitle, deleteIdentity, deleteDraft, cancelDelete, confirmDelete };
+    peek = globalThis.MVSReaderPeek?.create({ toggle, root, send, beforePeek: () => sync(false), getTarget: () => {
+      const s = current();
+      return !open && !s?.busy && enabled && host.isConnected && !document.fullscreenElement && C.canonical(location.href) === activeUrl
+        ? { url: activeUrl, visit, doc: s?.locationUncertain ? null : s?.doc, fetchedAt: s?.fetchedAt || 0 } : null;
+    } });
   };
   const render = () => {
     if (!view) return;
@@ -267,6 +343,19 @@
     view.noteView.hidden = s?.tab !== 'note';
     if (!s) return;
     const confirming = Boolean(s.deleteConfirm);
+    if (menu && (menu.url !== activeUrl || menu.id !== s.doc?.id || confirming)) closeMenu();
+    view.location.disabled = s.busy || !s.doc || confirming || Boolean(s.locationUncertain);
+    view.more.disabled = confirming;
+    view.locationLabel.textContent = s.locationUncertain ? 'Unconfirmed' : s.doc ? C.locationLabel(s.doc.location) : 'Not saved';
+    view.location.title = s.locationUncertain ? 'Location unconfirmed. Refresh to check Reader.' : C.locationLabel(s.doc?.location);
+    view.location.setAttribute('aria-description', `Current location: ${view.locationLabel.textContent}`);
+    view.location.setAttribute('aria-expanded', String(menu?.kind === 'location'));
+    view.more.setAttribute('aria-expanded', String(menu?.kind === 'more'));
+    view.locationMenu.hidden = menu?.kind !== 'location'; view.moreMenu.hidden = menu?.kind !== 'more';
+    for (const item of view.locationItems) {
+      item.disabled = view.location.disabled;
+      if (item.getAttribute('data-location')) item.setAttribute('aria-checked', String(s.doc?.location === item.getAttribute('data-location')));
+    }
     view.deletion.hidden = !confirming;
     view.summaryTab.disabled = confirming;
     view.noteTab.disabled = confirming || (!s.doc && !s.dirty);
@@ -310,17 +399,19 @@
     }
     if (view.note.value !== s.value) view.note.value = s.value;
     view.save.disabled = confirming || s.busy || !s.dirty || !s.doc || Boolean(s.conflict);
-    const feedback = s.busy ? 'Working…' : s.conflict ? 'Review conflict' : s.statusKind === 'error' ? (s.action === 'save' ? 'Not saved' : 'Check error') : s.dirty ? 'Unsaved draft' : s.feedback ? 'Saved' : '';
+    const feedback = s.busy ? 'Working…' : s.conflict ? 'Review conflict' : s.statusKind === 'error' ? (s.action === 'save' ? 'Not saved' : 'Check error') : s.moveFeedback || (s.dirty ? 'Unsaved draft' : s.feedback ? 'Saved' : '');
     if (view.dirty.textContent !== feedback) view.dirty.textContent = feedback;
-    view.dirty.dataset.kind = s.statusKind === 'error' ? 'error' : s.feedback ? 'success' : 'info';
+    view.dirty.dataset.kind = s.statusKind === 'error' ? 'error' : s.feedback || s.moveFeedback ? 'success' : 'info';
     view.conflict.hidden = !s.conflict;
     view.remote.textContent = s.conflict?.notes || '(Empty note)';
     placePopover();
+    positionMenu();
   };
   const load = async (nextPage = false, retried = false) => {
     if (!sameVideo()) return;
     const url = activeUrl, s = current();
     if (!s || s.busy || s.deleteConfirm) return;
+    peek?.invalidate(url); closeMenu();
     clearTimeout(s.retryTimer);
     clearFeedback(s); s.statusKind = 'info'; s.action = 'read';
     s.busy = true; s.status = 'Checking Reader…'; render();
@@ -339,6 +430,7 @@
       render(); return;
     }
     if (response.ok && response.document) {
+      s.fetchedAt = Date.now(); s.locationUncertain = false;
       C.receive(s, response.document); s.cursor = null;
       s.status = s.conflict ? 'Reader changed. Review the note conflict before saving.' : '';
       s.statusKind = s.conflict ? 'warning' : 'info';
@@ -350,10 +442,51 @@
     } else { s.status = messageFor(response); s.statusKind = 'error'; }
     if (url === activeUrl) render();
   };
+  const selectLocation = async value => {
+    const selected = menu;
+    if (selected?.kind !== 'location') return;
+    closeMenu();
+    if (!sameVideo()) return;
+    const url = activeUrl, s = current();
+    if (!s?.doc || s.busy || s.doc.id !== selected.id || selected.url !== url) return;
+    if (value === 'trash') { requestDeletion(); return; }
+    if (!Object.hasOwn(C.locations, value) || s.locationUncertain) return;
+    peek?.invalidate(url);
+    clearFeedback(s); s.action = 'location'; s.statusKind = 'info'; s.status = 'Checking Reader before moving…';
+    const id = s.doc.id, request = ++s.request;
+    s.busy = true; render();
+    const response = await send({ type: 'reader-panel-move', pageUrl: url, id, location: value, baseLocation: selected.baseLocation });
+    sameVideo(); if (s.request !== request) return;
+    s.busy = false;
+    if (response.document?.id === id && response.document.videoUrl === url && s.doc?.id === id) {
+      C.receive(s, response.document); s.fetchedAt = Date.now(); s.locationUncertain = false;
+    }
+    if (response.ok && response.document?.id === id && response.document.videoUrl === url && response.document.location === value && s.doc?.id === id) {
+      if (s.conflict) { s.status = 'Location updated. Reader also has a different note; review the conflict.'; s.statusKind = 'warning'; }
+      else {
+        s.moveFeedback = `Now in ${C.locationLabel(s.doc.location)}`; s.status = s.moveFeedback; s.statusKind = 'info';
+        const feedback = s.moveFeedback;
+        s.moveTimer = setTimeout(() => {
+          if (s.request !== request || s.doc?.id !== id || s.moveFeedback !== feedback) return;
+          s.moveFeedback = ''; if (s.status === feedback) s.status = '';
+          if (activeUrl === url) render();
+        }, 3000);
+      }
+    } else if (response.code === 'location_conflict') {
+      s.status = 'Reader’s location changed. Review its current location before choosing again.'; s.statusKind = 'warning';
+    } else if (response.code === 'location_not_applied') {
+      s.status = `Reader kept ${C.locationLabel(s.doc?.location)}. That destination may not be enabled in your Library.`; s.statusKind = 'error';
+    } else {
+      s.locationUncertain = response.ok || ['location_uncertain', 'location_cache_error'].includes(response.code);
+      s.status = messageFor(response.ok ? { code: 'location_uncertain' } : response); s.statusKind = 'error';
+    }
+    if (url === activeUrl) render();
+  };
   const saveNote = async () => {
     if (!sameVideo()) return;
     const url = activeUrl, s = current();
     if (!s?.doc || s.busy || !s.dirty || s.conflict || s.deleteConfirm) return;
+    peek?.invalidate(url);
     clearFeedback(s); s.statusKind = 'info'; s.action = 'save';
     const id = s.doc.id, sent = s.value, request = ++s.request;
     s.busy = true; s.status = 'Checking Reader before saving…'; render();
@@ -362,7 +495,7 @@
     if (s.request !== request) return;
     s.busy = false;
     if (response.ok && response.id === id && s.doc?.id === id) {
-      C.saved(s, sent); s.status = ''; s.statusKind = 'info';
+      C.saved(s, sent); s.fetchedAt = Date.now(); s.status = ''; s.statusKind = 'info';
       confirmSave(s, url, id, request, sent);
     } else if (response.code === 'conflict') {
       s.conflict = response.document; s.status = 'Reader changed. Review the note conflict before saving.'; s.statusKind = 'warning';
@@ -376,14 +509,14 @@
     if (!sameVideo()) return;
     const s = current();
     if (!s?.doc || s.busy || C.canonical(location.href) !== activeUrl) return;
-    clearFeedback(s);
+    closeMenu(); peek?.invalidate(activeUrl); clearFeedback(s);
     s.deleteConfirm = { url: activeUrl, id: s.doc.id, title: s.doc.title || '', baseNotes: s.doc.notes, updatedAt: s.doc.updatedAt || '' };
     render(); view.cancelDelete.focus();
   };
   const cancelDeletion = () => {
     const s = current();
     if (!s?.deleteConfirm) return;
-    s.deleteConfirm = null; render(); view.trash.focus();
+    s.deleteConfirm = null; render(); view.location.focus();
   };
   const deleteDocument = async () => {
     if (!sameVideo()) return;
@@ -427,6 +560,7 @@
     const supported = url && !/^\/(embed|shorts)\//.test(location.pathname);
     const changed = url !== activeUrl;
     if (changed) {
+      closeMenu(); peek?.close();
       const previous = current();
       clearFeedback(previous); clearTimeout(previous?.retryTimer);
       if (previous) {
@@ -461,6 +595,7 @@
     if (changes.readerPanelTheme) { theme = ['light', 'dark'].includes(changes.readerPanelTheme.newValue) ? changes.readerPanelTheme.newValue : 'system'; applyTheme(); }
     if (changes.showReaderPanel) { enabled = changes.showReaderPanel.newValue === true; schedule(); }
     if (changes.readerToken) {
+      closeMenu(); peek?.invalidate();
       for (const s of states.values()) { clearTimeout(s.retryTimer); clearFeedback(s); s.deleteConfirm = null; s.loaded = false; s.doc = null; s.conflict = null; s.request++; s.busy = false; }
       render();
     }
@@ -468,6 +603,7 @@
     // in other open panels too, retaining drafts and cancelling stale confirmations.
     if (changes.readerDocuments) {
       const { oldValue = {}, newValue = {} } = changes.readerDocuments;
+      peek?.documentsChanged(oldValue, newValue);
       for (const [url, s] of states) {
         s.loaded = false;
         const previous = oldValue?.[url]?.id;
@@ -482,22 +618,37 @@
       }
       render();
     }
+    if (changes.readerDocumentUpdates) {
+      const update = changes.readerDocumentUpdates.newValue;
+      if (update) {
+        peek?.invalidate(update.videoUrl);
+        const s = states.get(update.videoUrl);
+        if (s?.doc?.id === update.id && !(s.busy && s.action === 'location')) {
+          s.doc = { ...s.doc, location: update.location, updatedAt: update.updatedAt }; s.loaded = false; s.fetchedAt = 0;
+          s.locationUncertain = false; s.deleteConfirm = null; closeMenu(); render();
+        }
+      }
+    }
   });
   new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true });
   document.addEventListener('yt-navigate-finish', () => sync());
   document.addEventListener('yt-page-data-updated', () => sync());
   document.addEventListener('fullscreenchange', schedule);
   document.addEventListener('pointerdown', event => {
+    if (menu && !event.composedPath().includes(view.moreMenu) && !event.composedPath().includes(view.locationMenu) && !event.composedPath().includes(view.more) && !event.composedPath().includes(view.location)) closeMenu();
+    if (peek?.active() && !event.composedPath().includes(host)) peek.close();
     if (open && !event.composedPath().includes(host)) dismiss();
   }, true);
   document.addEventListener('focusin', event => {
+    if (menu && !event.composedPath().includes(view.moreMenu) && !event.composedPath().includes(view.locationMenu) && !event.composedPath().includes(view.more) && !event.composedPath().includes(view.location)) closeMenu();
     if (open && !event.composedPath().includes(host)) dismiss();
   });
   document.addEventListener('keydown', event => {
+    if (!open && peek?.active() && event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); peek.close(); return; }
     if (open && event.key === 'Escape') {
       event.preventDefault();
       event.stopPropagation();
-      if (current()?.deleteConfirm) cancelDeletion(); else dismiss(true);
+      if (menu) closeMenu(true); else if (current()?.deleteConfirm) cancelDeletion(); else dismiss(true);
     }
   }, true);
   window.addEventListener('pointermove', event => {
@@ -510,7 +661,7 @@
     if (drag && event.pointerId === drag.id) { event.stopPropagation(); endDrag(); }
   }, true);
   window.addEventListener('pointercancel', endDrag);
-  window.addEventListener('resize', () => { endDrag(); placePopover(); });
+  window.addEventListener('resize', () => { endDrag(); placePopover(); positionMenu(); });
   window.addEventListener('popstate', () => sync());
   window.addEventListener('beforeunload', event => {
     if ([...states.values()].some(s => s.dirty)) { event.preventDefault(); event.returnValue = ''; }

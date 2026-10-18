@@ -228,6 +228,86 @@ test('document projection excludes highlights and foreign videos and uses safe R
   assert.deepEqual(projected.tags, ['Science']);
 });
 
+const moveMessage = (extra = {}) => ({ type: 'reader-panel-move', pageUrl: A, id: 'doc-a', location: 'shortlist', baseLocation: 'later', ...extra });
+
+test('location projection keeps literal API values; Inbox/New is never relabelled Later', () => {
+  assert.equal(C.cleanDocument({ ...doc(), location: 'new' }, A).location, 'new');
+  assert.equal(C.locationLabel('new'), 'Inbox / New'); assert.equal(C.locationLabel('feed'), 'Feed');
+  assert.equal(C.locationLabel('unknown'), 'Other: unknown'); assert.equal(C.locationLabel(''), 'Location unknown');
+  assert.deepEqual(C.locations, { later: 'Later', shortlist: 'Shortlist', archive: 'Archive' });
+});
+
+test('location moves use exact id/source preflight, PATCH only location, and return the verified readback', async () => {
+  for (const location of ['later', 'shortlist', 'archive']) {
+    let actual = 'new';
+    const app = harness({ stored: { readerDocuments: { [A]: { id: 'doc-a', at: 1 } } }, responder: (url, init) => {
+      if (init.method === 'PATCH') { actual = JSON.parse(init.body).location; return { id: 'doc-a' }; }
+      return { results: [{ ...doc(), location: actual }] };
+    } });
+    const reply = await app.message(moveMessage({ baseLocation: 'new', location }));
+    assert.equal(reply.ok, true); assert.equal(reply.document.location, location); assert.equal(reply.document.notes, 'Original');
+    assert.deepEqual(app.requests.map(r => [r.url, r.method]), [
+      ['https://readwise.io/api/v3/list/?id=doc-a', undefined], ['https://readwise.io/api/v3/update/doc-a/', 'PATCH'],
+      ['https://readwise.io/api/v3/list/?id=doc-a', undefined]]);
+    assert.deepEqual(JSON.parse(app.requests[1].body), { location });
+    assert.equal(app.data.readerDocumentUpdates.id, 'doc-a'); assert.equal(app.data.readerDocumentUpdates.videoUrl, A);
+    assert.equal(app.data.readerDocumentUpdates.location, location);
+  }
+});
+
+test('invalid locations, foreign sources and replacement ids never PATCH', async () => {
+  for (const location of ['trash', 'new', 'inbox', 'feed', '__proto__', 'constructor', 'Later', null]) {
+    const app = harness(); assert.equal((await app.message(moveMessage({ location }))).code, 'invalid_location');
+    assert.equal(app.requests.length, 0);
+  }
+  for (const source of [{ ...doc(), source_url: B, location: 'later' }, { ...doc(), parent_id: 'parent', location: 'later' }]) {
+    const app = harness({ responder: () => ({ results: [source] }) });
+    assert.equal((await app.message(moveMessage())).code, 'not_found'); assert.equal(app.requests.length, 1);
+  }
+  const replaced = harness({ stored: { readerDocuments: { [A]: { id: 'replacement', at: 1 } } } });
+  assert.equal((await replaced.message(moveMessage())).code, 'document_changed'); assert.equal(replaced.requests.length, 0);
+});
+
+test('location conflicts and no-op selections do not write; account fallback is reported honestly', async () => {
+  const conflict = harness({ responder: () => ({ results: [{ ...doc(), location: 'archive' }] }) });
+  const changed = await conflict.message(moveMessage());
+  assert.equal(changed.code, 'location_conflict'); assert.equal(changed.document.location, 'archive'); assert.equal(conflict.requests.length, 1);
+  const same = harness({ responder: () => ({ results: [{ ...doc(), location: 'shortlist' }] }) });
+  assert.equal((await same.message(moveMessage({ baseLocation: 'shortlist' }))).ok, true); assert.equal(same.requests.length, 1);
+  let reads = 0;
+  const fallback = harness({ responder: (url, init) => init.method === 'PATCH' ? { id: 'doc-a' }
+    : { results: [{ ...doc(), location: ++reads === 1 ? 'later' : 'new' }] } });
+  const reply = await fallback.message(moveMessage());
+  assert.equal(reply.ok, false); assert.equal(reply.code, 'location_not_applied'); assert.equal(reply.document.location, 'new');
+  assert.equal(fallback.requests.length, 3);
+});
+
+test('navigation, credential changes and replacement mapping during move preflight stop the PATCH', async () => {
+  for (const change of ['navigation', 'token', 'replacement']) {
+    const app = harness({ responder: () => {
+      if (change === 'navigation') app.setTab({ id: 1, url: B });
+      if (change === 'token') app.data.readerToken = 'different-fixture';
+      if (change === 'replacement') app.data.readerDocuments = { [A]: { id: 'replacement', at: 2 } };
+      return { results: [{ ...doc(), location: 'later' }] };
+    } });
+    const reply = await app.message(moveMessage());
+    assert.equal(reply.code, { navigation: 'invalid_sender', token: 'auth_changed', replacement: 'document_changed' }[change]);
+    assert.equal(app.requests.length, 1);
+  }
+});
+
+test('location PATCH failures or failed readback never report a move or automatically retry', async () => {
+  for (const [failure, expected] of [[new Error('offline'), 'location_uncertain'], [{ status: 401 }, 'unauthorized'], [{ status: 429 }, 'rate_limited']]) {
+    const app = harness({ responder: (url, init) => init.method === 'PATCH' ? failure : { results: [{ ...doc(), location: 'later' }] } });
+    assert.equal((await app.message(moveMessage())).code, expected); assert.equal(app.requests.length, 2);
+  }
+  let reads = 0;
+  const readback = harness({ responder: (url, init) => init.method === 'PATCH' ? { id: 'doc-a' }
+    : ++reads === 1 ? { results: [{ ...doc(), location: 'later' }] } : new Error('offline') });
+  assert.equal((await readback.message(moveMessage())).code, 'location_uncertain'); assert.equal(readback.requests.length, 3);
+  assert.equal(readback.data.readerDocumentUpdates, undefined);
+});
+
 test('save retains document id for canonical aliases and legacy timestamp cache is left intact', async () => {
   const app = harness({ stored: { readerSavedUrls: { [A]: 123 } }, responder: () => ({ status: 201, id: 'doc-a', url: 'https://read.readwise.io/read/doc-a' }) });
   const result = await app.message({ type: 'save-to-reader', pageUrl: 'https://m.youtube.com/watch?v=alpha&t=2', title: 'Title', author: 'Author' });

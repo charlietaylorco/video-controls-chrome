@@ -29,7 +29,7 @@ async function fixture({ enabled = true, width = 1100, height = 1100, theme = 's
     const data = { showReaderPanel: enabled, showReader: true, readerPanelTheme: theme };
     window.mock = { messages: [], callbacks: [], defer: false, notes: 'A useful observation to revisit.',
       summary: 'Attention is a limited resource. This video explores how deliberate practice, fewer distractions, and time for reflection can help us learn.\n\nThe key idea: make space for what matters before adding more information.',
-      tags: ['Learning', 'Ideas to try'], conflict: false, empty: false, error: null, saveError: null, deleteError: null, deleteReply: null, deleted: [], ids: {},
+      tags: ['Learning', 'Ideas to try'], location: 'later', moveError: null, conflict: false, empty: false, error: null, saveError: null, deleteError: null, deleteReply: null, deleted: [], ids: {},
       change(values) {
         const changed = Object.fromEntries(Object.entries(values).map(([key, value]) => [key, { oldValue: data[key], newValue: value }]));
         Object.assign(data, values);
@@ -38,7 +38,7 @@ async function fixture({ enabled = true, width = 1100, height = 1100, theme = 's
       release() { const [callback, response] = this.callbacks.shift(); callback(response); },
     };
     const documentFor = message => ({ id: mock.ids[message.pageUrl] || (message.pageUrl.includes('beta') ? 'doc-b' : 'doc-a'),
-      videoUrl: message.pageUrl, title: 'How attention shapes the way we learn', updatedAt: 'v1', summary: mock.summary, notes: mock.notes, tags: mock.tags });
+      videoUrl: message.pageUrl, title: 'How attention shapes the way we learn', updatedAt: 'v1', location: mock.location, summary: mock.summary, notes: mock.notes, tags: mock.tags });
     window.chrome = {
       runtime: { lastError: null,
         sendMessage(message, callback) {
@@ -52,6 +52,9 @@ async function fixture({ enabled = true, width = 1100, height = 1100, theme = 's
           } else if (message.type === 'reader-panel-delete') {
             response = mock.deleteReply || (mock.deleteError ? { ok: false, code: mock.deleteError } : { ok: true, id: message.id });
             if (response.ok) mock.deleted.push(message.pageUrl);
+          } else if (message.type === 'reader-panel-move') {
+            if (!mock.moveError) mock.location = message.location;
+            response = mock.moveError ? { ok: false, code: mock.moveError } : { ok: true, document: documentFor(message) };
           } else if (message.type === 'save-to-reader') response = { ok: true, url: 'https://read.readwise.io/read/doc-a' };
           else response = { ok: true, saved: false };
           if (mock.defer && message.type.startsWith('reader-panel-')) mock.callbacks.push([callback, response]);
@@ -65,7 +68,7 @@ async function fixture({ enabled = true, width = 1100, height = 1100, theme = 's
     };
   }, { enabled, theme });
   await page.goto(A);
-  for (const file of ['reader-core.js', 'reader-editor.js', 'reader-panel.js']) await page.addScriptTag({ path: path.join(root, file) });
+  for (const file of ['reader-core.js', 'reader-editor.js', 'reader-peek.js', 'reader-panel.js']) await page.addScriptTag({ path: path.join(root, file) });
   const panel = page.locator('#mvs-reader-panel');
   const editor = panel.frameLocator('iframe[title="Document Note"]').locator('textarea');
   const open = async (tab) => {
@@ -75,7 +78,8 @@ async function fixture({ enabled = true, width = 1100, height = 1100, theme = 's
   const navigate = async url => {
     await page.evaluate(url => { history.pushState({}, '', url); document.dispatchEvent(new Event('yt-navigate-finish')); }, url);
   };
-  return { page, panel, editor, open, navigate, errors, close: () => context.close() };
+  const trash = async () => { await panel.locator('.location').click(); await panel.getByRole('menuitem', { name: 'Delete from Reader', exact: true }).click(); };
+  return { page, panel, editor, open, trash, navigate, errors, close: () => context.close() };
 }
 
 test('launcher is opt-in, collapsed, and opens without creating a Reader document', async () => {
@@ -374,7 +378,7 @@ test('header is one compact row with working icon actions and no removed explana
   const header = f.panel.locator('.header');
   const headerBounds = await header.boundingBox();
   assert.ok(headerBounds.height <= 40);
-  for (const label of ['Refresh', 'Open in Reader', 'Extension options', 'Close Reader']) {
+  for (const label of ['Refresh', 'More Reader actions', 'Close Reader']) {
     const action = f.panel.getByRole(label === 'Open in Reader' ? 'link' : 'button', { name: label, exact: true });
     assert.ok(await action.getAttribute('title'));
     assert.equal(await action.innerText(), '');
@@ -384,13 +388,15 @@ test('header is one compact row with working icon actions and no removed explana
   }
   await f.panel.getByRole('button', { name: 'Refresh', exact: true }).click();
   assert.equal(await f.page.evaluate(() => mock.messages.filter(m => m.type === 'reader-panel-get').length), 2);
+  await f.panel.getByRole('button', { name: 'More Reader actions', exact: true }).click();
   const popupPromise = f.page.waitForEvent('popup');
-  await f.panel.getByRole('link', { name: 'Open in Reader', exact: true }).click();
+  await f.panel.getByRole('menuitem', { name: 'Open in Reader', exact: true }).click();
   const popup = await popupPromise;
   await popup.waitForURL('https://read.readwise.io/read/doc-a');
   assert.equal(popup.url(), 'https://read.readwise.io/read/doc-a');
   await popup.close();
-  await f.panel.getByRole('button', { name: 'Extension options', exact: true }).click();
+  await f.panel.getByRole('button', { name: 'More Reader actions', exact: true }).click();
+  await f.panel.getByRole('menuitem', { name: 'Extension options', exact: true }).click();
   assert.equal(await f.page.evaluate(() => mock.messages.at(-1).type), 'open-options');
   await f.panel.getByRole('tab', { name: /^Note/ }).click();
   assert.equal(await f.editor.isVisible(), true);
@@ -421,6 +427,44 @@ test('long and multiple tags expand safely without displacing header controls at
   assert.ok(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   await f.panel.locator('.tag-toggle').click();
   assert.equal(await f.panel.locator('.tags').isVisible(), false);
+  assert.deepEqual(f.errors, []); await f.close();
+});
+
+test('location and overflow menus fit narrow viewports and keep the Note draft and header geometry', async () => {
+  for (const width of [280, 390]) {
+    const f = await fixture({ width, height: 520 }); await f.open('note'); await f.editor.fill('Keep this draft');
+    const before = await f.panel.locator('.header').boundingBox();
+    await f.panel.locator('.location').click();
+    const menu = f.panel.locator('#reader-location-menu'), bounds = await menu.boundingBox();
+    assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width && bounds.y >= 0 && bounds.y + bounds.height <= 520);
+    assert.deepEqual(await menu.getByRole('menuitemradio').allTextContents(), ['Later', 'Shortlist', 'Archive']);
+    await menu.getByRole('menuitemradio', { name: 'Shortlist', exact: true }).click();
+    assert.equal(await f.panel.locator('.location-label').innerText(), 'Shortlist');
+    assert.equal(await f.editor.inputValue(), 'Keep this draft');
+    assert.deepEqual(await f.panel.locator('.header').boundingBox(), before);
+    await f.panel.getByRole('button', { name: 'More Reader actions', exact: true }).focus();
+    await f.page.keyboard.press('ArrowDown');
+    assert.equal(await f.panel.getByRole('menuitem', { name: 'Open in Reader', exact: true }).evaluate(el => el.getRootNode().activeElement === el), true);
+    await f.page.keyboard.press('End');
+    assert.equal(await f.panel.getByRole('menuitem', { name: 'Extension options', exact: true }).evaluate(el => el.getRootNode().activeElement === el), true);
+    await f.page.keyboard.press('Escape'); assert.equal(await f.panel.locator('#reader-more-menu').isVisible(), false);
+    assert.equal(await f.panel.getByRole('dialog').isVisible(), true);
+    assert.deepEqual(f.errors, []); await f.close();
+  }
+});
+
+test('launcher summary peek is temporary, focus-free, and pins the normal Note panel without changing its draft', async () => {
+  const f = await fixture(); await f.open('note'); await f.editor.fill('Keep while peeking');
+  await f.panel.getByRole('button', { name: 'Close Reader', exact: true }).click();
+  await f.panel.locator('.toggle').hover(); await f.panel.locator('.peek').waitFor({ state: 'visible' });
+  assert.match(await f.panel.locator('.peek-summary').innerText(), /Attention is a limited resource/);
+  assert.equal(await f.panel.locator('.body').isVisible(), false);
+  assert.equal(await f.panel.locator('#reader-note-tab').getAttribute('aria-selected'), 'true');
+  assert.equal(await f.panel.locator('.toggle').evaluate(el => el.getRootNode().activeElement === el), true);
+  await f.panel.locator('.toggle').click();
+  assert.equal(await f.panel.locator('.peek').isVisible(), false); assert.equal(await f.editor.inputValue(), 'Keep while peeking');
+  assert.equal(await f.panel.getByRole('tab', { name: /^Note/ }).getAttribute('aria-selected'), 'true');
+  assert.deepEqual(await f.page.evaluate(() => mock.messages.map(m => m.type)), ['reader-panel-get']);
   assert.deepEqual(f.errors, []); await f.close();
 });
 
@@ -574,7 +618,7 @@ test('Delete browser: confirmation is inert text, focuses Cancel and restores no
     const f = await fixture({ width, height: 520 }); await f.open('note');
     await f.editor.fill('Preserved local draft');
     const before = await noteGeometry(f), videoBefore = await f.page.locator('video').boundingBox();
-    await f.panel.getByRole('button', { name: 'Delete from Reader', exact: true }).click();
+    await f.trash();
     const confirmation = f.panel.getByRole('alertdialog');
     assert.match(await confirmation.innerText(), /How attention shapes the way we learn/);
     assert.match(await confirmation.innerText(), /alpha.*doc-a/);
@@ -591,7 +635,7 @@ test('Delete browser: confirmation is inert text, focuses Cancel and restores no
     assert.equal(await f.page.evaluate(() => mock.messages.filter(m => m.type === 'reader-panel-delete').length), 0);
     await confirmation.getByRole('button', { name: 'Cancel', exact: true }).click();
     assert.equal(await f.editor.inputValue(), 'Preserved local draft'); assert.deepEqual(await noteGeometry(f), before);
-    await f.panel.getByRole('button', { name: 'Delete from Reader', exact: true }).click();
+    await f.trash();
     await f.page.keyboard.press('Escape');
     assert.equal(await confirmation.isVisible(), false); assert.equal(await f.panel.getByRole('dialog').isVisible(), true);
     assert.deepEqual(await noteGeometry(f), before); assert.deepEqual(f.errors, []); await f.close();
@@ -601,7 +645,7 @@ test('Delete browser: confirmation is inert text, focuses Cancel and restores no
 test('Delete browser: dirty success preserves newer text without layout shifts and clean success becomes unsaved without auto-save', async () => {
   const f = await fixture(); await f.open('note'); await f.editor.fill('Before deletion');
   const before = await noteGeometry(f);
-  await f.panel.getByRole('button', { name: 'Delete from Reader', exact: true }).click();
+  await f.trash();
   await f.page.evaluate(() => { mock.defer = true; });
   await f.panel.getByRole('button', { name: 'Delete document', exact: true }).click();
   assert.deepEqual(await noteGeometry(f), before);
@@ -610,11 +654,11 @@ test('Delete browser: dirty success preserves newer text without layout shifts a
   assert.match(await f.panel.locator('.status').innerText(), /Deleted from Reader.*unsaved note is kept/s);
   assert.equal(await f.editor.inputValue(), 'Typed while deletion pending'); assert.deepEqual(await noteGeometry(f), before);
   assert.equal(await f.panel.getByRole('button', { name: 'Save note', exact: true }).isDisabled(), true);
-  assert.equal(await f.panel.getByRole('button', { name: 'Delete from Reader', exact: true }).isDisabled(), true);
+  assert.equal(await f.panel.locator('button[aria-label="Delete from Reader"]').isDisabled(), true);
   assert.deepEqual(await f.page.evaluate(() => mock.messages.map(m => m.type)), ['reader-panel-get', 'reader-panel-delete']);
   assert.deepEqual(f.errors, []); await f.close();
   const clean = await fixture(); await clean.open();
-  await clean.panel.getByRole('button', { name: 'Delete from Reader', exact: true }).click();
+  await clean.trash();
   await clean.panel.getByRole('button', { name: 'Delete document', exact: true }).click();
   assert.match(await clean.panel.locator('.status').innerText(), /^Deleted from Reader/);
   assert.equal(await clean.panel.locator('.summary').isVisible(), false);
@@ -625,7 +669,7 @@ test('Delete browser: dirty success preserves newer text without layout shifts a
 
 test('Delete browser: navigation and replacement identity cancel confirmation, including before SPA synchronization', async () => {
   const f = await fixture(); await f.open('note'); await f.editor.fill('Draft A');
-  await f.panel.getByRole('button', { name: 'Delete from Reader', exact: true }).click();
+  await f.trash();
   await f.page.evaluate(url => history.pushState({}, '', url), B);
   await f.panel.getByRole('button', { name: 'Delete document', exact: true }).click();
   assert.equal(await f.page.evaluate(() => mock.messages.filter(m => m.type === 'reader-panel-delete').length), 0);
@@ -633,10 +677,10 @@ test('Delete browser: navigation and replacement identity cancel confirmation, i
   assert.equal(await f.panel.getByRole('alertdialog').isVisible(), false); assert.equal(await f.editor.inputValue(), 'A useful observation to revisit.');
   await f.navigate(A); await f.open('note'); assert.equal(await f.editor.inputValue(), 'Draft A');
   await f.page.evaluate(url => mock.change({ readerDocuments: { [url]: { id: 'doc-a' } } }), A);
-  await f.panel.getByRole('button', { name: 'Delete from Reader', exact: true }).click();
+  await f.trash();
   await f.page.evaluate(url => { mock.ids[url] = 'replacement'; mock.change({ readerDocuments: { [url]: { id: 'replacement' } } }); }, A);
   assert.equal(await f.panel.getByRole('alertdialog').isVisible(), false);
-  assert.equal(await f.panel.getByRole('button', { name: 'Delete from Reader', exact: true }).isDisabled(), true);
+  assert.equal(await f.panel.locator('button[aria-label="Delete from Reader"]').isDisabled(), true);
   assert.equal(await f.editor.inputValue(), 'Draft A');
   assert.equal(await f.page.evaluate(() => mock.messages.filter(m => m.type === 'reader-panel-delete').length), 0);
   assert.deepEqual(f.errors, []); await f.close();
@@ -644,14 +688,14 @@ test('Delete browser: navigation and replacement identity cancel confirmation, i
 
 test('Delete browser: a late response stays bound to its video and cannot change the next editor', async () => {
   const f = await fixture(); await f.open('note'); await f.editor.fill('Draft for deleted A');
-  await f.panel.getByRole('button', { name: 'Delete from Reader', exact: true }).click();
+  await f.trash();
   await f.page.evaluate(() => { mock.defer = true; });
   await f.panel.getByRole('button', { name: 'Delete document', exact: true }).click();
   await f.navigate(B); await f.open();
   await f.page.evaluate(() => { mock.release(); mock.release(); mock.defer = false; });
   await f.panel.getByRole('tab', { name: /^Note/ }).click();
   assert.equal(await f.editor.inputValue(), 'A useful observation to revisit.');
-  assert.equal(await f.panel.getByRole('button', { name: 'Delete from Reader', exact: true }).isEnabled(), true);
+  assert.equal(await f.panel.locator('button[aria-label="Delete from Reader"]').isEnabled(), true);
   assert.doesNotMatch(await f.panel.locator('.status').textContent(), /Deleted from Reader/);
   const sent = await f.page.evaluate(() => mock.messages.find(m => m.type === 'reader-panel-delete'));
   assert.equal(sent.pageUrl, A); assert.equal(sent.id, 'doc-a');
@@ -665,14 +709,14 @@ test('Delete browser: errors and uncertain outcomes keep the draft and geometry;
   const before = await noteGeometry(f);
   for (const code of ['unauthorized', 'rate_limited', 'network_error', 'delete_uncertain', 'delete_cache_error', 'document_changed']) {
     await f.page.evaluate(code => { mock.deleteError = code; }, code);
-    await f.panel.getByRole('button', { name: 'Delete from Reader', exact: true }).click();
+    await f.trash();
     await f.panel.getByRole('button', { name: 'Delete document', exact: true }).click();
     assert.equal(await f.panel.locator('.status').getAttribute('data-kind'), 'error');
     assert.doesNotMatch(await f.panel.locator('.status').innerText(), /^Deleted from Reader/);
     assert.equal(await f.editor.inputValue(), 'Keep on failure'); assert.deepEqual(await noteGeometry(f), before);
   }
   await f.page.evaluate(() => { mock.deleteReply = { ok: true, id: 'doc-a', alreadyDeleted: true }; });
-  await f.panel.getByRole('button', { name: 'Delete from Reader', exact: true }).click();
+  await f.trash();
   await f.panel.getByRole('button', { name: 'Delete document', exact: true }).click();
   assert.match(await f.panel.locator('.status').innerText(), /already absent/);
   assert.equal(await f.editor.inputValue(), 'Keep on failure'); assert.deepEqual(await noteGeometry(f), before);

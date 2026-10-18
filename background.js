@@ -511,7 +511,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     getReaderPanelService().handle(message, { isCurrent, scope: [sender.tab.id, sender.documentId || "", message.lease] }).then(sendResponse);
     return true;
   }
-  if (["reader-panel-get", "reader-panel-save-note", "reader-panel-delete"].includes(message?.type)) {
+  if (["reader-panel-get", "reader-panel-save-note", "reader-panel-delete", "reader-panel-move"].includes(message?.type)) {
     const origin = MVSReaderCore.youtubeOrigin(sender.url);
     const target = MVSReaderCore.canonical(message.pageUrl);
     if (sender.id !== chrome.runtime.id || !Number.isInteger(sender.tab?.id) || sender.frameId !== 0 ||
