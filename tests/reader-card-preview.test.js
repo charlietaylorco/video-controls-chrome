@@ -235,6 +235,7 @@ test('actual card resolver accepts surfaces and aliases, rejects ambiguous/recyc
       getVideoCardContainer: () => source, getCurrentContextSource: () => source, getAssociatedTitle: () => surface,
       getAssociatedPageUrl: () => links[0]?.href, readerButton: { dataset: { readerSaved: 'true' } },
       readerSavedUrlCache: new Map([[B, true]]), normalizeYouTubeStateUrl: C.canonical, MVSReaderCore: C };
+    context.readerStateKey = C.canonical;
     context.globalThis = context; vm.runInNewContext(helper + '\nglobalThis.resolveCard = getReaderCardTarget;', context);
     assert.equal(context.resolveCard().videoUrl, B); assert.equal(context.resolveCard().saved, true);
     links.push({ href: A }); assert.equal(context.resolveCard(), null);

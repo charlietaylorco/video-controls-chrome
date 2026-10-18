@@ -558,3 +558,50 @@ test('deletion clears clean notes, preserves dirty and newer drafts, and cannot 
     }
   }
 });
+
+test('confirmed extension deletion persists a canonical deleted marker across aliases, duplicate cards and worker restarts', async () => {
+  const app = harness({ stored: { readerDocuments: { [A]: { id: 'doc-a', at: 1 } }, readerSavedUrls: { [A]: 1, 'https://youtu.be/alpha?t=4': 1 } },
+    responder: (url, init) => init.method === 'DELETE' ? { status: 204 } : { results: [doc()] } });
+  assert.equal((await app.delete()).ok, true);
+  assert.equal(app.data.readerDeletedVideos[A].id, 'doc-a');
+  const restarted = harness({ stored: app.data });
+  for (const url of [A, A + '&t=8', 'https://youtu.be/alpha', 'https://m.youtube.com/watch?v=alpha']) {
+    const state = await restarted.message({ type: 'get-reader-save-state', pageUrl: url });
+    assert.equal(state.saved, false); assert.equal(state.deleted, true); assert.equal(state.url, A);
+  }
+  assert.equal(restarted.requests.length, 0);
+});
+
+test('absence and failed/uncertain deletion never invent extension deletion history', async () => {
+  for (const response of [{ results: [] }, { status: 404 }]) {
+    const app = harness({ stored: { readerDocuments: { [A]: { id: 'doc-a', at: 1 } } }, responder: () => response });
+    assert.equal((await app.delete()).alreadyDeleted, true); assert.equal((await app.service.savedState(A)).deleted, false);
+  }
+  const app = harness({ stored: { readerSavedUrls: { [A]: 1 } },
+    responder: (url, init) => init.method === 'DELETE' ? new Error('offline') : { results: [doc()] } });
+  assert.equal((await app.delete()).code, 'delete_uncertain');
+  assert.equal((await app.service.savedState(A)).deleted, false); assert.equal((await app.service.savedState(A)).saved, true);
+});
+
+test('intentional successful re-save clears a prior deleted marker and stale flags cannot override deletion', async () => {
+  const app = harness({ stored: { readerDeletedVideos: { [A]: { id: 'deleted-id', at: 1 } }, readerSavedUrls: { [A]: 1 } },
+    responder: () => ({ status: 201, id: 'new-id', url: 'https://read.readwise.io/read/new-id' }) });
+  assert.equal((await app.service.savedState(A)).deleted, true); assert.equal((await app.service.savedState(A)).saved, false);
+  assert.equal((await app.message({ type: 'save-to-reader', pageUrl: A, title: 'Title', author: 'Author' })).ok, true);
+  assert.equal(app.data.readerDeletedVideos[A], undefined);
+  const state = await app.service.savedState(A); assert.equal(state.saved, true); assert.equal(state.deleted, false);
+});
+
+test('newer verified Reader state clears the marker without auto-saving, and a replacement save wins a late deletion', async () => {
+  const app = harness({ stored: { readerDeletedVideos: { [A]: { id: 'old', at: 1 } } } });
+  assert.equal((await app.get()).document.id, 'doc-a'); assert.equal(app.data.readerDeletedVideos[A], undefined);
+  assert.equal((await app.service.savedState(A)).saved, true); assert.ok(app.requests.every(r => !r.method));
+  let release;
+  const race = harness({ stored: { readerDocuments: { [A]: { id: 'doc-a', at: 1 } } }, responder: async (url, init) => {
+    if (init.method === 'DELETE') { await new Promise(resolve => { release = resolve; }); return { status: 204 }; }
+    return { results: [doc()] };
+  } });
+  const deleting = race.delete(); await new Promise(setImmediate); await race.service.remember(A, 'replacement'); release();
+  assert.equal((await deleting).ok, true); assert.equal(race.data.readerDeletedVideos[A], undefined);
+  assert.equal((await race.service.savedState(A)).saved, true);
+});

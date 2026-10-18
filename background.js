@@ -639,13 +639,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === "get-reader-save-state") {
       const targetUrl = normalizeTargetUrl(message?.pageUrl || sender?.tab?.url);
 
-      isReaderUrlSaved(targetUrl).then((saved) => {
-        sendResponse({
-          ok: true,
-          saved,
-          url: targetUrl
-        });
-      });
+      getReaderPanelService().savedState(targetUrl).then(state => sendResponse({ ok: true, ...state }),
+        () => sendResponse({ ok: false, code: "storage_error" }));
 
       return true;
     }
