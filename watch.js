@@ -41,6 +41,7 @@
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('d', commands); svg.append(path); parent.append(svg);
   };
+  const player = globalThis.MVSWatchPlayer.create({ announce });
   const controls = () => {
     $('refresh').disabled = refreshing || pending.size > 0 || Boolean(deletion);
     $('refresh').textContent = refreshing ? 'Refreshing…' : 'Refresh this page';
@@ -51,10 +52,10 @@
   };
   const makeRow = item => {
     const card = node('article', '', null, 'video'); card.dataset.url = item.videoUrl;
-    const thumbnailLink = node('a', '', card, 'thumbnail-link');
-    thumbnailLink.href = item.videoUrl; thumbnailLink.target = '_blank'; thumbnailLink.rel = 'noopener noreferrer'; thumbnailLink.tabIndex = -1;
-    const image = node('img', '', thumbnailLink, 'thumbnail'); image.alt = ''; image.loading = 'lazy'; image.decoding = 'async'; image.width = 480; image.height = 270;
+    const mediaBox = node('div', '', card, 'video-media'), thumbnailButton = node('button', '', mediaBox, 'thumbnail-button'); thumbnailButton.type = 'button';
+    const image = node('img', '', thumbnailButton, 'thumbnail'); image.alt = ''; image.loading = 'lazy'; image.decoding = 'async'; image.width = 480; image.height = 270;
     image.referrerPolicy = 'no-referrer'; image.src = `https://i.ytimg.com/vi/${encodeURIComponent(new URL(item.videoUrl).searchParams.get('v'))}/mqdefault.jpg`;
+    const playPrompt = node('span', '', thumbnailButton, 'play-prompt'); playPrompt.setAttribute('aria-hidden', 'true'); icon(playPrompt, 'm9 6 10 6-10 6Z');
     const copy = node('div', '', card, 'video-copy'), heading = node('h2', '', copy), link = node('a', '', heading);
     link.href = item.videoUrl; link.target = '_blank'; link.rel = 'noopener noreferrer';
     const metadata = node('dl', '', copy, 'metadata');
@@ -67,8 +68,12 @@
     for (const [value, label] of Object.entries(C.locations)) { const option = node('option', label, move); option.value = value; }
     const removeGroup = node('optgroup', '', move); removeGroup.label = 'Remove document';
     const trash = node('option', 'Trash…', removeGroup, 'trash-option'); trash.value = 'trash';
-    const readerLink = node('a', '', locationRow, 'reader-link'); readerLink.target = '_blank'; readerLink.rel = 'noopener noreferrer'; readerLink.title = 'Open in Reader';
+    const locationActions = node('div', '', locationRow, 'location-actions');
+    const youtubeLink = node('a', 'Open on YouTube', locationActions, 'youtube-link'); youtubeLink.href = item.videoUrl; youtubeLink.target = '_blank'; youtubeLink.rel = 'noopener noreferrer';
+    const readerLink = node('a', '', locationActions, 'reader-link'); readerLink.target = '_blank'; readerLink.rel = 'noopener noreferrer'; readerLink.title = 'Open in Reader';
     icon(readerLink, 'M14 3h7v7M10 14 21 3M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5');
+    const closePlayer = node('button', '', locationActions, 'player-close'); closePlayer.type = 'button'; closePlayer.title = 'Close player'; closePlayer.setAttribute('aria-label', 'Close YouTube player'); closePlayer.hidden = true;
+    icon(closePlayer, 'm6 6 12 12M6 18 18 6');
     const summary = node('p', '', copy, 'summary-text');
     const footer = node('div', '', copy, 'card-footer'), footerDetails = node('div', '', footer, 'footer-details');
     const note = node('p', '', footerDetails, 'row-status'); note.setAttribute('role', 'status');
@@ -82,15 +87,24 @@
       else if (destination) void mutate(item.videoUrl, destination);
     });
     refresh.addEventListener('click', () => void refreshCard(item.videoUrl));
-    return { card, link, channel, tags, date, checked, placeholder, summary, move, readerLink, refresh, note };
+    thumbnailButton.addEventListener('click', () => {
+      const current = items.find(row => row.videoUrl === item.videoUrl); if (!current || !loaded || deletion) return;
+      player.open({ videoUrl: current.videoUrl, title: current.title, host: mediaBox, trigger: thumbnailButton, close: closePlayer });
+    });
+    closePlayer.addEventListener('click', () => player.clear({ focus: true }));
+    closePlayer.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); player.clear({ focus: true }); } });
+    return { card, link, channel, tags, date, checked, placeholder, summary, move, readerLink, refresh, note, thumbnailButton, youtubeLink };
   };
   const render = () => {
     const order = items.map(item => item.videoUrl);
+    player.keep(order);
     for (const url of rows.keys()) if (!order.includes(url)) rows.delete(url);
     const cards = [];
     for (const item of items) {
       let row = rows.get(item.videoUrl); if (!row) { row = makeRow(item); rows.set(item.videoUrl, row); }
       row.link.textContent = item.title || `YouTube video · ${new URL(item.videoUrl).searchParams.get('v')}`;
+      row.thumbnailButton.setAttribute('aria-label', `Load YouTube player for ${item.title || 'video'}`); row.thumbnailButton.title = 'Load YouTube player';
+      row.youtubeLink.setAttribute('aria-label', `Open ${item.title || 'video'} on YouTube`);
       row.channel.textContent = item.author || 'Not retained';
       const tags = Array.isArray(item.tags) ? W.tags(item.tags) : null;
       row.tags.textContent = tags ? tags.length ? tags.slice(0, 3).join(' · ') + (tags.length > 3 ? ` +${tags.length - 3}` : '') : 'None' : 'Not fetched';
@@ -115,7 +129,10 @@
       row.note.textContent = pending.has(item.videoUrl) ? 'Working…' : errors.get(item.videoUrl) || (!item.readerId ? 'Reader ID not retained; open the video page to link it.' : '');
       row.note.dataset.error = String(errors.has(item.videoUrl)); cards.push(row.card);
     }
-    if (Array.from(grid.children).map(n => n.dataset.url).join('|') !== order.join('|')) grid.replaceChildren(...cards);
+    if (Array.from(grid.children).map(n => n.dataset.url).join('|') !== order.join('|')) {
+      // Reparenting an iframe can restart navigation. Unmount before reordering.
+      player.clear(); grid.replaceChildren(...cards);
+    }
     grid.hidden = loaded && items.length === 0; $('empty').hidden = !loaded || items.length > 0;
     grid.setAttribute('aria-busy', String(!loaded)); controls();
   };
@@ -128,7 +145,7 @@
     if (clearStatus && !refreshing && pending.size === 0 && !deletion) announce('');
   };
   const reloadLocal = () => { clearTimeout(reloadTimer); reloadTimer = setTimeout(() => { if (!refreshing && !pending.size && !deletion) void load(); }, 100); };
-  const changePage = () => { refreshRequest++; refreshing = false; loaded = false; render(); void load({ clearStatus: true }); };
+  const changePage = () => { player.clear(); refreshRequest++; refreshing = false; loaded = false; render(); void load({ clearStatus: true }); };
   const refreshCard = async url => {
     const item = items.find(row => row.videoUrl === url);
     if (!item?.readerId || !loaded || refreshing || pending.size || deletion) return;
@@ -189,7 +206,7 @@
       else errors.delete(item.videoUrl);
     }
     if (request !== refreshRequest) return;
-    refreshing = false; await load(); announce(failure ? messageFor(failure) : count ? 'This page is up to date with Reader.' : 'No linked Reader IDs on this page. Open a video page to link an older save.', Boolean(failure));
+    refreshing = false; await load(); announce(failure ? messageFor(failure) : count ? `Checked ${count} video${count === 1 ? '' : 's'} in Reader.` : 'No linked Reader IDs on this page. Open a video page to link an older save.', Boolean(failure));
   });
   for (const [value, label] of Object.entries(W.filters)) {
     const button = node('button', label, $('filters')); button.type = 'button'; button.dataset.filter = value;
@@ -197,10 +214,9 @@
   }
   $('previous').addEventListener('click', () => { if (cursors.length > 1) { cursors.pop(); changePage(); } });
   $('next').addEventListener('click', () => { if (nextCursor) { cursors.push(nextCursor); changePage(); } });
-  const applyTheme = () => { document.documentElement.dataset.theme = theme === 'system' ? media.matches ? 'dark' : 'light' : theme; $('theme').value = theme; };
+  const applyTheme = () => { document.documentElement.dataset.theme = theme === 'system' ? media.matches ? 'dark' : 'light' : theme; };
   media.addEventListener('change', applyTheme);
   chrome.storage.local.get({ readerPanelTheme: 'system' }, data => { theme = ['system', 'dark', 'light'].includes(data.readerPanelTheme) ? data.readerPanelTheme : 'system'; applyTheme(); });
-  $('theme').addEventListener('change', () => chrome.storage.local.set({ readerPanelTheme: $('theme').value }));
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
     if (changes.readerPanelTheme) { theme = ['system', 'dark', 'light'].includes(changes.readerPanelTheme.newValue) ? changes.readerPanelTheme.newValue : 'system'; applyTheme(); }

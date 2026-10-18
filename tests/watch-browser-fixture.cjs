@@ -10,7 +10,7 @@ const bootstrap = `
 const options = new URL(location.href).searchParams;
 const mode = options.get('mode') || 'normal';
 const listeners = [], storageListeners = [], documents = new Map();
-const data = { readerToken: 'fixture-token-not-real', readerPanelTheme: 'system', readerSavedUrls: {}, readerDocuments: {} };
+const data = { readerToken: 'fixture-token-not-real', readerPanelTheme: options.get('theme') || 'system', readerSavedUrls: {}, readerDocuments: {} };
 let calls = 0, fixtureClock = Date.now() - 3600000, added = 0;
 const report = text => { const row = document.createElement('li'); row.textContent = text; document.getElementById('fixture-log').append(row); };
 window.fetch = async (url, init = {}) => {
@@ -51,8 +51,15 @@ action: { onClicked: { addListener() {} } } };
 window.importScripts = () => {};
 const imageSource = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
 Object.defineProperty(HTMLImageElement.prototype, 'src', { get: imageSource.get, set(value) {
-  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="224" height="126"><rect width="224" height="126" fill="#505d48"/><path d="m96 40 38 23-38 23Z" fill="#e0e7d7"/></svg>';
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="224" height="126"><rect width="224" height="126" fill="#505d48"/><circle cx="176" cy="32" r="13" fill="#d6dfca"/><path d="M0 126 60 44 117 108 155 73 224 126Z" fill="#718267"/></svg>';
   imageSource.set.call(this, 'data:image/svg+xml,' + encodeURIComponent(svg));
+} });
+const frameSource = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'src');
+Object.defineProperty(HTMLIFrameElement.prototype, 'src', { get: frameSource.get, set(value) {
+  const url = new URL(value);
+  if (url.origin !== 'https://www.youtube.com' || !url.pathname.startsWith('/embed/')) throw Error('Fixture blocks external frames');
+  report('Mock player request: ' + url.pathname + ' autoplay=' + url.searchParams.get('autoplay'));
+  frameSource.set.call(this, 'player.html?' + new URLSearchParams({ video: url.pathname.split('/').at(-1), unavailable: options.get('player_error') || '' }));
 } });
 ${source('reader-core.js')}
 ${source('reader-watch-core.js')}
@@ -88,9 +95,11 @@ document.getElementById('fixture-auth').addEventListener('click', () => chrome.s
 document.addEventListener('click', event => { if (event.target.closest('a')) { event.preventDefault(); report('Fixture blocked link navigation'); } }, true);
 `;
 let html = fs.readFileSync(path.join(root, 'watch.html'), 'utf8').replace(/<script[^>]*src="[^"]+"[^>]*><\/script>/g, '');
-html = html.replace('<head>', '<head><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\' \'unsafe-inline\'; style-src \'self\' \'unsafe-inline\'; img-src data:; connect-src \'none\'">');
+html = html.replace('<head>', '<head><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\' \'unsafe-inline\'; style-src \'self\' \'unsafe-inline\'; img-src data:; frame-src \'self\'; connect-src \'none\'">');
 const tools = '<aside style="font:11px system-ui;padding:10px 20px;background:#e5e8df;color:#25301d"><strong>Mock data only · isolated native browser check</strong> · <span id="fixture-count">Mock Reader requests: 0</span> <button id="fixture-add" type="button">Add a mock save</button> <button id="fixture-auth" type="button">Change mock connection</button> <label><input type="checkbox" id="fixture-slow"> Slow responses</label> <label><input type="checkbox" id="fixture-fail"> Reject Reader requests</label><details><summary>Mock trace</summary><ol id="fixture-log"></ol></details></aside>';
-html = html.replace('<body>', '<body>' + tools).replace('</body>', '<script>' + bootstrap + '</script><script src="watch.js"></script></body>');
+html = html.replace('<body>', '<body>' + tools).replace('</body>', '<script>' + bootstrap + '</script><script src="watch-player.js"></script><script src="watch.js"></script></body>');
 fs.writeFileSync(path.join(destination, 'index.html'), html);
-for (const file of ['watch.css', 'watch.js']) fs.copyFileSync(path.join(root, file), path.join(destination, file));
+for (const file of ['watch.css', 'watch-player.js', 'watch.js']) fs.copyFileSync(path.join(root, file), path.join(destination, file));
 console.log(destination);
+
+fs.writeFileSync(path.join(destination, 'player.html'), `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"><style>body{margin:0;padding:14px;background:#19221a;color:#e8eee2;font:12px system-ui}h1{font-size:16px;margin:8px 0}p{margin:8px 0}button{padding:8px;font:inherit}</style></head><body><h1>Mock YouTube player</h1><p id="identity"></p><p id="state">Paused · autoplay off · synthetic data only</p><button id="play">Play mock video</button><script>const q=new URLSearchParams(location.search);document.querySelector('#identity').textContent='Fixture video: '+q.get('video');if(q.get('unavailable')){document.querySelector('#state').textContent='Mock unavailable player (simulates identification error 153)';document.querySelector('#play').hidden=true;}document.querySelector('#play').onclick=()=>document.querySelector('#state').textContent='Playing mock video · no real media/network';</script></body></html>`);
