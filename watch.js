@@ -37,6 +37,10 @@
   })[result.code] || (result.code === 'rate_limited' ? `Reader rate limit reached. Try after ${new Date(result.retryAt || Date.now() + 60000).toLocaleTimeString()}.` : 'Reader could not complete this request. Try Refresh.');
   const announce = (text, error = false) => { status.textContent = text; status.dataset.error = String(error); };
   const node = (tag, text, parent, className) => { const n = document.createElement(tag); if (text) n.textContent = text; if (className) n.className = className; parent?.append(n); return n; };
+  const icon = (parent, commands) => {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('d', commands); svg.append(path); parent.append(svg);
+  };
   const controls = () => {
     $('refresh').disabled = refreshing || pending.size > 0 || Boolean(deletion);
     $('refresh').textContent = refreshing ? 'Refreshing…' : 'Refresh this page';
@@ -54,20 +58,23 @@
     const copy = node('div', '', card, 'video-copy'), heading = node('h2', '', copy), link = node('a', '', heading);
     link.href = item.videoUrl; link.target = '_blank'; link.rel = 'noopener noreferrer';
     const metadata = node('dl', '', copy, 'metadata');
-    const field = label => { const group = node('div', '', metadata); node('dt', label, group); return node('dd', '', group); };
-    const channel = field('Channel'), tags = field('Tags'), date = field('Saved date');
-    const locationRow = node('div', '', copy, 'location-row'), locationLabel = node('label', 'Saved location', locationRow);
+    const field = label => { const group = node('div', '', metadata); node('dt', label, group, 'sr-only'); return node('dd', '', group); };
+    const channel = field('Channel'), tags = field('Tags'); channel.className = 'channel-name';
+    const locationRow = node('div', '', copy, 'location-row'), locationLabel = node('label', '', locationRow);
+    node('span', 'Saved location', locationLabel, 'sr-only');
     const move = node('select', '', locationLabel);
     const placeholder = node('option', 'Not checked', move); placeholder.value = ''; placeholder.disabled = true;
     for (const [value, label] of Object.entries(C.locations)) { const option = node('option', label, move); option.value = value; }
     const removeGroup = node('optgroup', '', move); removeGroup.label = 'Remove document';
     const trash = node('option', 'Trash…', removeGroup, 'trash-option'); trash.value = 'trash';
-    const readerLink = node('a', 'Open Reader ↗', locationRow); readerLink.target = '_blank'; readerLink.rel = 'noopener noreferrer';
+    const readerLink = node('a', '', locationRow, 'reader-link'); readerLink.target = '_blank'; readerLink.rel = 'noopener noreferrer'; readerLink.title = 'Open in Reader';
+    icon(readerLink, 'M14 3h7v7M10 14 21 3M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5');
     const summary = node('p', '', copy, 'summary-text');
-    const footer = node('div', '', copy, 'card-footer'), note = node('p', '', footer, 'row-status'); note.setAttribute('role', 'status');
+    const footer = node('div', '', copy, 'card-footer'), footerDetails = node('div', '', footer, 'footer-details');
+    const note = node('p', '', footerDetails, 'row-status'); note.setAttribute('role', 'status');
+    const footerMeta = node('div', '', footerDetails, 'footer-meta'), date = node('time', '', footerMeta), checked = node('span', '', footerMeta);
     const refresh = node('button', '', footer, 'card-refresh'); refresh.type = 'button';
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('d', 'M20 7v5h-5M20 12a8 8 0 1 0-2.3 5.7'); svg.append(path); refresh.append(svg);
+    icon(refresh, 'M20 7v5h-5M20 12a8 8 0 1 0-2.3 5.7');
     move.addEventListener('change', () => {
       const destination = move.value, current = items.find(row => row.videoUrl === item.videoUrl);
       move.value = current && Object.hasOwn(C.locations, current.location) ? current.location : '';
@@ -75,7 +82,7 @@
       else if (destination) void mutate(item.videoUrl, destination);
     });
     refresh.addEventListener('click', () => void refreshCard(item.videoUrl));
-    return { card, link, channel, tags, date, placeholder, summary, move, readerLink, refresh, note };
+    return { card, link, channel, tags, date, checked, placeholder, summary, move, readerLink, refresh, note };
   };
   const render = () => {
     const order = items.map(item => item.videoUrl);
@@ -88,7 +95,10 @@
       const tags = Array.isArray(item.tags) ? W.tags(item.tags) : null;
       row.tags.textContent = tags ? tags.length ? tags.slice(0, 3).join(' · ') + (tags.length > 3 ? ` +${tags.length - 3}` : '') : 'None' : 'Not fetched';
       row.tags.title = tags?.join(' · ') || '';
-      row.date.textContent = new Date(item.savedAt).toLocaleDateString();
+      const savedDate = new Date(item.savedAt), hasSavedDate = Number.isFinite(savedDate.getTime());
+      row.date.textContent = hasSavedDate ? `Saved ${savedDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}` : 'Saved date unavailable';
+      row.date.dateTime = hasSavedDate ? savedDate.toISOString() : ''; row.date.setAttribute('aria-label', hasSavedDate ? `Saved date: ${savedDate.toLocaleString()}` : 'Saved date unavailable');
+      row.checked.textContent = item.checkedAt ? `Checked ${new Date(item.checkedAt).toLocaleString()}` : 'Not checked';
       row.placeholder.textContent = item.status === 'missing' ? 'Not found in Reader' : item.checkedAt ? C.locationLabel(item.location) : 'Not checked';
       row.placeholder.hidden = Object.hasOwn(C.locations, item.location) && item.status === 'saved';
       row.move.value = Object.hasOwn(C.locations, item.location) && item.status === 'saved' ? item.location : '';
@@ -101,7 +111,8 @@
       row.refresh.setAttribute('aria-label', `Refresh ${item.title || 'video'} from Reader`); row.refresh.title = 'Refresh this card from Reader';
       row.card.setAttribute('aria-busy', String(pending.has(item.videoUrl) || refreshing));
       row.readerLink.hidden = !item.readerId; if (item.readerId) row.readerLink.href = C.readerUrl(item.readerId);
-      row.note.textContent = pending.has(item.videoUrl) ? 'Working…' : errors.get(item.videoUrl) || (!item.readerId ? 'Reader ID not retained; open the video page to link it.' : item.checkedAt ? `Checked ${new Date(item.checkedAt).toLocaleString()}` : 'Saved locally · not yet checked with Reader');
+      row.readerLink.setAttribute('aria-label', `Open ${item.title || 'video'} in Reader`);
+      row.note.textContent = pending.has(item.videoUrl) ? 'Working…' : errors.get(item.videoUrl) || (!item.readerId ? 'Reader ID not retained; open the video page to link it.' : '');
       row.note.dataset.error = String(errors.has(item.videoUrl)); cards.push(row.card);
     }
     if (Array.from(grid.children).map(n => n.dataset.url).join('|') !== order.join('|')) grid.replaceChildren(...cards);

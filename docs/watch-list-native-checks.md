@@ -2,13 +2,13 @@
 
 Checks ran on 18 October 2026 in Codex’s isolated in-app browser. The actual page, IndexedDB store, background routing and Reader transport ran against synthetic documents and a fake in-memory HTTP adapter. No extension was installed, real Reader credentials used, or real notes/library mutated. The fixture’s CSP blocks outbound connections and substitutes local thumbnail art.
 
-The refined page has a compact **Recent saves** title, two substantial cards per desktop row, large 16:9 thumbnails, title and Channel/Tags/Saved date metadata, a current-location dropdown containing a separate **Trash…** action, full inline summaries, and a bottom-right per-card refresh icon. It has no intro, default “Newest saves…” copy, redundant Trash button, summary disclosure, text clamp, or internal summary scroll area.
+The refined page has a compact **Recent saves** title, two substantial cards per desktop row, large 16:9 thumbnails, title, channel name and tags with visually hidden accessible field labels, a flat current-location dropdown containing a separate **Trash…** action, full inline summaries, and a bottom-right per-card refresh icon. Open in Reader is icon-only with a tooltip; Saved date and Checked share the bottom-left footer. It has no intro, default “Newest saves…” copy, redundant Trash button, summary disclosure, text clamp, or internal summary scroll area.
 
 | Check | Observed result |
 | --- | --- |
 | Initial view and Next/Previous | At most 12 cards per page; zero Reader requests for cached browsing |
 | Per-card Refresh | Exactly one `list/?id=mock-25` request supplied summary, tags and location; other cards were not fetched |
-| Pending refresh and mock 401 | Actual first card height stayed **685.21875px** before, during loading and after the error; error remained visible in the reserved feedback area |
+| Pending refresh and mock 401 | Actual first card height stayed **699.8203125px** before, during loading and after the error; error remained visible in the reserved feedback area |
 | Dropdown move Later → Shortlist | Exact-ID preflight, location-only PATCH and readback; dropdown showed verified Shortlist |
 | Dropdown Trash cancellation | Exact title/URL/ID confirmation, Cancel initially focused, no DELETE; dropdown retained the verified location |
 | Confirmed dropdown Trash | Exact-ID preflight, one mock DELETE with HTTP 204, absent-ID readback; card removed and success remained visible |
@@ -17,6 +17,9 @@ The refined page has a compact **Recent saves** title, two substantial cards per
 | Connection changed during slow card refresh | The late reply did not replace the connection-change message with success |
 | Connection changed during slow Trash preparation | Confirmation stayed closed after the late reply |
 | Theme and layout | Light/dark modes; desktop 1280px had two 538px columns and 16:9 image geometry; 390px and 280px had one column and no horizontal overflow |
+| Final labels and footer | Channel/Tags/location labels remained in the accessibility tree but were visually clipped; channel text measured 13px; Reader icon had no visible text and retained its exact target, accessible name and tooltip; Saved/Checked fit the reserved 32px footer at 390px and 280px |
+| Flat selector keyboard | Native menu opened with ArrowDown; Escape closed it and retained a solid visible focus outline. Resting background/border were transparent |
+| Final Trash check | Flat dropdown still opened the exact-document dialog with Cancel focused; cancellation sent no DELETE |
 | Full summary | No disclosure elements; computed maximum height `none` and overflow `visible` |
 
 The original pass additionally checked a bounded 12-ID page refresh, new-save notifications, cancellation of the remaining slow refresh batch on page change, and empty/unlinked states. Current follow-up checks reconfirm these page controls and states. The full Node suite covers the unchanged history, paging, API budgets, quota, notes/playback and stale-target behavior.
