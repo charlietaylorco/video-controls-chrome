@@ -236,6 +236,15 @@
       if (area !== 'local') return;
       if (changes.readerPanelTheme) { theme = ['light', 'dark'].includes(changes.readerPanelTheme.newValue) ? changes.readerPanelTheme.newValue : 'system'; applyTheme(); }
       if (changes.readerToken) { cache.clear(); close(); }
+      if (changes.readerDocumentUpdates) {
+        const change = changes.readerDocumentUpdates.newValue;
+        if (change) {
+          cache.delete(change.videoUrl);
+          if (session?.url === change.videoUrl && session.doc?.id === change.id && !session.busy) {
+            session.confirm = false; session.doc = null; session.text = 'Reader changed. Refresh before continuing.'; render();
+          }
+        }
+      }
       let invalidated = false;
       if (changes.readerDocuments) {
         const { oldValue = {}, newValue = {} } = changes.readerDocuments;

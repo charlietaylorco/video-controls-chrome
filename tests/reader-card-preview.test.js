@@ -433,6 +433,17 @@ test('a discovery lookup’s late own cache-link event and unrelated saves canno
   assert.match(f.byClass('summary').textContent, /beta/); assert.equal(f.findButton('Delete from Reader').disabled, false);
 });
 
+test('location updates invalidate only the matching saved-card summary and stale delete confirmation', async () => {
+  const f = fixture(); await f.hover(); f.findButton('Delete from Reader').click();
+  f.change({ readerDocumentUpdates: { newValue: { id: 'doc-alpha', videoUrl: A, location: 'shortlist', updatedAt: 'v2' } } });
+  assert.equal(f.byClass('confirmation').hidden, false);
+  f.change({ readerDocumentUpdates: { newValue: { id: 'doc-beta', videoUrl: B, location: 'archive', updatedAt: 'v2' } } });
+  assert.equal(f.byClass('confirmation').hidden, true); assert.equal(f.findButton('Delete from Reader').disabled, true);
+  assert.match(f.byClass('summary').textContent, /Reader changed/); assert.equal(f.messages.length, 1);
+  f.findButton('Refresh summary').click(); await tick(); assert.equal(f.messages.length, 2);
+  assert.equal(f.findButton('Delete from Reader').disabled, false);
+});
+
 test('actual card resolver accepts surfaces and aliases, rejects ambiguous/recycled links and never falls back to watch URL', () => {
   const content = fs.readFileSync(path.join(__dirname, '../content.js'), 'utf8');
   const helper = content.match(/  const getReaderCardTarget = \(\) => \{[\s\S]*?\n  \};/)[0];

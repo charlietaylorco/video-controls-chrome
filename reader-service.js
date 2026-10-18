@@ -210,6 +210,31 @@
       return requireDelete ? { ok: true, id, targetUrl: url, deleted: true, deleteStatus: 204, verifiedAbsent: true }
         : { ok: true, id, alreadyDeleted };
     };
+    const moveLocation = async message => {
+      const url = C.canonical(message.pageUrl);
+      if (!url || !C.validId(message.id) || !Object.hasOwn(C.locations, message.location) || typeof message.baseLocation !== 'string')
+        throw error('invalid_location');
+      const checkMapping = async () => {
+        await storageQueue;
+        const mapped = (await read({ [KEY]: {} }))[KEY]?.[url]?.id;
+        if (mapped && mapped !== message.id) throw error('document_changed');
+      };
+      await checkMapping();
+      const doc = await byId(url, message.id);
+      if (doc.location !== message.baseLocation) return { ok: false, code: 'location_conflict', document: doc };
+      if (doc.location === message.location) return { ok: true, document: doc };
+      await checkMapping();
+      try { await api(`update/${encodeURIComponent(doc.id)}/`, { method: 'PATCH', body: JSON.stringify({ location: message.location }) }); }
+      catch (e) { if (e.code === 'save_uncertain') throw error('location_uncertain'); throw e; }
+      // UPDATE returns only id/url; account configuration can redirect a move.
+      // Read back the actual location instead of optimistically claiming success.
+      let actual;
+      try { actual = await byId(url, doc.id); }
+      catch { throw error('location_uncertain'); }
+      try { await write({ readerDocumentUpdates: { id: actual.id, videoUrl: url, location: actual.location, updatedAt: actual.updatedAt, at: now() } }); }
+      catch { throw error('location_cache_error'); }
+      return { ok: actual.location === message.location, code: actual.location === message.location ? undefined : 'location_not_applied', document: actual };
+    };
     const getCard = async (message) => {
       const url = C.canonical(message.targetUrl);
       if (!url) throw error('invalid_request');
@@ -248,6 +273,7 @@
         if (message.type === 'reader-panel-get') return get(message);
         if (message.type === 'reader-panel-save-note') return saveNote(message);
         if (message.type === 'reader-panel-delete') return deleteDocument(message);
+        if (message.type === 'reader-panel-move') return moveLocation(message);
         if (message.type === 'reader-card-get') return getCard(message);
         if (message.type === 'reader-card-delete') return deleteCard(message);
         throw error('invalid_request');

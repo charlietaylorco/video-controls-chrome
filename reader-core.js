@@ -24,6 +24,9 @@
   const validId = (id) => typeof id === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(id);
   const pageKey = value => youtubeOrigin(value) ? new URL(value).href : null;
   const readerUrl = (id) => validId(id) ? `https://read.readwise.io/read/${id}` : null;
+  const locations = Object.freeze({ later: 'Later', shortlist: 'Shortlist', archive: 'Archive' });
+  const locationLabel = value => Object.hasOwn(locations, value) ? locations[value]
+    : value === 'new' ? 'Inbox / New' : value === 'feed' ? 'Feed' : value === 'inbox' ? 'Inbox' : value ? `Other: ${value}` : 'Location unknown';
   const cleanDocument = (doc, videoUrl) => {
     if (!doc || !validId(doc.id) || doc.is_deleted || doc.parent_id || canonical(doc.source_url) !== videoUrl) return null;
     const tags = Array.isArray(doc.tags) ? doc.tags : Object.entries(doc.tags || {}).map(([key, tag]) =>
@@ -31,6 +34,7 @@
     return { id: doc.id, videoUrl, url: readerUrl(doc.id), title: typeof doc.title === 'string' ? doc.title : '',
       summary: typeof doc.summary === 'string' ? doc.summary : '',
       notes: typeof doc.notes === 'string' ? doc.notes : '',
+      location: typeof doc.location === 'string' ? doc.location : '',
       tags: tags.filter(tag => typeof tag === 'string').slice(0, 100),
       updatedAt: typeof doc.updated_at === 'string' ? doc.updated_at : '' };
   };
@@ -56,7 +60,7 @@
     if (!state.dirty) state.value = state.base = '';
     return true;
   };
-  const api = { youtubeOrigin, pageKey, canonical, validId, readerUrl, cleanDocument, draft, edit, receive, saved, removed };
+  const api = { youtubeOrigin, pageKey, canonical, validId, readerUrl, locations, locationLabel, cleanDocument, draft, edit, receive, saved, removed };
   globalThis.MVSReaderCore = api;
   if (typeof module !== 'undefined') module.exports = api;
 })();
