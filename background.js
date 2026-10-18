@@ -486,13 +486,25 @@ const pickTargetUrl = (message, sender) => {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (["reader-panel-get", "reader-panel-save-note", "reader-panel-delete"].includes(message?.type)) {
+    const origin = MVSReaderCore.youtubeOrigin(sender.url);
+    const target = MVSReaderCore.canonical(message.pageUrl);
     if (sender.id !== chrome.runtime.id || !Number.isInteger(sender.tab?.id) || sender.frameId !== 0 ||
-        !MVSReaderCore.canonical(sender.url) ||
-        MVSReaderCore.canonical(sender.url) !== MVSReaderCore.canonical(message.pageUrl)) {
+        !origin || !target || (sender.documentLifecycle && sender.documentLifecycle !== "active")) {
       sendResponse({ ok: false, code: "invalid_sender" });
       return undefined;
     }
-    getReaderPanelService().handle(message).then(sendResponse);
+    // A content-script context can retain its original URL through YouTube SPA
+    // navigation (including Home -> video). Use current browser-owned tab data,
+    // not sender.url or the sender.tab snapshot, for video identity. Recheck at
+    // each API request, including after queued work and before note/delete writes.
+    const isCurrent = () => new Promise(resolve => {
+      try {
+        chrome.tabs.get(sender.tab.id, tab => resolve(!chrome.runtime.lastError && tab?.id === sender.tab.id &&
+          MVSReaderCore.youtubeOrigin(tab.url) === origin && MVSReaderCore.canonical(tab.url) === target &&
+          (!tab.pendingUrl || MVSReaderCore.canonical(tab.pendingUrl) === target)));
+      } catch { resolve(false); }
+    });
+    getReaderPanelService().handle(message, { isCurrent, scope: [sender.tab.id, sender.documentId || ""] }).then(sendResponse);
     return true;
   }
 

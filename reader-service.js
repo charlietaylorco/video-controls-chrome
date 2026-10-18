@@ -7,6 +7,7 @@
     let operationQueue = Promise.resolve();
     const pending = new Map();
     let operationToken;
+    let operationIsCurrent = () => true;
     const read = (defaults) => new Promise((resolve, reject) => storage.get(defaults, data =>
       chrome.runtime.lastError ? reject(new Error('storage_error')) : resolve(data)));
     const write = (data) => new Promise((resolve, reject) => storage.set(data, () =>
@@ -50,6 +51,7 @@
       const { readerToken, readerPanelBudget = {} } = await read({ readerToken: '', readerPanelBudget: {} });
       if (readerToken !== operationToken) throw error('auth_changed');
       if (typeof readerToken !== 'string' || !readerToken.trim()) throw error('missing_token');
+      if (!(await operationIsCurrent())) throw error('invalid_sender');
       // Persist cooldowns across MV3 worker restarts. Fail fast instead of queuing stale edits.
       if (readerPanelBudget.blockedUntil > now()) throw error('rate_limited', { retryAt: readerPanelBudget.blockedUntil });
       const group = init.method === 'PATCH' ? 'update' : init.method === 'DELETE' ? 'delete' : 'list';
@@ -109,7 +111,7 @@
         try { return { ok: true, document: await byId(url, id) }; }
         catch (e) { if (e.code !== 'not_found') throw e; }
       }
-      // One page per explicit action. Never sweep the library on navigation or in a loop.
+      // One page per panel lookup. Never sweep the library in a navigation loop.
       const cursor = typeof message.cursor === 'string' && message.cursor.length < 1000 ? message.cursor : '';
       const data = await api(`list/?category=video&limit=100${cursor ? `&pageCursor=${encodeURIComponent(cursor)}` : ''}`);
       const matches = data.results.map(doc => C.cleanDocument(doc, url)).filter(Boolean);
@@ -165,10 +167,13 @@
       catch { throw error('delete_cache_error'); }
       return { ok: true, id, alreadyDeleted };
     };
-    const handle = (message) => {
-      const key = message.type === 'reader-panel-get' ? JSON.stringify([message.pageUrl, message.cursor]) : null;
+    const handle = (message, { isCurrent = () => true, scope = null } = {}) => {
+      // Never share a rejected/stale visit's reply with a new visit or another tab.
+      const key = message.type === 'reader-panel-get' ? JSON.stringify([scope, message.pageUrl, message.cursor, message.visit]) : null;
       if (key && pending.has(key)) return pending.get(key);
       const result = operationQueue.then(async () => {
+        operationIsCurrent = isCurrent;
+        if (!(await operationIsCurrent())) throw error('invalid_sender');
         operationToken = (await read({ readerToken: '' })).readerToken;
         if (message.type === 'reader-panel-get') return get(message);
         if (message.type === 'reader-panel-save-note') return saveNote(message);

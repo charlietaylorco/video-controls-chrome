@@ -7,9 +7,10 @@ const path = require('node:path');
 const vm = require('node:vm');
 const A = 'https://www.youtube.com/watch?v=alpha';
 const B = 'https://www.youtube.com/watch?v=beta';
+const D = 'https://www.youtube.com/watch?v=gamma';
 const tick = () => new Promise(setImmediate);
 
-function fixture() {
+function fixture({ url = A } = {}) {
   const events = new Map(), timers = new Map(), storageListeners = [], messages = [];
   let timerId = 0, active, editor, input, escape, responder;
   class Node {
@@ -35,13 +36,15 @@ function fixture() {
   const document = { documentElement: new Node('html'), fullscreenElement: null,
     createElement: tag => new Node(tag), createElementNS: (_, tag) => new Node(tag),
     addEventListener(type, fn) { events.set(type, [...(events.get(type) || []), fn]); } };
-  const location = { href: A, pathname: '/watch' };
+  const location = { href: url, pathname: new URL(url).pathname };
   const docs = new Map([['doc-a', { id: 'doc-a', videoUrl: A, title: 'Attention and learning', summary: 'Summary A', notes: 'Original A', tags: ['Learning'], updatedAt: 'v1' }],
-    ['doc-b', { id: 'doc-b', videoUrl: B, title: 'Video B', summary: 'Summary B', notes: 'Original B', tags: [], updatedAt: 'v1' }]]);
+    ['doc-b', { id: 'doc-b', videoUrl: B, title: 'Video B', summary: 'Summary B', notes: 'Original B', tags: [], updatedAt: 'v1' }],
+    ['doc-c', { id: 'doc-c', videoUrl: D, title: 'Video C', summary: 'Summary C', notes: 'Original C', tags: [], updatedAt: 'v1' }]]);
   const context = { URL, console, Date, Element: Node, location, document, innerWidth: 1100, innerHeight: 900,
     MutationObserver: class { observe() {} },
     setTimeout(fn, delay) { const id = ++timerId; timers.set(id, { fn, delay }); return id; }, clearTimeout: id => timers.delete(id),
-    matchMedia: () => ({ matches: false, addEventListener() {} }), addEventListener() {},
+    matchMedia: () => ({ matches: false, addEventListener() {} }),
+    addEventListener(type, fn) { events.set(`window:${type}`, [...(events.get(`window:${type}`) || []), fn]); },
     MVSReaderEditor: { create(options) {
       input = options.onInput; escape = options.onEscape;
       editor = { frame: new Node('iframe'), value: '', mount() {}, setTheme() {} }; return editor;
@@ -51,6 +54,7 @@ function fixture() {
       const normal = () => {
         const doc = [...docs.values()].find(doc => doc.videoUrl === message.pageUrl);
         if (message.type === 'reader-panel-get') return { ok: true, document: doc ? { ...doc } : null };
+        if (message.type === 'reader-panel-save-note') { doc.notes = message.notes; return { ok: true, id: message.id, notes: message.notes }; }
         if (message.type === 'reader-panel-delete') { docs.delete(message.id); return { ok: true, id: message.id }; }
         throw new Error(`Unexpected action: ${message.type}`);
       };
@@ -68,11 +72,13 @@ function fixture() {
   const fire = (type, extra = {}) => (events.get(type) || []).forEach(fn => fn({ preventDefault() {}, stopPropagation() {}, ...extra }));
   return { messages, docs, button, byClass, get active() { return active; }, get value() { return editor.value; },
     set responder(fn) { responder = fn; },
-    async open() { byClass('toggle').click(); await tick(); },
+    async open() { if (byClass('body').hidden) byClass('toggle').click(); await tick(); },
+    runTimers(delay) { for (const [id, timer] of [...timers]) if (timer.delay === delay) { timers.delete(id); timer.fn(); } },
+    event: fire,
     edit(value) { editor.value = value; input(value); }, escape() { escape(); },
     change(values) { storageListeners.forEach(fn => fn(values, 'local')); },
     navigate(url, sync = true) {
-      location.href = url;
+      location.href = url; location.pathname = new URL(url).pathname;
       if (sync) { fire('yt-navigate-finish'); for (const [id, timer] of timers) if (timer.delay === 150) { timers.delete(id); timer.fn(); } }
     },
   };
@@ -91,6 +97,107 @@ test('delete is a separate confirmation naming exact document; Cancel and Escape
   f.button('Delete from Reader').click(); f.escape();
   assert.equal(f.byClass('delete-confirm').hidden, true); assert.equal(f.byClass('body').hidden, false);
   assert.equal(f.messages.filter(m => m.type === 'reader-panel-delete').length, 0);
+});
+
+test('a closed panel binds the new URL on opening before YouTube navigation events arrive', async () => {
+  const f = fixture(); await f.open(); f.button('Close Reader').click();
+  f.navigate(B, false); await f.open();
+  assert.equal(f.messages.at(-1).pageUrl, B); assert.equal(f.byClass('summary').textContent, 'Summary B');
+});
+
+test('an open panel follows committed video navigation and refreshes without closing or reloading', async () => {
+  const f = fixture(); await f.open(); f.navigate(B); await tick();
+  assert.equal(f.byClass('body').hidden, false); assert.equal(f.byClass('summary').textContent, 'Summary B');
+  assert.equal(f.messages.at(-1).pageUrl, B);
+});
+
+test('closed navigation performs no reads until opening and supports Home-to-video without a reload', async () => {
+  const f = fixture({ url: 'https://www.youtube.com/' });
+  assert.equal(f.byClass('toggle'), undefined); f.navigate(B); await tick();
+  assert.equal(f.byClass('body').hidden, true); assert.equal(f.messages.length, 0);
+  await f.open(); assert.equal(f.byClass('summary').textContent, 'Summary B');
+  f.button('Close Reader').click(); f.navigate(D); await tick();
+  assert.equal(f.messages.length, 1); await f.open(); assert.equal(f.byClass('summary').textContent, 'Summary C');
+});
+
+test('rapid A-B-C and late replies, including an old A reply after returning to A, cannot replace the current visit', async () => {
+  const f = fixture(); const replies = [];
+  f.responder = (message, normal) => new Promise(resolve => replies.push(() => resolve(normal())));
+  f.byClass('toggle').click(); f.navigate(B); f.navigate(D);
+  assert.deepEqual(f.messages.map(m => m.pageUrl), [A, B, D]);
+  replies[2](); await tick(); assert.equal(f.byClass('summary').textContent, 'Summary C');
+  replies[1](); await tick(); assert.equal(f.byClass('summary').textContent, 'Summary C');
+  f.navigate(A); assert.equal(f.messages.length, 4);
+  f.docs.get('doc-a').summary = 'Fresh return to A'; replies[3](); await tick();
+  f.docs.get('doc-a').summary = 'Stale original visit'; replies[0](); await tick();
+  assert.equal(f.byClass('summary').textContent, 'Fresh return to A');
+  assert.notEqual(f.messages[0].visit, f.messages[3].visit);
+});
+
+test('timestamp, hash, duplicate finish and page-data events preserve the same video and draft without refetching', async () => {
+  const f = fixture(); await f.open(); f.edit('Draft A');
+  f.navigate(A + '&t=42#chapter'); f.event('yt-page-data-updated'); f.event('yt-navigate-finish'); await tick();
+  assert.equal(f.messages.length, 1); assert.equal(f.value, 'Draft A'); assert.equal(f.byClass('body').hidden, false);
+  f.navigate(B); await tick(); f.edit('Draft B'); f.navigate(A); await tick();
+  assert.equal(f.value, 'Draft A'); f.navigate(B); await tick(); assert.equal(f.value, 'Draft B');
+});
+
+test('an in-flight reply observes a changed URL even when the SPA event has not fired', async () => {
+  const f = fixture(); let release;
+  f.responder = (message, normal) => message.pageUrl === A ? new Promise(resolve => { release = () => resolve(normal()); }) : normal();
+  f.byClass('toggle').click(); f.navigate(B, false); release(); await tick();
+  assert.equal(f.byClass('summary').textContent, 'Summary B'); assert.equal(f.messages.at(-1).pageUrl, B);
+});
+
+test('a transient stale-tab rejection retries only the read once and never caches failure as loaded', async () => {
+  const f = fixture(); let count = 0;
+  f.responder = (message, normal) => ++count === 1 ? { ok: false, code: 'invalid_sender' } : normal();
+  await f.open(); assert.equal(f.byClass('status').dataset.kind, 'info');
+  f.runTimers(250); await tick(); assert.equal(count, 2); assert.equal(f.byClass('summary').textContent, 'Summary A');
+  f.button('Close Reader').click(); await f.open(); assert.equal(count, 2);
+  const stuck = fixture(); stuck.responder = () => ({ ok: false, code: 'invalid_sender' });
+  await stuck.open(); stuck.runTimers(250); await tick(); stuck.runTimers(250); await tick();
+  assert.equal(stuck.messages.length, 2); assert.equal(stuck.byClass('status').dataset.kind, 'error');
+  stuck.responder = (message, normal) => normal(); stuck.button('Close Reader').click(); await stuck.open();
+  assert.equal(stuck.byClass('summary').textContent, 'Summary A'); assert.equal(stuck.messages.length, 3);
+});
+
+test('a pending read retry is cancelled by navigation or closing and never retries offline/rate errors', async () => {
+  for (const close of [true, false]) {
+    const f = fixture(); f.responder = () => ({ ok: false, code: 'invalid_sender' }); await f.open();
+    if (close) f.button('Close Reader').click(); else { f.responder = (message, normal) => normal(); f.navigate(B); }
+    f.runTimers(250); await tick(); assert.equal(f.messages.filter(m => m.pageUrl === A).length, 1);
+  }
+  for (const code of ['network_error', 'rate_limited', 'unauthorized']) {
+    const f = fixture(); f.responder = () => ({ ok: false, code }); await f.open(); f.runTimers(250); await tick();
+    assert.equal(f.messages.length, 1); assert.equal(f.byClass('status').dataset.kind, 'error');
+  }
+});
+
+test('old note-save clicks and deletion confirmations never retarget the new video before its SPA event', async () => {
+  const f = fixture(); await f.open(); f.edit('Draft A'); f.navigate(B, false);
+  f.button('Save note').click(); await tick();
+  assert.equal(f.messages.filter(m => m.type === 'reader-panel-save-note').length, 0); assert.equal(f.value, 'Original B');
+  f.navigate(A); await tick(); assert.equal(f.value, 'Draft A');
+  f.button('Delete from Reader').click(); f.navigate(B, false); f.button('Delete document').click(); await tick();
+  assert.equal(f.messages.filter(m => m.type === 'reader-panel-delete').length, 0); assert.equal(f.byClass('delete-confirm').hidden, true);
+  assert.equal(f.value, 'Original B');
+});
+
+test('accepted pending saves stay bound to A while newer A edits and B drafts survive navigation', async () => {
+  const f = fixture(); await f.open(); f.edit('Sent A'); let release;
+  f.responder = (message, normal) => message.type === 'reader-panel-save-note' ? new Promise(resolve => { release = () => resolve(normal()); }) : normal();
+  f.button('Save note').click(); f.edit('Newer A'); f.navigate(B); await tick(); f.edit('Draft B');
+  release(); await tick(); assert.equal(f.value, 'Draft B'); f.navigate(A); await tick();
+  assert.equal(f.value, 'Newer A'); assert.match(f.byClass('footer').children[1].textContent, /Unsaved draft/);
+  const sent = f.messages.find(m => m.type === 'reader-panel-save-note'); assert.equal(sent.pageUrl, A); assert.equal(sent.id, 'doc-a');
+});
+
+test('browser back/forward and page-data events rebind immediately without polling', async () => {
+  const f = fixture(); await f.open();
+  f.navigate(B, false); f.event('window:popstate'); await tick(); assert.equal(f.byClass('summary').textContent, 'Summary B');
+  f.navigate(A, false); f.event('yt-page-data-updated'); await tick(); assert.equal(f.byClass('summary').textContent, 'Summary A');
+  assert.equal(f.messages.length, 3);
 });
 
 test('confirmed deletion shows unsaved state, removes stale content and never automatically saves again', async () => {

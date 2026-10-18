@@ -9,18 +9,19 @@ const B = 'https://www.youtube.com/watch?v=beta';
 const doc = (id = 'doc-a', source_url = A, notes = 'Original') => ({
   id, source_url, notes, title: 'A Reader video', summary: 'Summary from Reader', tags: { science: { name: 'Science' } }, parent_id: null,
 });
-function harness({ stored = {}, responder } = {}) {
+function harness({ stored = {}, responder, tabUrl = A } = {}) {
   const data = { readerToken: 'fixture-token', ...structuredClone(stored) };
   const requests = [];
   let clock = 100000;
   let listener;
+  let tab = { id: 1, url: tabUrl };
   const context = vm.createContext({ URL, AbortSignal, Date, console,
     chrome: {
       runtime: { id: 'extension', lastError: null, getURL: s => s, onMessage: { addListener(fn) { listener = fn; } } },
       storage: { local: {
         get(defaults, cb) { cb({ ...defaults, ...data }); },
         set(values, cb) { Object.assign(data, values); cb?.(); },
-      } }, action: { onClicked: { addListener() {} } }, tabs: {},
+      } }, action: { onClicked: { addListener() {} } }, tabs: { get(id, callback) { callback(tab); } },
     },
     fetch: async (url, options) => {
       requests.push({ url, ...options });
@@ -36,7 +37,7 @@ function harness({ stored = {}, responder } = {}) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), context));
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../background.js'), 'utf8'), context);
   const service = context.MVSReaderService.create({ storage: context.chrome.storage.local, fetch: context.fetch, now: () => clock });
-  return { data, requests, context, service, advance(ms) { clock += ms; },
+  return { data, requests, context, service, advance(ms) { clock += ms; }, setTab(value) { tab = value; },
     get: (pageUrl = A, cursor) => service.handle({ type: 'reader-panel-get', pageUrl, cursor }),
     note: (values = {}) => service.handle({ type: 'reader-panel-save-note', pageUrl: A, id: 'doc-a', notes: 'Edited', baseNotes: 'Original', ...values }),
     delete: (values = {}) => service.handle({ type: 'reader-panel-delete', pageUrl: A, id: 'doc-a', confirmed: true,
@@ -231,12 +232,74 @@ test('credentials changed between conflict check and write prevent the write', a
 test('background validates extension, top frame, sender host and video identity', async () => {
   const app = harness();
   const valid = { id: 'extension', frameId: 0, url: A, tab: { id: 1 } };
-  for (const sender of [{ ...valid, id: 'other' }, { ...valid, frameId: 1 }, { ...valid, url: B },
-    { ...valid, url: 'https://evil.test' }, { ...valid, tab: null }]) {
+  for (const sender of [{ ...valid, id: 'other' }, { ...valid, frameId: 1 }, { ...valid, documentLifecycle: 'cached' },
+    { ...valid, url: 'https://evil.test' }, { ...valid, url: 'http://www.youtube.com/watch?v=alpha' },
+    { ...valid, url: 'https://user@www.youtube.com/watch?v=alpha' }, { ...valid, tab: null }]) {
     assert.equal((await app.message({ type: 'reader-panel-get', pageUrl: A }, sender)).code, 'invalid_sender');
   }
   assert.equal(app.requests.length, 0);
   assert.equal((await app.message({ type: 'reader-panel-get', pageUrl: A }, valid)).ok, true);
+});
+
+test('background accepts a current SPA video when the content script sender still names its original video', async () => {
+  const app = harness({ tabUrl: B, responder: () => ({ results: [doc('doc-b', B)] }) });
+  const result = await app.message({ type: 'reader-panel-get', pageUrl: B },
+    { id: 'extension', frameId: 0, url: A, tab: { id: 1, url: A } });
+  assert.equal(result.ok, true); assert.equal(result.document.id, 'doc-b');
+});
+
+test('Home-to-video contexts are trusted by origin; current tabs.get data outranks stale sender snapshots', async () => {
+  const app = harness({ tabUrl: B, responder: () => ({ results: [doc('doc-b', B)] }) });
+  const sender = { id: 'extension', frameId: 0, url: 'https://www.youtube.com/', tab: { id: 1, url: A } };
+  assert.equal((await app.message({ type: 'reader-panel-get', pageUrl: B + '&t=20' }, sender)).document.id, 'doc-b');
+  for (const current of [{ id: 1, url: A }, { id: 1, url: 'https://evil.test/watch?v=beta' },
+    { id: 1, url: 'https://m.youtube.com/watch?v=beta' }, { id: 1, url: B, pendingUrl: A }, { id: 2, url: B }, undefined]) {
+    app.setTab(current);
+    const count = app.requests.length;
+    assert.equal((await app.message({ type: 'reader-panel-get', pageUrl: B }, sender)).code, 'invalid_sender');
+    assert.equal(app.requests.length, count);
+  }
+  app.context.chrome.tabs.get = (id, callback) => {
+    app.context.chrome.runtime.lastError = { message: 'Closed tab' }; callback(); app.context.chrome.runtime.lastError = null;
+  };
+  assert.equal((await app.message({ type: 'reader-panel-get', pageUrl: B }, sender)).code, 'invalid_sender');
+});
+
+test('stale save and delete messages are rejected against the live tab before any Reader request', async () => {
+  const app = harness({ tabUrl: B });
+  for (const message of [{ type: 'reader-panel-save-note', pageUrl: A, id: 'doc-a', baseNotes: 'Original', notes: 'Do not write' },
+    { type: 'reader-panel-delete', pageUrl: A, id: 'doc-a', confirmed: true, baseNotes: 'Original', title: 'A Reader video', updatedAt: '' }]) {
+    assert.equal((await app.message(message)).code, 'invalid_sender');
+  }
+  assert.equal(app.requests.length, 0);
+});
+
+test('navigation during mutation preflight stops PATCH/DELETE without retrying or changing the target', async () => {
+  for (const type of ['reader-panel-save-note', 'reader-panel-delete']) {
+    const app = harness({ responder: () => { app.setTab({ id: 1, url: B }); return { results: [doc()] }; } });
+    const result = await app.message({ type, pageUrl: A, id: 'doc-a', baseNotes: 'Original', notes: 'Keep draft',
+      confirmed: true, title: 'A Reader video', updatedAt: '' });
+    assert.equal(result.code, 'invalid_sender'); assert.equal(app.requests.length, 1);
+    assert.equal(app.requests[0].method, undefined);
+  }
+});
+
+test('queued stale visits never fetch Reader and read coalescing is scoped by tab and visit', async () => {
+  let release;
+  const app = harness({ responder: async () => {
+    if (!release) await new Promise(resolve => { release = resolve; });
+    return { results: [doc()] };
+  } });
+  let current = true;
+  const first = app.service.handle({ type: 'reader-panel-get', pageUrl: A, visit: 1 }, { scope: 1 });
+  await new Promise(setImmediate);
+  const stale = app.service.handle({ type: 'reader-panel-get', pageUrl: B, visit: 2 }, { scope: 1, isCurrent: () => current });
+  const otherTab = app.service.handle({ type: 'reader-panel-get', pageUrl: A, visit: 1 }, { scope: 2 });
+  const newVisit = app.service.handle({ type: 'reader-panel-get', pageUrl: A, visit: 3 }, { scope: 1 });
+  current = false; release();
+  assert.equal((await first).ok, true); assert.equal((await stale).code, 'invalid_sender');
+  assert.equal((await otherTab).ok, true); assert.equal((await newVisit).ok, true);
+  assert.equal(app.requests.length, 3);
 });
 
 test('draft refresh preserves edits, detects conflict and keeps newer edits after pending save', () => {
@@ -302,7 +365,7 @@ test('delete rejects missing confirmation, invalid identity and untrusted sender
     assert.equal((await app.delete(values)).code, 'invalid_delete');
   }
   assert.equal((await app.message({ type: 'reader-panel-delete', pageUrl: A },
-    { id: 'extension', frameId: 0, url: B, tab: { id: 1 } })).code, 'invalid_sender');
+    { id: 'extension', frameId: 0, url: 'https://evil.test', tab: { id: 1 } })).code, 'invalid_sender');
   assert.equal(app.requests.length, 0);
 });
 
