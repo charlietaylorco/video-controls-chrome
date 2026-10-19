@@ -1,0 +1,30 @@
+# Recent saves: local search and toast feedback
+
+This independent PR starts from merged main `8668c6a`. PR #13 remains separate and unmerged. A local-only combined preview can include both changes; no Reader data or browser permissions are changed by preparing that checkout.
+
+## Behavior
+
+- “Refresh this page” is a plain text control next to YT Lists in the header. A quiet, borderless search field replaces its previous toolbar position, with a visible keyboard outline and an always-available labeled Clear control (disabled when empty).
+- Search updates after 180 ms without submitting. Criteria changes immediately invalidate in-flight replies; composition waits for IME completion. Search words are literal, case-insensitive, normalized for whitespace/Unicode and combined with AND across retained title, channel and available cached summary text.
+- Click a channel to set a separate exact full-name filter. The clearable chip identifies that filter and receives focus after the explicit channel action; substring text search remains separate. Query, channel and location intersect. Clear removes query/channel while keeping location; the empty-state reset clears them and selects All saves. Changes reset pagination to page one.
+- Search covers retained entries beyond the visible 12. Existing location/deletion rules remain: To watch excludes Archive/Feed/missing/deleted, and All saves excludes confirmed deletions. Display names are the available channel identity; channels with identical normalized names cannot be distinguished by channel ID.
+- Only cached summary text is searched, including bounded cached excerpts. Empty, missing, evicted, wrong-ID and deleted/missing-document summaries do not match. Placeholder text is not searchable. Titles/channels remain searchable after summary eviction. Search does not fetch Reader data, regenerate summaries or import history.
+- Ordinary notices use a fixed bottom-right toast, outside document flow. They expire after six seconds of visible, unhovered, unfocused time; a new notice restarts that lifetime. They pause for pointer hover, keyboard focus and hidden pages, and have a Dismiss control. Automatic display/expiry does not move focus. Manual dismissal can restore the prior connected control.
+- One persistent error toast is separate from the routine toast. Errors remain until explicitly dismissed, with affected-card errors also retained during the page session. Reader-connection changes are persistent notices. Deletion errors remain in the named confirmation dialog; existing one-use confirmation and strict deletion checks are unchanged. Announcements use a dedicated polite, atomic live region. Reduced-motion CSS disables entrance animation.
+
+## Performance and asynchronous safety
+
+No schema migration or persistent search index is required. Empty queries retain the existing indexed pagination path, reading at most 13 matching metadata rows and hydrating at most 12 summaries. Exact channel filtering streams that location index. Text search first scans the bounded summary cache (at most 200 summaries), retaining only matched terms/IDs, then streams metadata until 13 matches or exhaustion. It never materializes all retained history in memory. Rare/no-match queries may scan all local metadata; no Reader requests are made.
+
+Superseded scans stop on cursor callbacks within the same page scope; another tab's search is independent. Scope entries are released when work completes. Page/view generation checks also reject late results during debounce, query/channel/location changes, paging and refresh cancellation. Missing summaries and identity replacements cannot inherit a stale summary match.
+
+## Verification
+
+- `npm test`: **219 passing tests on the independent branch**. New cases cover all search fields, cross-field words/case/Unicode/whitespace, results beyond 12 and 2,000 entries, exact channel versus prefixes, location intersections, pagination, empty/uncached/stale summaries, literal hostile strings/input bounds, superseded worker scans and cross-tab isolation.
+- The actual page/search/toast controllers run against a deterministic DOM/worker fixture. Tests cover typing/debounce/IME, out-of-order replies, query/filter/page reset, exact-channel click/clear, empty reset, zero Reader messages for search, live notice text, card-node/focus preservation, persistent errors and toast timing/hover/focus/hidden-page/new-notice/dismissal lifecycle.
+- Root/test JS syntax, Watch HTML script/style references, manifest assets, unchanged manifest/permissions/CSP and diff whitespace checked.
+- **Native visual validation was blocked:** CUA browser inventory was empty, and opening the loopback preview in Codex returned `queued` for this hidden task. No screenshot, native layout geometry, actual assistive-technology speech, reduced-motion rendering or narrow-viewport pass is claimed. Normal Arc was not automated. The DOM tests verify node/focus stability; fixed positioning and responsive/reduced-motion styles were reviewed in source.
+
+Offline browser fixture: `node tests/watch-browser-fixture.cjs`; serve only `output/watch-browser` on loopback. Use `?mode=normal&theme=light`, `theme=dark`, `mode=empty` or `mode=unlinked`. The fixture loads actual modules with synthetic Reader/storage data and blocks outbound connections/navigation. “Slow local searches” deliberately delays single-character results longer than longer queries for manual stale-result checks.
+
+When an isolated browser is available, verify: full-history title/channel/summary results and exact channel clear/reset; narrow/light/dark search layout; keyboard focus rings and toast dismiss; unchanged card/grid rectangles during notice display/expiry; six-second expiry and hover/focus/hidden-page pauses; persistent errors; reduced-motion entrance; and named deletion confirmation. Do not use real Reader mutations for these checks.

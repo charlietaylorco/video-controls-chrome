@@ -86,6 +86,9 @@ test('history survives beyond old two-thousand-entry caches and summary eviction
   const page = await a.store.page({ filter: 'all' }); assert.equal(page.items.length, 12);
   const oldest = await a.store.page({ filter: 'all', cursor: [100000, 'https://www.youtube.com/watch?v=history_1'] });
   assert.equal(oldest.items.find(row => row.videoUrl.endsWith('history_0'))?.summary, null);
+  await a.record('https://www.youtube.com/watch?v=history_0', 'id-0', { title: 'Oldest retained needle' }, { openExisting: true });
+  const found = await a.store.page({ query: 'oldest needle' }); assert.equal(found.items[0].videoUrl, 'https://www.youtube.com/watch?v=history_0');
+  assert.equal(a.requests.length, 0);
 });
 
 test('To watch includes unknown/new/later/shortlist but excludes verified archive/feed/missing/deleted', async () => {
@@ -264,4 +267,79 @@ test('tags are retained only from verified Reader metadata, bounded, and reset f
   let row = (await a.store.page()).items[0]; assert.equal(row.tags.length, 100); assert.equal(row.tags[0], tags[0]); assert.equal(row.tags[1].length, 200);
   await a.record(A, 'replacement'); row = (await a.store.page()).items[0]; assert.equal(row.tags, null); assert.equal(row.summary, null);
   assert.equal(a.requests.length, 1);
+});
+
+test('search finds retained title/channel/cached-summary terms beyond the visible page, case-insensitively and without Reader calls', async () => {
+  const a = app();
+  for (let i = 0; i < 35; i++) {
+    a.advance(1); const url = `https://www.youtube.com/watch?v=search_${i}`, id = `search-${i}`;
+    await a.record(url, id, { title: i === 0 ? 'Design practice' : 'Ordinary video', author: i === 1 ? 'Hidden Channel' : 'Maker' });
+    if (i === 0) await a.store.verify(url, { id, videoUrl: url, title: 'Design practice', author: 'Maker', location: 'later', summary: 'A philosophy of attention', tags: [] });
+  }
+  assert.equal((await a.call('watch-list-page')).items.length, 12);
+  for (const query of ['DESIGN', ' hidden   CHANNEL ', 'ATTENTION', 'ＤＥＳＩＧＮ philosophy']) {
+    const reply = await a.call('watch-list-page', { query });
+    assert.equal(reply.ok, true); assert.equal(reply.items.length, 1);
+  }
+  assert.equal((await a.call('watch-list-page', { query: 'not fetched' })).items.length, 0);
+  assert.equal((await a.call('watch-list-page', { query: '<img' })).items.length, 0);
+  assert.equal(a.requests.length, 0);
+});
+
+test('exact channel filtering intersects query/location and paginates every retained match without duplicates', async () => {
+  const a = app();
+  for (let i = 0; i < 33; i++) {
+    const url = `https://www.youtube.com/watch?v=channels_${i}`, id = `channel-${i}`; a.advance(1);
+    await a.record(url, id, { title: i % 2 ? 'Quiet craft' : 'Learning', author: i < 26 ? 'Maker' : 'Maker Extra' });
+    await a.store.verify(url, { id, videoUrl: url, title: i % 2 ? 'Quiet craft' : 'Learning', author: i < 26 ? 'Maker' : 'Maker Extra', location: i === 0 ? 'archive' : 'later', summary: '' });
+  }
+  const seen = new Set(); let cursor = null;
+  do {
+    const page = await a.call('watch-list-page', { channel: '  MAKER  ', cursor });
+    for (const item of page.items) { assert.equal(item.author, 'Maker'); assert.ok(!seen.has(item.videoUrl)); seen.add(item.videoUrl); }
+    cursor = page.nextCursor;
+  } while (cursor);
+  assert.equal(seen.size, 25); // exact Maker, excluding the archived item in To watch
+  assert.equal((await a.call('watch-list-page', { channel: 'Maker', filter: 'all' })).hasNext, true);
+  const archived = await a.call('watch-list-page', { channel: 'Maker', filter: 'archive', query: 'learning' });
+  assert.equal(archived.items.length, 1);
+  assert.equal((await a.call('watch-list-page', { channel: 'Maker Extra', query: 'quiet craft' })).items.length, 3);
+  assert.equal((await a.call('watch-list-page', { channel: 'Make' })).items.length, 0);
+  assert.equal(a.requests.length, 0);
+});
+
+test('search ignores uncached, empty, stale-ID and missing summaries; clearing criteria restores indexed pages', async () => {
+  const a = app(); await a.record(); await a.record(B, 'doc-b');
+  await a.store.verify(A, { id: 'doc-a', videoUrl: A, title: 'One', author: 'A channel', summary: 'unique cached phrase', location: 'later' });
+  assert.equal((await a.call('watch-list-page', { query: 'unique' })).items.length, 1);
+  await a.record(A, 'replacement', { title: 'Replacement', author: 'A channel' });
+  assert.equal((await a.call('watch-list-page', { query: 'unique' })).items.length, 0);
+  assert.equal((await a.call('watch-list-page', { query: 'summary not fetched' })).items.length, 0);
+  assert.equal((await a.call('watch-list-page', { query: '   ' })).items.length, 2);
+  await a.store.verify(A, { id: 'replacement', videoUrl: A, title: 'Replacement', author: 'A channel', summary: '', location: 'later' });
+  assert.equal((await a.call('watch-list-page', { query: 'not available' })).items.length, 0);
+  await a.store.verify(A, { id: 'replacement', videoUrl: A, title: 'Replacement', author: 'A channel', summary: 'unique cached phrase', location: 'later' });
+  await a.store.mark(A, 'replacement', 'missing');
+  assert.equal((await a.call('watch-list-page', { filter: 'all', query: 'unique' })).items.length, 0);
+  assert.equal((await a.call('watch-list-page', { filter: 'all', query: 'replacement' })).items.length, 1);
+  assert.equal(a.requests.length, 0);
+});
+
+test('search validates input bounds and treats query text as literal inert data', async () => {
+  const a = app(); await a.record(A, 'doc-a', { title: '<img src=x onerror=alert(1)> .*', author: 'A [channel]' });
+  assert.equal((await a.call('watch-list-page', { query: '.*', channel: 'A [channel]' })).items.length, 1);
+  for (const values of [{ query: {} }, { query: 'x'.repeat(301) }, { channel: ['Maker'] }, { channel: 'x'.repeat(301) }]) {
+    assert.equal((await a.call('watch-list-page', values)).code, 'invalid_request');
+  }
+  assert.equal(a.requests.length, 0);
+});
+
+test('superseded local scans stop per page scope without cancelling another tab or calling Reader', async () => {
+  const a = app(); await a.record(); await a.record(B, 'doc-b');
+  const old = a.call('watch-list-page', { query: 'absent' });
+  const latest = a.call('watch-list-page', { query: 'local' });
+  const other = a.call('watch-list-page', { query: 'local' }, { ...scope, scope: 'another-page' });
+  assert.equal((await old).code, 'stale_search'); assert.equal((await latest).items.length, 2); assert.equal((await other).items.length, 2);
+  const stopped = await a.store.page({ query: 'anything', isCurrent: () => false }); assert.equal(stopped.stale, true);
+  assert.equal(a.requests.length, 0);
 });

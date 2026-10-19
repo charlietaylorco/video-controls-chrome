@@ -27,7 +27,17 @@
     : Object.hasOwn(filters, filter) ? ['locationRecent', filter] : null;
   const cursor = row => [row.savedAt, row.videoUrl];
   const validCursor = value => value == null || Array.isArray(value) && value.length === 2 && Number.isFinite(value[0]) && value[0] > 0 && C.canonical(value[1]) === value[1];
-  const api = { PAGE_SIZE, CACHE_SIZE, SUMMARY_LIMIT, filters, text, tags, decorate, seeds, indexFor, cursor, validCursor };
+  const normalize = value => typeof value === 'string' ? value.normalize('NFKC').toLowerCase().trim().replace(/\s+/g, ' ') : '';
+  const searchCriteria = (query = '', channel = '') => {
+    if (typeof query !== 'string' || query.length > 300 || typeof channel !== 'string' || channel.length > 300) return null;
+    return { terms: [...new Set(normalize(query).split(' ').filter(Boolean))], channel: normalize(channel) };
+  };
+  const matches = (item, criteria, summaryTerms = []) => {
+    if (criteria.channel && normalize(item.author) !== criteria.channel) return false;
+    const metadata = normalize(`${item.title || ''} ${item.author || ''}`);
+    return criteria.terms.every(term => metadata.includes(term) || summaryTerms.includes(term));
+  };
+  const api = { PAGE_SIZE, CACHE_SIZE, SUMMARY_LIMIT, filters, text, tags, decorate, seeds, indexFor, cursor, validCursor, normalize, searchCriteria, matches };
   globalThis.MVSReaderWatchCore = api;
   if (typeof module !== 'undefined') module.exports = api;
 })();

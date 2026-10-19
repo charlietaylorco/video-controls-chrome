@@ -98,29 +98,53 @@
         const request = tx.objectStore('items').get(videoUrl); request.onsuccess = () => done(request.result || null);
       });
     };
-    const page = async ({ filter = 'watch', cursor = null } = {}) => {
-      const definition = W.indexFor(filter);
-      if (!definition || !W.validCursor(cursor)) throw Object.assign(fail(), { code: 'invalid_request' });
+    const page = async ({ filter = 'watch', cursor = null, query = '', channel = '', isCurrent = () => true } = {}) => {
+      const definition = W.indexFor(filter), criteria = W.searchCriteria(query, channel);
+      if (!definition || !W.validCursor(cursor) || !criteria) throw Object.assign(fail(), { code: 'invalid_request' });
       await ready();
       return transaction(['items', 'summaries'], 'readonly', (tx, done) => {
         const [index, prefix] = definition, rows = [];
         const range = keyRange.bound([prefix, 0, ''], cursor ? [prefix, ...cursor] : [prefix, Number.MAX_SAFE_INTEGER, '\uffff'], false, Boolean(cursor));
-        const request = tx.objectStore('items').index(index).openCursor(range, 'prev');
-        request.onsuccess = () => {
-          const current = request.result;
-          if (current && rows.length < W.PAGE_SIZE + 1) { rows.push(current.value); current.continue(); return; }
-          const hasNext = rows.length > W.PAGE_SIZE, items = rows.slice(0, W.PAGE_SIZE);
-          for (const item of items) {
-            const summary = tx.objectStore('summaries').get(item.videoUrl);
-            summary.onsuccess = () => {
-              const cached = summary.result;
-              item.summary = cached?.id === item.readerId && item.status === 'saved' ? cached.summary : null;
-              item.summaryTruncated = Boolean(cached?.id === item.readerId && cached.truncated);
-              item.summaryCheckedAt = cached?.id === item.readerId ? cached.checkedAt : 0;
-            };
-          }
-          done({ items, hasNext, nextCursor: hasNext ? W.cursor(items.at(-1)) : null });
+        // Only the bounded summary cache is searched up front. Stream retained
+        // metadata through the existing location index; never load all history
+        // into memory or call Reader. Unfiltered pages keep their 13-row fast path.
+        const summaryMatches = new Map();
+        const scanItems = () => {
+          const request = tx.objectStore('items').index(index).openCursor(range, 'prev');
+          request.onsuccess = () => {
+            if (!isCurrent()) { done({ stale: true }); return; }
+            const current = request.result;
+            if (current && rows.length < W.PAGE_SIZE + 1) {
+              const row = current.value, cached = summaryMatches.get(row.videoUrl);
+              if (W.matches(row, criteria, cached?.id === row.readerId && row.status === 'saved' ? cached.terms : [])) rows.push(row);
+              if (rows.length <= W.PAGE_SIZE) { current.continue(); return; }
+            }
+            const hasNext = rows.length > W.PAGE_SIZE, items = rows.slice(0, W.PAGE_SIZE);
+            for (const item of items) {
+              const summary = tx.objectStore('summaries').get(item.videoUrl);
+              summary.onsuccess = () => {
+                const cached = summary.result;
+                item.summary = cached?.id === item.readerId && item.status === 'saved' ? cached.summary : null;
+                item.summaryTruncated = Boolean(cached?.id === item.readerId && cached.truncated);
+                item.summaryCheckedAt = cached?.id === item.readerId ? cached.checkedAt : 0;
+              };
+            }
+            done({ items, hasNext, nextCursor: hasNext ? W.cursor(items.at(-1)) : null });
+          };
         };
+        if (!criteria.terms.length) scanItems();
+        else {
+          const summaries = tx.objectStore('summaries').openCursor();
+          summaries.onsuccess = () => {
+            if (!isCurrent()) { done({ stale: true }); return; }
+            const current = summaries.result;
+            if (!current) { scanItems(); return; }
+            const cached = current.value, normalized = W.normalize(cached.summary);
+            const terms = criteria.terms.filter(term => normalized.includes(term));
+            if (terms.length) summaryMatches.set(cached.videoUrl, { id: cached.id, terms });
+            current.continue();
+          };
+        }
       });
     };
     return { ready, recordSave, verify, mark, get, page };

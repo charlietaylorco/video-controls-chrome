@@ -39,7 +39,8 @@ window.chrome = { runtime: { id: 'extension', lastError: null, getURL: file => '
   sendMessage(message, callback) { seeded.then(() => { for (const fn of listeners) fn(message,
     { id: 'extension', frameId: 0, documentId: 'fixture-watch', url: 'chrome-extension://extension/watch.html', tab: { id: 1 } }, reply => {
       if (message.type === 'watch-list-page') report('Local page: ' + (reply.items?.length || 0) + ' cards');
-      callback(reply);
+      if (message.type === 'watch-list-page' && document.getElementById('fixture-search-slow').checked) setTimeout(() => callback(reply), message.query?.length === 1 ? 600 : 50);
+      else callback(reply);
     }); }); }
 }, storage: { local: {
   get(defaults, cb) { cb(Object.fromEntries(Object.entries(defaults).map(([key, value]) => [key, data[key] ?? value]))); },
@@ -89,10 +90,10 @@ document.addEventListener('click', event => { if (event.target.closest('a')) { e
 `;
 let html = fs.readFileSync(path.join(root, 'watch.html'), 'utf8').replace(/<script[^>]*src="[^"]+"[^>]*><\/script>/g, '');
 html = html.replace('<head>', '<head><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\' \'unsafe-inline\'; style-src \'self\' \'unsafe-inline\'; img-src data:; connect-src \'none\'">');
-const tools = '<aside style="font:11px system-ui;padding:10px 20px;background:#e5e8df;color:#25301d"><strong>Mock data only · isolated native browser check</strong> · <span id="fixture-count">Mock Reader requests: 0</span> <button id="fixture-add" type="button">Add a mock save</button> <button id="fixture-auth" type="button">Change mock connection</button> <label><input type="checkbox" id="fixture-slow"> Slow responses</label> <label><input type="checkbox" id="fixture-fail"> Reject Reader requests</label><details><summary>Mock trace</summary><ol id="fixture-log"></ol></details></aside>';
-html = html.replace('<body>', '<body>' + tools).replace('</body>', '<script>' + bootstrap + '</script><script src="watch-location-menu.js"></script><script src="watch.js"></script></body>');
+const tools = '<aside style="font:11px system-ui;padding:10px 20px;background:#e5e8df;color:#25301d"><strong>Mock data only · isolated native browser check</strong> · <span id="fixture-count">Mock Reader requests: 0</span> <button id="fixture-add" type="button">Add a mock save</button> <button id="fixture-auth" type="button">Change mock connection</button> <label><input type="checkbox" id="fixture-slow"> Slow responses</label> <label><input type="checkbox" id="fixture-fail"> Reject Reader requests</label> <label><input type="checkbox" id="fixture-search-slow"> Slow local searches</label><details><summary>Mock trace</summary><ol id="fixture-log"></ol></details></aside>';
+html = html.replace('<body>', '<body>' + tools).replace('</body>', '<script>' + bootstrap + '</script><script src="watch-location-menu.js"></script><script src="watch-feedback.js"></script><script src="watch-search.js"></script><script src="watch.js"></script></body>');
 fs.writeFileSync(path.join(destination, 'index.html'), html);
-for (const file of ['watch.css', 'watch-location-menu.js', 'watch.js']) fs.copyFileSync(path.join(root, file), path.join(destination, file));
+for (const file of ['watch.css', 'watch-location-menu.js', 'watch-feedback.js', 'watch-search.js', 'watch.js']) fs.copyFileSync(path.join(root, file), path.join(destination, file));
 console.log(destination);
 
 fs.copyFileSync(path.join(root, 'reader-header.js'), path.join(destination, 'reader-header.js'));
