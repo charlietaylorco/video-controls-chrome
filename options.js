@@ -489,3 +489,19 @@ readerPanelThemeInput.addEventListener("change", () => {
     showStatus(chrome.runtime.lastError ? "Could not save Reader theme" : "Reader theme saved");
   });
 });
+
+const recentSavesLauncherInput = document.getElementById("show-recent-saves-launcher");
+const recentSavesPositionInput = document.getElementById("recent-saves-launcher-position");
+const normalizeRecentSavesPosition = value => ["top-left", "top-right", "bottom-left", "bottom-right"].includes(value) ? value : "bottom-left";
+chrome.storage.local.get(["showRecentSavesLauncher", "recentSavesLauncherPosition"], values => {
+  recentSavesLauncherInput.checked = values.showRecentSavesLauncher !== false;
+  recentSavesPositionInput.value = normalizeRecentSavesPosition(values.recentSavesLauncherPosition);
+});
+recentSavesLauncherInput.addEventListener("change", () => {
+  saveToggle("showRecentSavesLauncher", recentSavesLauncherInput.checked, "Recent saves shortcut visibility saved");
+});
+recentSavesPositionInput.addEventListener("change", () => {
+  chrome.storage.local.set({ recentSavesLauncherPosition: normalizeRecentSavesPosition(recentSavesPositionInput.value) }, () => {
+    showStatus(chrome.runtime.lastError ? "Could not save shortcut position" : "Recent saves shortcut position saved");
+  });
+});

@@ -87,15 +87,12 @@ dialog h2{font-size:20px;margin:0 0 16px}
 .text-action:hover:not(:disabled){text-decoration:underline;filter:none;background:transparent}
 .page-actions .yt-lists-link{margin:0}
 .search-field{display:flex;align-items:center;gap:8px;flex:0 1 310px;min-width:220px;border-bottom:1px solid var(--line)}
-.search-field:focus-within{border-bottom-color:var(--focus)}
-.search-field input{font:inherit;color:var(--text);background:transparent;border:0;border-radius:0;padding:8px 0;min-width:0;width:100%;font-size:12px;outline-offset:3px}
-.search-field input:focus-visible{outline:2px solid var(--focus)}
+.search-field input{font:inherit;color:var(--text);background:transparent;border:0;border-radius:0;padding:8px 0;min-width:0;width:100%;font-size:12px;outline:none;box-shadow:none}
 .search-field input::placeholder{color:var(--muted);opacity:1}
 .search-field input::-webkit-search-cancel-button{-webkit-appearance:none}
 .search-field button{border:0;background:transparent;padding:6px 0;color:var(--muted);font-size:11px}
 .search-field button:hover:not(:disabled){text-decoration:underline;filter:none}
 .search-meta{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:42px;margin:0 0 8px}
-.search-meta p{margin:0;color:var(--muted);font-size:10px}
 #channel-filter{font-size:11px;padding:4px 8px;border-radius:16px;background:var(--chip);max-width:55%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .channel-filter-button{display:inline-block;max-width:100%;border:0;border-radius:2px;padding:0;background:transparent;color:inherit;text-align:left;overflow-wrap:anywhere}
 .channel-filter-button:hover:not(:disabled){text-decoration:underline;filter:none}

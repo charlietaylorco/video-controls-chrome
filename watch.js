@@ -10,6 +10,8 @@
   };
   let items = [], filter = 'watch', query = '', channelFilter = '', cursors = [null], hasNext = false, nextCursor = null, pageRequest = 0, refreshRequest = 0;
   let refreshing = false, loaded = false, reloadTimer, deletion = null, deleting = false, theme = 'system';
+  // Request readiness must not hide the last settled view during local search.
+  let hasSettledView = false, displayedSearch = false, displayedPage = 1;
   const media = matchMedia('(prefers-color-scheme: dark)');
   const send = message => new Promise(resolve => {
     let settled = false;
@@ -58,7 +60,7 @@
     $('refresh').textContent = refreshing ? 'Refreshing…' : 'Refresh this page';
     $('previous').disabled = !loaded || cursors.length < 2 || pending.size > 0 || Boolean(deletion);
     $('next').disabled = !loaded || !hasNext || pending.size > 0 || Boolean(deletion);
-    $('page-label').textContent = `Page ${cursors.length} · ${items.length} ${query.trim() || channelFilter ? 'match' + (items.length === 1 ? '' : 'es') : 'video' + (items.length === 1 ? '' : 's')}`;
+    $('page-label').textContent = `Page ${displayedPage} · ${items.length} ${displayedSearch ? 'match' + (items.length === 1 ? '' : 'es') : 'video' + (items.length === 1 ? '' : 's')}`;
     $('search').disabled = pending.size > 0 || Boolean(deletion);
     $('clear-search').disabled = $('search').disabled || !query && !channelFilter;
     $('channel-filter').disabled = $('search').disabled;
@@ -136,8 +138,8 @@
       locationMenu.close(); grid.replaceChildren(...cards);
     }
     locationMenu.refresh();
-    grid.hidden = loaded && items.length === 0; $('empty').hidden = !loaded || items.length > 0;
-    const searching = Boolean(query.trim() || channelFilter);
+    grid.hidden = hasSettledView && items.length === 0; $('empty').hidden = !hasSettledView || items.length > 0;
+    const searching = displayedSearch;
     $('empty-title').textContent = searching ? 'No matching videos' : 'No videos in this view';
     $('empty-description').textContent = searching ? 'Try a different search or reset the channel and location filters. Only retained titles, channel names and available cached summaries are searchable.' : 'Save a YouTube video with the extension’s Reader button, or try All saves. Retained older saves may need their Reader ID linked on the video page.';
     $('reset-view').hidden = !searching && filter === 'all';
@@ -148,12 +150,13 @@
     if (request !== pageRequest) return;
     if (!result.ok) { announce(messageFor(result), true); controls(); return; }
     items = result.items.filter(item => C.canonical(item.videoUrl) === item.videoUrl && (!item.readerId || C.validId(item.readerId)));
-    hasNext = result.hasNext; nextCursor = result.nextCursor; loaded = true; render();
+    hasNext = result.hasNext; nextCursor = result.nextCursor; loaded = hasSettledView = true;
+    displayedSearch = Boolean(query.trim() || channelFilter); displayedPage = cursors.length; render();
     $('search-status').textContent = `${items.length} ${query.trim() || channelFilter ? 'matching ' : ''}video${items.length === 1 ? '' : 's'} on page ${cursors.length}${hasNext ? '. More results available.' : '.'}`;
     if (clearStatus && !refreshing && pending.size === 0 && !deletion) announce('');
   };
   const reloadLocal = () => { clearTimeout(reloadTimer); reloadTimer = setTimeout(() => { if (!refreshing && !pending.size && !deletion) void load(); }, 100); };
-  const invalidateView = () => { locationMenu.close(); refreshRequest++; pageRequest++; refreshing = false; loaded = false; $('search-status').textContent = 'Searching local saves…'; render(); };
+  const invalidateView = () => { locationMenu.close(); refreshRequest++; pageRequest++; refreshing = false; loaded = false; render(); };
   const changePage = () => { invalidateView(); void load({ clearStatus: true }); };
   const refreshCard = async (url, origin) => {
     const item = items.find(row => row.videoUrl === url);

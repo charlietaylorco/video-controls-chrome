@@ -24,3 +24,6 @@ Earlier passes additionally checked cached zero-request pagination, bounded 12-I
 [Current layout](recent-saves-desktop-mock.jpg), [styled menu](recent-saves-menu-mock.jpg), [dark menu](recent-saves-dark-mock.jpg), [narrow layout](recent-saves-narrow-mock.jpg), [header fixture](recent-saves-header-mock.jpg). Layout previews use two synthetic cards; normal mode keeps 27 saves/12-card paging. Original mock request traces are retained as historical evidence, not live Reader logs.
 
 Run `npm test`; generate browser fixtures with `node tests/watch-browser-fixture.cjs`, then serve only `output/watch-browser` on loopback. The optional full Chromium suite was not rerun. Live authenticated Reader behavior and actual YouTube DOM still require a manual smoke test before release. No permissions or security settings were expanded.
+
+
+Historical note: the header-launcher checks above predate the replacement with the viewport-fixed floating shortcut. Current search/toast/floating-launcher behavior and the native-validation gap are recorded in [Recent saves refinements](recent-saves-search-toasts.md).

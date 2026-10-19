@@ -28,7 +28,7 @@ function fixture() {
     getElementById: id => ids.get(id), createElement: tag => new Node(tag), createElementNS: (ns, tag) => new Node(tag),
     addEventListener(type, fn) { listeners.set(type, [...listeners.get(type) || [], fn]); } };
   document.activeElement = document.body;
-  for (const id of ['videos','search','clear-search','channel-filter','search-help','search-status','filters','refresh','previous','next','page-label','empty','empty-title','empty-description','reset-view','deletion','delete-title','delete-identity','delete-status','cancel-delete','confirm-delete','announcements','toast','error-toast']) {
+  for (const id of ['videos','search','clear-search','channel-filter','search-status','filters','refresh','previous','next','page-label','empty','empty-title','empty-description','reset-view','deletion','delete-title','delete-identity','delete-status','cancel-delete','confirm-delete','announcements','toast','error-toast']) {
     const node = new Node(id === 'search' ? 'input' : ['clear-search','channel-filter','refresh','previous','next','reset-view','cancel-delete','confirm-delete'].includes(id) ? 'button' : 'div');
     ids.set(id, node); document.body.append(node);
   }
@@ -125,4 +125,32 @@ test('toast lifetime pauses for pointer, keyboard focus and hidden documents, re
   await f.run(1000); assert.equal(box.hidden, true);
   refresh.click(); await f.flush(); await f.run(1000); f.visibility(true); await f.run(10000); assert.equal(box.hidden, false);
   f.visibility(false); await f.run(5000); assert.equal(box.hidden, true);
+});
+
+test('successive empty searches keep the settled empty view throughout debounce and stale replies, then transition only for current results', async () => {
+  const f = fixture(); await f.flush(); const replies = [];
+  f.responder = (message, normal) => message.type === 'watch-list-page' ? new Promise(resolve => replies.push({ message, resolve })) : normal(message);
+  f.ids.get('search').focus();
+  f.input('elephant'); await f.run(180); replies[0].resolve({ok:true,items:[],hasNext:false}); await f.flush();
+  const empty = f.ids.get('empty'), grid = f.ids.get('videos'), label = f.ids.get('page-label').textContent;
+  assert.equal(empty.hidden, false); assert.equal(grid.hidden, true);
+  const visibility = [];
+  for (const [name, node] of [['empty', empty], ['grid', grid]]) {
+    let hidden = node.hidden;
+    Object.defineProperty(node, 'hidden', { get: () => hidden, set(value) { if (value !== hidden) visibility.push([name,value]); hidden = value; } });
+  }
+  const stableEmpty = () => { assert.equal(empty.hidden, false); assert.equal(grid.hidden, true); assert.equal(f.ids.get('empty-title').textContent,'No matching videos'); assert.equal(f.ids.get('page-label').textContent,label); assert.deepEqual(visibility,[]); };
+  f.input('elephantx'); stableEmpty(); await f.run(179); stableEmpty(); await f.run(1); stableEmpty();
+  f.input('elephantxx'); stableEmpty();
+  replies[1].resolve({ok:true,items:f.defaultItems,hasNext:false}); await f.flush(); stableEmpty();
+  await f.run(180); stableEmpty(); replies[2].resolve({ok:true,items:[],hasNext:false}); await f.flush(); stableEmpty();
+  f.input('focus'); stableEmpty(); await f.run(180); stableEmpty();
+  replies[3].resolve({ok:true,items:[f.defaultItems[1]],hasNext:false}); await f.flush();
+  assert.equal(empty.hidden,true); assert.equal(grid.hidden,false); assert.deepEqual(visibility,[['grid',false],['empty',true]]);
+  visibility.length = 0; const card = f.findClass('video')[0];
+  f.input('absent again'); assert.equal(grid.hidden,false); assert.equal(empty.hidden,true); assert.equal(f.findClass('video')[0],card);
+  await f.run(180); assert.deepEqual(visibility,[]);
+  replies[4].resolve({ok:true,items:[],hasNext:false}); await f.flush();
+  assert.equal(empty.hidden,false); assert.equal(grid.hidden,true); assert.deepEqual(visibility,[['grid',true],['empty',false]]);
+  assert.equal(f.document.activeElement,f.ids.get('search')); assert.ok(f.messages.every(m => m.type === 'watch-list-page'));
 });
