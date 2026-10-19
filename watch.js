@@ -1,14 +1,17 @@
 /* Token-free, bounded extension page. All Reader calls go through the worker. */
 (() => {
   const C = globalThis.MVSReaderCore, W = globalThis.MVSReaderWatchCore;
-  const $ = id => document.getElementById(id), grid = $('videos'), status = $('status');
+  const $ = id => document.getElementById(id), grid = $('videos');
+  const feedback = globalThis.MVSWatchFeedback.create({ routine: $('toast'), error: $('error-toast'), live: $('announcements') });
   const rows = new Map(), errors = new Map(), pending = new Set();
   const rememberError = (url, text) => {
     errors.delete(url); errors.set(url, text);
     while (errors.size > 100) errors.delete(errors.keys().next().value);
   };
-  let items = [], filter = 'watch', cursors = [null], hasNext = false, nextCursor = null, pageRequest = 0, refreshRequest = 0;
+  let items = [], filter = 'watch', query = '', channelFilter = '', cursors = [null], hasNext = false, nextCursor = null, pageRequest = 0, refreshRequest = 0;
   let refreshing = false, loaded = false, reloadTimer, deletion = null, deleting = false, theme = 'system';
+  // Request readiness must not hide the last settled view during local search.
+  let hasSettledView = false, displayedSearch = false, displayedPage = 1;
   const media = matchMedia('(prefers-color-scheme: dark)');
   const send = message => new Promise(resolve => {
     let settled = false;
@@ -35,7 +38,7 @@
     auth_changed: 'Reader credentials changed. Refresh before continuing.', invalid_sender: 'This extension page is no longer current. Reopen Recent saves.',
     request_uncertain: 'The request could not be confirmed. Refresh before trying again.', runtime_error: 'The extension is unavailable. Reload the extension and reopen Recent saves.'
   })[result.code] || (result.code === 'rate_limited' ? C.rateLimitMessage(result) : 'Reader could not complete this request. Try Refresh.');
-  const announce = (text, error = false) => { status.textContent = text; status.dataset.error = String(error); };
+  const announce = (text, error = false) => feedback.show(text, error);
   const node = (tag, text, parent, className) => { const n = document.createElement(tag); if (text) n.textContent = text; if (className) n.className = className; parent?.append(n); return n; };
   const icon = (parent, commands) => {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
@@ -55,9 +58,12 @@
   const controls = () => {
     $('refresh').disabled = refreshing || pending.size > 0 || Boolean(deletion);
     $('refresh').textContent = refreshing ? 'Refreshing…' : 'Refresh this page';
-    $('previous').disabled = cursors.length < 2 || pending.size > 0 || Boolean(deletion);
-    $('next').disabled = !hasNext || pending.size > 0 || Boolean(deletion);
-    $('page-label').textContent = `Page ${cursors.length} · ${items.length} video${items.length === 1 ? '' : 's'}`;
+    $('previous').disabled = !loaded || cursors.length < 2 || pending.size > 0 || Boolean(deletion);
+    $('next').disabled = !loaded || !hasNext || pending.size > 0 || Boolean(deletion);
+    $('page-label').textContent = `Page ${displayedPage} · ${items.length} ${displayedSearch ? 'match' + (items.length === 1 ? '' : 'es') : 'video' + (items.length === 1 ? '' : 's')}`;
+    $('search').disabled = pending.size > 0 || Boolean(deletion);
+    $('clear-search').disabled = $('search').disabled || !query && !channelFilter;
+    $('channel-filter').disabled = $('search').disabled;
     for (const b of $('filters').children) { b.setAttribute('aria-pressed', String(b.dataset.filter === filter)); b.disabled = pending.size > 0 || Boolean(deletion); }
   };
   const makeRow = item => {
@@ -70,7 +76,8 @@
     link.href = item.videoUrl; link.target = '_blank'; link.rel = 'noopener noreferrer';
     const metadata = node('dl', '', copy, 'metadata');
     const field = label => { const group = node('div', '', metadata); node('dt', label, group, 'sr-only'); return node('dd', '', group); };
-    const channel = field('Channel'); channel.className = 'channel-name';
+    const channel = node('button', '', field('Channel'), 'channel-filter-button'); channel.type = 'button';
+    channel.addEventListener('click', () => { const current = items.find(row => row.videoUrl === item.videoUrl); if (loaded && current?.author && !pending.size && !deletion) search.setChannel(current.author); });
     const locationRow = node('div', '', copy, 'location-row'), move = node('button', '', locationRow, 'location-trigger'); move.type = 'button';
     move.setAttribute('aria-haspopup', 'menu'); move.setAttribute('aria-expanded', 'false'); move.setAttribute('aria-controls', locationMenu.id);
     const locationActions = node('div', '', locationRow, 'location-actions');
@@ -106,6 +113,8 @@
       row.link.textContent = item.title || `YouTube video · ${new URL(item.videoUrl).searchParams.get('v')}`;
       row.thumbnailLink.setAttribute('aria-label', `Watch ${item.title || 'video'} on YouTube`); row.thumbnailLink.title = 'Open on YouTube';
       row.channel.textContent = item.author || 'Not retained';
+      row.channel.disabled = !item.author || !loaded || pending.size > 0 || Boolean(deletion);
+      row.channel.setAttribute('aria-label', item.author ? `Filter by exact channel: ${item.author}` : 'Channel not retained');
       const savedDate = new Date(item.savedAt), hasSavedDate = Number.isFinite(savedDate.getTime());
       row.date.textContent = hasSavedDate ? `Saved ${savedDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}` : 'Saved date unavailable';
       row.date.dateTime = hasSavedDate ? savedDate.toISOString() : ''; row.date.setAttribute('aria-label', hasSavedDate ? `Saved date: ${savedDate.toLocaleString()}` : 'Saved date unavailable');
@@ -129,19 +138,26 @@
       locationMenu.close(); grid.replaceChildren(...cards);
     }
     locationMenu.refresh();
-    grid.hidden = loaded && items.length === 0; $('empty').hidden = !loaded || items.length > 0;
+    grid.hidden = hasSettledView && items.length === 0; $('empty').hidden = !hasSettledView || items.length > 0;
+    const searching = displayedSearch;
+    $('empty-title').textContent = searching ? 'No matching videos' : 'No videos in this view';
+    $('empty-description').textContent = searching ? 'Try a different search or reset the channel and location filters. Only retained titles, channel names and available cached summaries are searchable.' : 'Save a YouTube video with the extension’s Reader button, or try All saves. Retained older saves may need their Reader ID linked on the video page.';
+    $('reset-view').hidden = !searching && filter === 'all';
     grid.setAttribute('aria-busy', String(!loaded)); controls();
   };
   const load = async ({ clearStatus = false } = {}) => {
-    const request = ++pageRequest, result = await send({ type: 'watch-list-page', filter, cursor: cursors.at(-1) });
+    const request = ++pageRequest, result = await send({ type: 'watch-list-page', filter, query, channel: channelFilter, cursor: cursors.at(-1) });
     if (request !== pageRequest) return;
     if (!result.ok) { announce(messageFor(result), true); controls(); return; }
     items = result.items.filter(item => C.canonical(item.videoUrl) === item.videoUrl && (!item.readerId || C.validId(item.readerId)));
-    hasNext = result.hasNext; nextCursor = result.nextCursor; loaded = true; render();
+    hasNext = result.hasNext; nextCursor = result.nextCursor; loaded = hasSettledView = true;
+    displayedSearch = Boolean(query.trim() || channelFilter); displayedPage = cursors.length; render();
+    $('search-status').textContent = `${items.length} ${query.trim() || channelFilter ? 'matching ' : ''}video${items.length === 1 ? '' : 's'} on page ${cursors.length}${hasNext ? '. More results available.' : '.'}`;
     if (clearStatus && !refreshing && pending.size === 0 && !deletion) announce('');
   };
   const reloadLocal = () => { clearTimeout(reloadTimer); reloadTimer = setTimeout(() => { if (!refreshing && !pending.size && !deletion) void load(); }, 100); };
-  const changePage = () => { locationMenu.close(); refreshRequest++; refreshing = false; loaded = false; render(); void load({ clearStatus: true }); };
+  const invalidateView = () => { locationMenu.close(); refreshRequest++; pageRequest++; refreshing = false; loaded = false; render(); };
+  const changePage = () => { invalidateView(); void load({ clearStatus: true }); };
   const refreshCard = async (url, origin) => {
     const item = items.find(row => row.videoUrl === url);
     if (!item?.readerId || !loaded || refreshing || pending.size || deletion) return;
@@ -212,6 +228,12 @@
     const button = node('button', label, $('filters')); button.type = 'button'; button.dataset.filter = value;
     button.addEventListener('click', () => { filter = value; cursors = [null]; changePage(); });
   }
+  const search = globalThis.MVSWatchSearch.create({ input: $('search'), clear: $('clear-search'), chip: $('channel-filter'), onChange: criteria => {
+    query = criteria.query; channelFilter = criteria.channel; cursors = [null]; invalidateView();
+    const request = pageRequest;
+    return () => { if (request === pageRequest) void load({ clearStatus: true }); };
+  } });
+  $('reset-view').addEventListener('click', () => { filter = 'all'; search.reset(); $('search').focus({ preventScroll: true }); });
   $('previous').addEventListener('click', () => { if (cursors.length > 1) { cursors.pop(); changePage(); } });
   $('next').addEventListener('click', () => { if (nextCursor) { cursors.push(nextCursor); changePage(); } });
   const applyTheme = () => { document.documentElement.dataset.theme = theme === 'system' ? media.matches ? 'dark' : 'light' : theme; };
@@ -224,7 +246,7 @@
     if (changes.readerToken) {
       locationMenu.close(); refreshRequest++; refreshing = false;
       if (deletion && !deleting) closeDelete();
-      render(); announce('Reader connection changed. Refresh to check current data.');
+      render(); announce('Reader connection changed. Refresh to check current data.', true);
     }
   });
   void load({ clearStatus: true });

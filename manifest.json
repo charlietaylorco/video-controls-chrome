@@ -60,7 +60,7 @@
       ],
       "js": [
         "reader-core.js",
-        "reader-header.js",
+        "reader-launcher.js",
         "reader-editor.js",
         "reader-peek.js",
         "reader-panel.js"

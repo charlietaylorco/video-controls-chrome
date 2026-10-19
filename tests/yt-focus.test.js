@@ -243,3 +243,16 @@ test('Reader popover theme defaults to system, validates modes and persists with
   }
   assert.equal(harness('options.js', { readerPanelTheme: 'invalid' }).input('reader-panel-theme').value, 'system');
 });
+
+test('Recent saves shortcut options default on/bottom-left, persist four corners and opt-out without changing the Reader panel/token', () => {
+  const app = harness('options.js', { showReaderPanel:true, readerToken:'fixture-token' });
+  assert.equal(app.input('show-recent-saves-launcher').checked,true); assert.equal(app.input('recent-saves-launcher-position').value,'bottom-left');
+  for (const position of ['top-left','top-right','bottom-left','bottom-right']) {
+    app.input('recent-saves-launcher-position').value=position; app.input('recent-saves-launcher-position').events.change();
+    assert.equal(app.data.recentSavesLauncherPosition,position); assert.equal(harness('options.js',app.data).input('recent-saves-launcher-position').value,position);
+  }
+  app.input('show-recent-saves-launcher').checked=false; app.input('show-recent-saves-launcher').events.change();
+  assert.equal(harness('options.js',app.data).input('show-recent-saves-launcher').checked,false);
+  assert.equal(app.data.showReaderPanel,true); assert.equal(app.data.readerToken,'fixture-token');
+  assert.equal(harness('options.js',{recentSavesLauncherPosition:'invalid'}).input('recent-saves-launcher-position').value,'bottom-left');
+});

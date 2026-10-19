@@ -2,7 +2,8 @@
 (() => {
   const create = ({ store, reader, now = Date.now, uuid = () => crypto.randomUUID() }) => {
     const C = globalThis.MVSReaderCore, W = globalThis.MVSReaderWatchCore;
-    const tickets = new Map(), refreshing = new Map();
+    const tickets = new Map(), refreshing = new Map(), pages = new Map();
+    let pageSequence = 0;
     const error = code => Object.assign(new Error(code), { code });
     const target = async message => {
       const url = C.canonical(message.videoUrl);
@@ -28,7 +29,15 @@
     };
     const handle = async (message, context = {}) => {
       try {
-        if (message.type === 'watch-list-page') return { ok: true, ...await store.page({ filter: message.filter, cursor: message.cursor }) };
+        if (message.type === 'watch-list-page') {
+          const key = context.scope ?? Symbol(), sequence = ++pageSequence;
+          pages.delete(key); pages.set(key, sequence);
+          const isCurrent = () => pages.get(key) === sequence;
+          try {
+            const result = await store.page({ filter: message.filter, cursor: message.cursor, query: message.query, channel: message.channel, isCurrent });
+            return result.stale || !isCurrent() ? { ok: false, code: 'stale_search' } : { ok: true, ...result };
+          } finally { if (isCurrent()) pages.delete(key); }
+        }
         if (message.type === 'watch-list-refresh') return await refresh(message, context);
         if (message.type === 'watch-list-move') {
           const row = await target(message);

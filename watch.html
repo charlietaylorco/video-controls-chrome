@@ -4,14 +4,16 @@
 <body>
   <main class="watch-app">
     <header class="page-header">
-      <h1>Recent saves</h1><a class="yt-lists-link" href="feed.html">YT Lists</a>
+      <h1>Recent saves</h1><nav class="page-actions" aria-label="Recent saves navigation"><button id="refresh" class="text-action" type="button">Refresh this page</button><a class="yt-lists-link" href="feed.html">YT Lists</a></nav>
     </header>
-    <section class="toolbar" aria-label="Recent saves controls"><div id="filters" class="filters" role="group" aria-label="Saved video views"></div><button id="refresh" class="primary" type="button">Refresh this page</button></section>
-    <div class="notice-area"><p id="status" role="status" aria-live="polite">Loading your saved videos…</p></div>
+    <section class="toolbar" aria-label="Recent saves controls"><div id="filters" class="filters" role="group" aria-label="Saved video views"></div><div class="search-field"><label class="sr-only" for="search">Search recent saves</label><input id="search" type="search" maxlength="300" placeholder="Search titles, channels, summaries…" autocomplete="off"><button id="clear-search" type="button" aria-label="Clear search and channel filter" disabled>Clear</button></div></section>
+    <div class="search-meta"><button id="channel-filter" type="button" hidden></button></div>
+    <p id="search-status" class="sr-only" role="status" aria-live="polite">Loading your saved videos…</p>
     <section id="videos" class="videos" aria-label="Saved videos" aria-busy="true"></section>
-    <section id="empty" class="empty" hidden><h2>No videos in this view</h2><p>Save a YouTube video with the extension’s Reader button, or try All saves. Retained older saves may need their Reader ID linked on the video page.</p></section>
+    <section id="empty" class="empty" hidden><h2 id="empty-title">No videos in this view</h2><p id="empty-description">Save a YouTube video with the extension’s Reader button, or try All saves. Retained older saves may need their Reader ID linked on the video page.</p><button id="reset-view" type="button" hidden>Reset search and filters</button></section>
     <nav class="pagination" aria-label="Recent saves pages"><button id="previous" type="button" disabled>Previous</button><span id="page-label">Page 1</span><button id="next" type="button" disabled>Next</button></nav>
   </main>
+  <aside class="feedback" aria-label="Notifications"><div id="error-toast" class="toast error-toast" hidden><p></p><button type="button" aria-label="Dismiss error">×</button></div><div id="toast" class="toast" hidden><p></p><button type="button" aria-label="Dismiss notification">×</button></div></aside><p id="announcements" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
   <dialog id="deletion" aria-labelledby="delete-heading" aria-describedby="delete-effects"><form method="dialog"><p class="eyebrow">Reader document</p><h2 id="delete-heading">Delete from Reader?</h2><p id="delete-title" class="delete-title"></p><p id="delete-identity" class="identity"></p><p id="delete-effects">This deletes the Reader document, including its highlights and notes. The extension cannot undo it. Unsaved note drafts in other tabs stay there; copy them before reloading or closing those tabs.</p><p id="delete-status" class="dialog-status" role="status" aria-live="polite"></p><div class="dialog-actions"><button id="cancel-delete" type="button" autofocus>Cancel</button><button id="confirm-delete" class="destructive" type="button">Delete document</button></div></form></dialog>
-  <script src="reader-core.js"></script><script src="reader-watch-core.js"></script><script src="watch-location-menu.js"></script><script src="watch.js"></script>
+  <script src="reader-core.js"></script><script src="reader-watch-core.js"></script><script src="watch-location-menu.js"></script><script src="watch-feedback.js"></script><script src="watch-search.js"></script><script src="watch.js"></script>
 </body></html>
