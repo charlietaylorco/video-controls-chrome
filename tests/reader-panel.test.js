@@ -19,9 +19,10 @@ test('card deletion cache changes preserve that video’s dirty note and leave o
   f.navigate(B); await tick(); assert.equal(f.value, 'Keep deleted B'); assert.equal(f.button('Save note').disabled, true);
 });
 
-function fixture({ url = A, width = 1100, height = 900 } = {}) {
+function fixture({ url = A, width = 1100, height = 900, transport = false } = {}) {
   const events = new Map(), timers = new Map(), storageListeners = [], messages = [];
-  let timerId = 0, active, editor, input, escape, responder, clock = 100000;
+  let timerId = 0, active, editor, input, escape, responder, service, httpResponder, clock = 100000;
+  const requests = [];
   class ClockDate extends Date { static now() { return clock; } }
   class Node {
     constructor(tag = '') { this.tagName = tag; this.children = []; this.attrs = {}; this.dataset = {}; this.style = {}; this.listeners = new Map(); this.hidden = false; this.textContent = ''; }
@@ -35,9 +36,9 @@ function fixture({ url = A, width = 1100, height = 900 } = {}) {
     click() { if (!this.disabled && !this.hidden) this.fire('click'); }
     focus() { active = this; }
     blur() { if (active === this) active = null; }
-    attachShadow() { this.shadowRoot = new Node('shadow'); return this.shadowRoot; }
+    attachShadow() { this.shadowRoot = new Node('shadow'); this.shadowRoot.host = this; return this.shadowRoot; }
     get activeElement() { return active; }
-    get isConnected() { return this === document.documentElement || Boolean(this.parentElement?.isConnected); }
+    get isConnected() { return this === document.documentElement || Boolean((this.parentElement || this.host)?.isConnected); }
     remove() { if (this.parentElement) this.parentElement.children = this.parentElement.children.filter(n => n !== this); this.parentElement = null; }
     getBoundingClientRect() { return { x: 0, y: 40, left: 0, top: 40, width: 390, height: 230 }; }
     hasPointerCapture() { return false; }
@@ -50,7 +51,9 @@ function fixture({ url = A, width = 1100, height = 900 } = {}) {
   const docs = new Map([['doc-a', { id: 'doc-a', videoUrl: A, title: 'Attention and learning', summary: 'Summary A', notes: 'Original A', location: 'later', tags: ['Learning'], updatedAt: 'v1' }],
     ['doc-b', { id: 'doc-b', videoUrl: B, title: 'Video B', summary: 'Summary B', notes: 'Original B', location: 'archive', tags: [], updatedAt: 'v1' }],
     ['doc-c', { id: 'doc-c', videoUrl: D, title: 'Video C', summary: 'Summary C', notes: 'Original C', location: 'shortlist', tags: [], updatedAt: 'v1' }]]);
-  const context = { URL, console, Date: ClockDate, Element: Node, location, document, innerWidth: width, innerHeight: height,
+  const data = { showReaderPanel: true, readerToken: 'fake-test-token',
+    readerDocuments: Object.fromEntries([...docs.values()].map(doc => [doc.videoUrl, { id: doc.id, at: clock }])) };
+  const context = { URL, AbortSignal, console, Date: ClockDate, Element: Node, location, document, innerWidth: width, innerHeight: height,
     MutationObserver: class { observe() {} },
     setTimeout(fn, delay) { const id = ++timerId; timers.set(id, { fn, delay }); return id; }, clearTimeout: id => timers.delete(id),
     matchMedia: () => ({ matches: false, addEventListener() {} }),
@@ -62,6 +65,7 @@ function fixture({ url = A, width = 1100, height = 900 } = {}) {
     chrome: { runtime: { lastError: null, sendMessage(message, callback) {
       messages.push(message);
       const normal = () => {
+        if (service) return service.handle(message, { isCurrent: () => context.MVSReaderCore.canonical(location.href) === message.pageUrl });
         const doc = [...docs.values()].find(doc => doc.videoUrl === message.pageUrl);
         if (message.type === 'reader-panel-get') return { ok: true, document: doc ? { ...doc } : null };
         if (message.type === 'reader-panel-save-note') { doc.notes = message.notes; return { ok: true, id: message.id, notes: message.notes }; }
@@ -71,19 +75,60 @@ function fixture({ url = A, width = 1100, height = 900 } = {}) {
         throw new Error(`Unexpected action: ${message.type}`);
       };
       Promise.resolve(responder ? responder(message, normal) : normal()).then(callback);
-    } }, storage: { local: { get(defaults, callback) { callback({ ...defaults, showReaderPanel: true }); } },
+    } }, storage: { local: { get(defaults, callback) { callback({ ...defaults, ...data }); },
+      set(values, callback) { Object.assign(data, values); callback?.(); } },
       onChanged: { addListener(fn) { storageListeners.push(fn); } } } },
   };
   context.window = context; context.top = context;
   vm.createContext(context);
-  for (const name of ['reader-core.js', 'reader-peek.js', 'reader-panel.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, '..', name), 'utf8'), context);
+  for (const name of ['reader-core.js', 'reader-service.js', 'reader-peek.js', 'reader-panel.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, '..', name), 'utf8'), context);
+  if (transport) service = context.MVSReaderService.create({ storage: context.chrome.storage.local, now: () => clock, fetch: async (url, init) => {
+    requests.push({ url, ...init });
+    const normal = () => {
+      const id = init.method === 'DELETE' ? new URL(url).pathname.split('/').at(-2) : new URL(url).searchParams.get('id');
+      if (init.method === 'DELETE') { docs.delete(id); return { status: 204 }; }
+      assert.equal(init.method, undefined, 'these interactions must never PATCH notes or location');
+      const doc = docs.get(id);
+      return { results: doc ? [{ ...doc, source_url: doc.videoUrl, updated_at: doc.updatedAt }] : [] };
+    };
+    const result = httpResponder ? await httpResponder(url, init, normal) : normal();
+    const status = result.status || 200;
+    return { status, ok: status >= 200 && status < 300, headers: { get: () => null }, json: async () => result };
+  } });
   const all = node => [node, ...node.children.flatMap(all), ...(node.shadowRoot ? all(node.shadowRoot) : [])];
   const nodes = () => all(document.documentElement);
   const byClass = name => nodes().find(n => (n.attrs.class || '').split(' ').includes(name));
   const button = name => nodes().find(n => n.tagName === 'button' && (n.attrs['aria-label'] === name || n.textContent === name));
   const fire = (type, extra = {}) => (events.get(type) || []).forEach(fn => fn({ composedPath: () => [], preventDefault() {}, stopPropagation() {}, ...extra }));
-  return { messages, docs, button, byClass, byId: id => nodes().find(n => n.attrs.id === id), get active() { return active; }, get value() { return editor.value; },
+  // Model the browser boundary that direct .click() mocks miss: document capture
+  // sees only the closed host, then the shadow root sees the internal path. A
+  // target hidden by pointerdown cannot receive the eventual activation.
+  const internalPath = node => { const result = []; for (; node; node = node.parentElement || node.host) result.push(node); return result; };
+  const visible = node => internalPath(node).every(n => !n.hidden && !n.disabled);
+  const dispatch = (node, type, extra = {}) => {
+    const inside = internalPath(node), shadow = inside.find(n => n.host), host = shadow?.host;
+    const outside = host ? [host, document.documentElement, document, context] : inside;
+    fire(type, { target: host || node, composedPath: () => outside, ...extra });
+    let stopped = false;
+    const event = { target: node, composedPath: () => inside, preventDefault() { this.prevented = true; }, stopPropagation() { stopped = true; }, ...extra };
+    for (const n of inside) { for (const fn of n.listeners.get(type) || []) fn(event); if (stopped) break; }
+    return event;
+  };
+  const focus = node => {
+    const prior = active; node.focus();
+    const inside = internalPath(node);
+    // Internal focus changes do not cross the closed root when relatedTarget
+    // and target retarget to the same host. The root still receives focusin.
+    const shadow = inside.find(n => n.host);
+    if (shadow && internalPath(prior).includes(shadow)) shadow.fire('focusin', { target: node, composedPath: () => inside });
+    else dispatch(node, 'focusin');
+  };
+  return { messages, docs, data, requests, button, byClass, byId: id => nodes().find(n => n.attrs.id === id), get active() { return active; }, get value() { return editor.value; },
     set responder(fn) { responder = fn; },
+    set httpResponder(fn) { httpResponder = fn; },
+    pointer(node) { dispatch(node, 'pointerdown'); if (visible(node)) { focus(node); if (visible(node)) node.click(); } },
+    key(key, node = active) { const event = dispatch(node, 'keydown', { key }); if (!event.prevented && ['Enter', ' '].includes(key) && visible(node)) node.click(); },
+    focus,
     async open() { if (byClass('body').hidden) byClass('toggle').click(); await tick(); },
     trash() { byClass('location').click(); button('Delete from Reader').click(); },
     move(value) { byClass('location').click(); button(value).click(); },
@@ -114,6 +159,74 @@ test('delete is a separate confirmation naming exact document; Cancel and Escape
   f.trash(); f.escape();
   assert.equal(f.byClass('delete-confirm').hidden, true); assert.equal(f.byClass('body').hidden, false);
   assert.equal(f.messages.filter(m => m.type === 'reader-panel-delete').length, 0);
+});
+
+test('closed-shadow pointer sequence reaches Trash, Cancel, then exact mocked Reader DELETE through the real service', async () => {
+  const f = fixture({ transport: true }); await f.open(); f.edit('Keep local draft');
+  f.pointer(f.byClass('location'));
+  assert.equal(f.byId('reader-location-menu').hidden, false);
+  f.pointer(f.button('Delete from Reader'));
+  assert.equal(f.byClass('delete-confirm').hidden, false);
+  assert.equal(f.active, f.button('Cancel'));
+  assert.match(f.byClass('delete-identity').textContent, /alpha.*doc-a/);
+  assert.equal(f.requests.filter(r => r.method === 'DELETE').length, 0);
+  f.pointer(f.button('Cancel'));
+  assert.equal(f.value, 'Keep local draft'); assert.equal(f.docs.has('doc-a'), true);
+  f.pointer(f.byClass('location')); f.pointer(f.button('Delete from Reader'));
+  f.pointer(f.button('Delete document')); await tick();
+  assert.deepEqual(f.requests.map(r => [new URL(r.url).pathname + new URL(r.url).search, r.method || 'GET']), [
+    ['/api/v3/list/?id=doc-a', 'GET'], ['/api/v3/list/?id=doc-a', 'GET'], ['/api/v3/delete/doc-a/', 'DELETE']
+  ]);
+  assert.equal(f.docs.has('doc-a'), false); assert.equal(f.docs.has('doc-b'), true);
+  assert.equal(f.data.readerDocuments[A], undefined); assert.equal(f.value, 'Keep local draft');
+  assert.match(f.byClass('status').textContent, /Deleted from Reader/);
+});
+
+test('closed-shadow keyboard sequence reaches Trash; rejected transport keeps document, error and draft', async () => {
+  const f = fixture({ transport: true }); await f.open(); f.edit('Keep after error');
+  f.httpResponder = (url, init, normal) => init.method === 'DELETE' ? { status: 401 } : normal();
+  f.focus(f.byClass('location')); f.key('ArrowDown'); f.key('End');
+  assert.equal(f.active, f.button('Delete from Reader')); f.key('Enter');
+  assert.equal(f.active, f.button('Cancel')); f.key('Tab'); f.key(' '); await tick();
+  assert.equal(f.requests.filter(r => r.method === 'DELETE').length, 1);
+  assert.equal(f.docs.has('doc-a'), true); assert.equal(f.value, 'Keep after error');
+  assert.match(f.byClass('status').textContent, /Reader rejected the token/);
+  assert.equal(f.byClass('status').dataset.kind, 'error');
+});
+
+test('closed-shadow Trash path still rejects stale navigation and replaced document identities', async () => {
+  const stale = fixture({ transport: true }); await stale.open(); stale.edit('Draft A');
+  stale.pointer(stale.byClass('location')); stale.pointer(stale.button('Delete from Reader'));
+  stale.navigate(B, false); stale.pointer(stale.button('Delete document')); await tick();
+  assert.equal(stale.requests.filter(r => r.method === 'DELETE').length, 0);
+  stale.navigate(A); await tick(); assert.equal(stale.value, 'Draft A');
+  const replaced = fixture({ transport: true }); await replaced.open();
+  replaced.pointer(replaced.byClass('location')); replaced.pointer(replaced.button('Delete from Reader'));
+  replaced.data.readerDocuments[A] = { id: 'replacement', at: 100001 };
+  replaced.pointer(replaced.button('Delete document')); await tick();
+  assert.equal(replaced.requests.filter(r => r.method === 'DELETE').length, 0);
+  assert.match(replaced.byClass('status').textContent, /matched document changed/);
+});
+
+test('internal panel focus dismisses only the menu; outside-host focus or pointer dismisses panel and keeps drafts', async () => {
+  for (const type of ['focusin', 'pointerdown']) {
+    const f = fixture(); await f.open(); f.edit('Draft'); f.pointer(f.byClass('location'));
+    f.focus(f.button('Summary'));
+    assert.equal(f.byId('reader-location-menu').hidden, true); assert.equal(f.byClass('body').hidden, false);
+    f.pointer(f.byClass('location')); f.event(type);
+    assert.equal(f.byId('reader-location-menu').hidden, true); assert.equal(f.byClass('body').hidden, true);
+    assert.equal(f.value, 'Draft');
+  }
+});
+
+test('closed-shadow pointer activation also preserves location moves and overflow actions', async () => {
+  const f = fixture(); await f.open(); f.edit('Unchanged draft');
+  f.pointer(f.byClass('location')); f.pointer(f.button('Shortlist')); await tick();
+  assert.equal(f.docs.get('doc-a').location, 'shortlist'); assert.equal(f.value, 'Unchanged draft');
+  assert.equal(f.byId('reader-location-menu').hidden, true);
+  f.pointer(f.button('More Reader actions')); f.pointer(f.button('Recent saves')); await tick();
+  assert.equal(f.messages.at(-1).type, 'open-watch-list'); assert.equal(f.byId('reader-more-menu').hidden, true);
+  assert.equal(f.byClass('body').hidden, false);
 });
 
 test('a closed panel binds the new URL on opening before YouTube navigation events arrive', async () => {
