@@ -53,8 +53,15 @@ tabs: { get(id, cb) { cb({ id, url: 'chrome-extension://extension/watch.html' })
 action: { onClicked: { addListener() {} } } };
 window.importScripts = () => {};
 const imageSource = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
+Object.defineProperty(HTMLImageElement.prototype, 'currentSrc', { get() { return this.dataset.fixtureSource || ''; } });
 Object.defineProperty(HTMLImageElement.prototype, 'src', { get: imageSource.get, set(value) {
-  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="224" height="126"><rect width="224" height="126" fill="#505d48"/><circle cx="176" cy="32" r="13" fill="#d6dfca"/><path d="M0 126 60 44 117 108 155 73 224 126Z" fill="#718267"/></svg>';
+  this.dataset.fixtureSource = value;
+  const mode = options.get('thumbnail') || 'available';
+  const low = mode === 'placeholder' && value.includes('/maxresdefault.jpg') || mode === 'unavailable';
+  const width = low ? 120 : value.includes('/maxresdefault.jpg') ? 1280 : value.includes('/sddefault.jpg') ? 640 : value.includes('/hqdefault.jpg') ? 480 : 320;
+  const height = low ? 90 : value.includes('/sddefault.jpg') ? 480 : value.includes('/hqdefault.jpg') ? 360 : width * 9 / 16;
+  report('Mock thumbnail: ' + value.split('/').pop() + ' ' + width + '×' + height);
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height + '" viewBox="0 0 224 126"><title>' + value.split('/').pop() + '</title><rect width="224" height="126" fill="#505d48"/><circle cx="176" cy="32" r="13" fill="#d6dfca"/><path d="M0 126 60 44 117 108 155 73 224 126Z" fill="#718267"/></svg>';
   imageSource.set.call(this, 'data:image/svg+xml,' + encodeURIComponent(svg));
 } });
 ${source('reader-core.js')}
@@ -93,9 +100,9 @@ document.addEventListener('click', event => { if (event.target.closest('a')) { e
 let html = fs.readFileSync(path.join(root, 'watch.html'), 'utf8').replace(/<script[^>]*src="[^"]+"[^>]*><\/script>/g, '');
 html = html.replace('<head>', '<head><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\' \'unsafe-inline\'; style-src \'self\' \'unsafe-inline\'; img-src data:; connect-src \'none\'">');
 const tools = '<aside style="font:11px system-ui;padding:10px 20px;background:#e5e8df;color:#25301d"><strong>Mock data only · isolated native browser check</strong> · <span id="fixture-count">Mock Reader requests: 0</span> <button id="fixture-add" type="button">Add a mock save</button> <button id="fixture-auth" type="button">Change mock connection</button> <label><input type="checkbox" id="fixture-slow"> Slow responses</label> <label><input type="checkbox" id="fixture-fail"> Reject Reader requests</label> <label><input type="checkbox" id="fixture-search-slow"> Slow local searches</label><details><summary>Mock trace</summary><ol id="fixture-log"></ol></details></aside>';
-html = html.replace('<body>', '<body>' + tools).replace('</body>', '<script>' + bootstrap + '</script><script src="watch-location-menu.js"></script><script src="watch-feedback.js"></script><script src="watch-search.js"></script><script src="watch.js"></script></body>');
+html = html.replace('<body>', '<body>' + tools).replace('</body>', '<script>' + bootstrap + '</script><script src="watch-location-menu.js"></script><script src="watch-feedback.js"></script><script src="watch-search.js"></script><script src="watch-thumbnail.js"></script><script src="watch.js"></script></body>');
 fs.writeFileSync(path.join(destination, 'index.html'), html);
-for (const file of ['watch.css', 'watch-location-menu.js', 'watch-feedback.js', 'watch-search.js', 'watch.js']) fs.copyFileSync(path.join(root, file), path.join(destination, file));
+for (const file of ['watch.css', 'watch-location-menu.js', 'watch-feedback.js', 'watch-search.js', 'watch-thumbnail.js', 'watch.js']) fs.copyFileSync(path.join(root, file), path.join(destination, file));
 console.log(destination);
 
 fs.copyFileSync(path.join(root, 'reader-launcher.js'), path.join(destination, 'reader-launcher.js'));

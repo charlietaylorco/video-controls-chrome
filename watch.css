@@ -23,7 +23,8 @@ h1{font-size:27px;letter-spacing:-.035em;line-height:1.2;margin:0;font-weight:65
 .videos{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:28px 24px;align-items:start;min-height:180px}
 .video{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;min-width:0}
 .video-media{position:relative;aspect-ratio:16/9;background:var(--chip)}
-.thumbnail-link{display:block}
+.thumbnail-link{display:block;aspect-ratio:16/9}
+.thumbnail-link[data-thumbnail-unavailable=true]::after{content:"Thumbnail unavailable";position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-size:12px}
 .thumbnail-link:focus-visible{outline-offset:-4px}
 .thumbnail{display:block;width:100%;height:auto;aspect-ratio:16/9;object-fit:cover;background:var(--chip)}
 .video-copy{padding:20px 22px 14px}

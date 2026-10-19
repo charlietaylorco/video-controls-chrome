@@ -14,6 +14,7 @@ function fixture() {
     setAttribute(key, value) { this.attrs[key] = String(value); }
     getAttribute(key) { return this.attrs[key] ?? null; }
     addEventListener(key, fn) { this.listeners.set(key, [...this.listeners.get(key) || [], fn]); }
+    removeEventListener(key, fn) { this.listeners.set(key, (this.listeners.get(key) || []).filter(callback => callback !== fn)); }
     fire(type, extra = {}) { const event = { key: '', relatedTarget: null, preventDefault() {}, ...extra }; for (const fn of this.listeners.get(type) || []) fn(event); }
     click() { if (!this.disabled && !this.hidden) this.fire('click'); }
     get isConnected() { return this === document.body || Boolean(this.parentElement?.isConnected); }
@@ -42,7 +43,7 @@ function fixture() {
     chrome: { runtime: { lastError: null, sendMessage(message, cb) { messages.push(message); Promise.resolve(responder ? responder(message, reply) : reply(message)).then(cb); } }, storage: { local: { get(defaults, cb) { cb(defaults); } }, onChanged: { addListener(fn) { storageListeners.push(fn); } } } },
     MVSWatchLocationMenu: { create: () => ({ id: 'location-menu', close() {}, refresh() {}, toggle() {}, open() {} }) },
   });
-  for (const file of ['reader-core.js','reader-watch-core.js','watch-feedback.js','watch-search.js','watch.js']) vm.runInContext(fs.readFileSync(path.join(__dirname,'..',file),'utf8'), context);
+  for (const file of ['reader-core.js','reader-watch-core.js','watch-feedback.js','watch-search.js','watch-thumbnail.js','watch.js']) vm.runInContext(fs.readFileSync(path.join(__dirname,'..',file),'utf8'), context);
   const flush = async () => { await tick(); await tick(); };
   const run = async delay => {
     clock += delay;
@@ -153,4 +154,13 @@ test('successive empty searches keep the settled empty view throughout debounce 
   replies[4].resolve({ok:true,items:[],hasNext:false}); await f.flush();
   assert.equal(empty.hidden,false); assert.equal(grid.hidden,true); assert.deepEqual(visibility,[['grid',true],['empty',false]]);
   assert.equal(f.document.activeElement,f.ids.get('search')); assert.ok(f.messages.every(m => m.type === 'watch-list-page'));
+});
+
+test('real card thumbnails fall back without Reader messages and removed rows cancel their late image events', async()=>{
+  const f=fixture();await f.flush();const image=f.findClass('thumbnail')[0];
+  assert.match(image.src,/\/maxresdefault\.jpg$/);assert.equal(image.loading,'lazy');
+  image.currentSrc=image.src;image.naturalWidth=120;image.naturalHeight=90;image.fire('load');assert.match(image.src,/\/sddefault\.jpg$/);
+  const last=image.src;f.responder=(message,normal)=>message.type==='watch-list-page'?{ok:true,items:[],hasNext:false}:normal(message);
+  f.input('no retained rows');await f.run(180);image.currentSrc=last;image.fire('error');assert.equal(image.src,last);
+  assert.ok(f.messages.every(message=>message.type==='watch-list-page'));assert.equal(f.findClass('video').length,0);
 });
