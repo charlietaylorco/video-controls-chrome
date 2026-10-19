@@ -73,7 +73,6 @@
     thumbnailLink.href = item.videoUrl; thumbnailLink.target = '_blank'; thumbnailLink.rel = 'noopener noreferrer';
     const image = node('img', '', thumbnailLink, 'thumbnail');
     const thumbnail = globalThis.MVSWatchThumbnail.attach(image, item.videoUrl, { onUnavailable: () => { thumbnailLink.dataset.thumbnailUnavailable = 'true'; } });
-    const actions = cardActions.attach(mediaBox, item.videoUrl);
     const copy = node('div', '', card, 'video-copy'), heading = node('h2', '', copy), link = node('a', '', heading);
     link.href = item.videoUrl; link.target = '_blank'; link.rel = 'noopener noreferrer';
     const metadata = node('dl', '', copy, 'metadata');
@@ -82,9 +81,11 @@
     channel.addEventListener('click', () => { const current = items.find(row => row.videoUrl === item.videoUrl); if (loaded && current?.author && !pending.size && !deletion) search.setChannel(current.author); });
     const locationRow = node('div', '', copy, 'location-row'), move = node('button', '', locationRow, 'location-trigger'); move.type = 'button';
     move.setAttribute('aria-haspopup', 'menu'); move.setAttribute('aria-expanded', 'false'); move.setAttribute('aria-controls', locationMenu.id);
-    const locationActions = node('div', '', locationRow, 'location-actions');
-    const readerLink = node('a', '', locationActions, 'reader-link'); readerLink.target = '_blank'; readerLink.rel = 'noopener noreferrer'; readerLink.title = 'Open in Reader';
+    const locationActions = node('div', '', locationRow, 'location-actions destination-actions');
+    locationActions.setAttribute('role', 'group'); locationActions.setAttribute('aria-label', 'Video destinations');
+    const readerLink = node('a', '', locationActions, 'reader-link destination-action'); readerLink.target = '_blank'; readerLink.rel = 'noopener noreferrer'; readerLink.title = 'Open in Reader';
     icon(readerLink, 'M14 3h7v7M10 14 21 3M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5');
+    const actions = cardActions.attach(locationActions, item.videoUrl);
     const summary = node('p', '', copy, 'summary-text');
     const footer = node('div', '', copy, 'card-footer'), footerDetails = node('div', '', footer, 'footer-details');
     const note = node('p', '', footerDetails, 'row-status'); note.setAttribute('role', 'status');
