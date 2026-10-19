@@ -49,7 +49,7 @@
     const errorText = reply => ({
       missing_token: 'Add your Reader token in Extension options.', unauthorized: 'Reader rejected the token. Check Extension options.',
       invalid_sender: 'This card changed. Hover its Reader icon again.', document_changed: 'The Reader document changed. Refresh and review it before deleting.',
-      delete_uncertain: 'Deletion could not be confirmed. Refresh to check Reader before trying again.',
+      delete_uncertain: 'Deletion could not be confirmed. Refresh to check Reader before trying again.' + (reply.rateLimitSource ? ' ' + C.rateLimitMessage(reply) : ''),
       delete_target_missing: 'The matched Reader document was not found. No DELETE was sent. Refresh to find the current document.',
       delete_not_confirmed: 'Reader did not confirm deletion of this document. Refresh to find its current state.',
       delete_still_present: 'Reader accepted DELETE but still returns this document. Refresh to check its current state; deletion has not been verified.',
@@ -58,7 +58,7 @@
       auth_changed: 'Reader credentials changed. Refresh before continuing.', network_error: 'Reader could not be reached. Try Refresh when connected.',
       runtime_error: 'The extension is unavailable. Copy any unsaved notes before reloading.',
       storage_error: 'Extension storage is unavailable. Try again later.'
-    })[reply.code] || (reply.code === 'rate_limited' ? `Reader rate limit. Try after ${new Date(reply.retryAt || now() + 60000).toLocaleTimeString()}.` : 'Reader could not complete this request. Try Refresh later.');
+    })[reply.code] || (reply.code === 'rate_limited' ? C.rateLimitMessage(reply, now()) : 'Reader could not complete this request. Try Refresh later.');
     const mount = () => {
       if (host) return;
       host = document.createElement('div'); host.id = 'mvs-reader-card-preview'; host.hidden = true;

@@ -27,6 +27,10 @@
   const locations = Object.freeze({ later: 'Later', shortlist: 'Shortlist', archive: 'Archive' });
   const locationLabel = value => Object.hasOwn(locations, value) ? locations[value]
     : value === 'new' ? 'Inbox / New' : value === 'feed' ? 'Feed' : value === 'inbox' ? 'Inbox' : value ? `Other: ${value}` : 'Location unknown';
+  const rateLimitMessage = (response, now = Date.now()) => {
+    const source = response.rateLimitSource === 'local' ? 'Extension' : response.rateLimitSource === 'reader' ? 'Reader' : 'Request';
+    return `${source} rate limit reached. Try again after ${new Date(response.retryAt || now + 60000).toLocaleTimeString()}.`;
+  };
   const cleanDocument = (doc, videoUrl) => {
     if (!doc || !validId(doc.id) || doc.is_deleted || doc.parent_id || canonical(doc.source_url) !== videoUrl) return null;
     const tags = Array.isArray(doc.tags) ? doc.tags : Object.entries(doc.tags || {}).map(([key, tag]) =>
@@ -61,7 +65,7 @@
     if (!state.dirty) state.value = state.base = '';
     return true;
   };
-  const api = { youtubeOrigin, pageKey, canonical, validId, readerUrl, locations, locationLabel, cleanDocument, draft, edit, receive, saved, removed };
+  const api = { youtubeOrigin, pageKey, canonical, validId, readerUrl, locations, locationLabel, rateLimitMessage, cleanDocument, draft, edit, receive, saved, removed };
   globalThis.MVSReaderCore = api;
   if (typeof module !== 'undefined') module.exports = api;
 })();

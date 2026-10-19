@@ -748,3 +748,17 @@ test('newer verified Reader state clears the marker without auto-saving, and a r
   assert.equal((await deleting).ok, true); assert.equal(race.data.readerDeletedVideos[A], undefined);
   assert.equal((await race.service.savedState(A)).saved, true);
 });
+
+test('rate-limit messages distinguish extension pacing, Reader 429 and unspecified legacy errors', () => {
+  assert.match(C.rateLimitMessage({ rateLimitSource: 'local', retryAt: 160000 }), /^Extension rate limit reached\. Try again after/);
+  assert.match(C.rateLimitMessage({ rateLimitSource: 'reader', retryAt: 160000 }), /^Reader rate limit reached\. Try again after/);
+  assert.match(C.rateLimitMessage({ retryAt: 160000 }), /^Request rate limit reached\./);
+});
+
+test('upstream HTTP-date and missing Retry-After retain their source and bounded persisted cooldown', async () => {
+  for (const [retryAfter, retryAt] of [[new Date(280000).toUTCString(), 280000], [null, 160000], ['invalid', 160000], ['1', 160000]]) {
+    const app = harness({ responder: () => ({ status: 429, retryAfter }) });
+    const reply = await app.get(); assert.equal(reply.rateLimitSource, 'reader'); assert.equal(reply.retryAt, retryAt);
+    assert.equal((await app.get()).rateLimitSource, 'reader'); assert.equal(app.requests.length, 1);
+  }
+});

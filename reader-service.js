@@ -65,17 +65,29 @@
       return { saved: Boolean(saved), deleted: Boolean(deleted), url };
     };
     const error = (code, extra = {}) => Object.assign(new Error(code), { code, ...extra });
-    const api = async (path, init = {}) => {
+    // Operations are serialized, so checking the complete strict-delete cost
+    // here prevents our own limiter from stranding its post-DELETE verification.
+    // A prepared confirmation reserves nothing while the user considers it.
+    const capacity = async (needs) => {
       const { readerToken, readerPanelBudget = {} } = await read({ readerToken: '', readerPanelBudget: {} });
       if (readerToken !== operationToken) throw error('auth_changed');
       if (typeof readerToken !== 'string' || !readerToken.trim()) throw error('missing_token');
       if (!(await operationIsCurrent())) throw error('invalid_sender');
       // Persist cooldowns across MV3 worker restarts. Fail fast instead of queuing stale edits.
-      if (readerPanelBudget.blockedUntil > now()) throw error('rate_limited', { retryAt: readerPanelBudget.blockedUntil });
+      if (readerPanelBudget.blockedUntil > now()) throw error('rate_limited', { retryAt: readerPanelBudget.blockedUntil, rateLimitSource: 'reader' });
+      let retryAt = 0;
+      for (const [group, count] of Object.entries(needs)) {
+        const times = (readerPanelBudget[group] || []).filter(t => t > now() - 60000).sort((a, b) => a - b);
+        const max = group === 'update' ? 45 : 18; // leave headroom for other clients
+        if (times.length + count > max) retryAt = Math.max(retryAt, times[times.length + count - max - 1] + 60000);
+      }
+      if (retryAt) throw error('rate_limited', { retryAt, rateLimitSource: 'local' });
+      return { readerToken, readerPanelBudget };
+    };
+    const api = async (path, init = {}) => {
       const group = init.method === 'PATCH' ? 'update' : init.method === 'DELETE' ? 'delete' : 'list';
+      const { readerToken, readerPanelBudget } = await capacity({ [group]: 1 });
       const times = (readerPanelBudget[group] || []).filter(t => t > now() - 60000);
-      const max = group === 'update' ? 45 : 18; // leave headroom for other clients
-      if (times.length >= max) throw error('rate_limited', { retryAt: times[0] + 60000 });
       readerPanelBudget[group] = [...times, now()];
       await write({ readerPanelBudget });
       let response;
@@ -90,7 +102,7 @@
         const delay = /^\d+$/.test(retry || '') ? Number(retry) * 1000 : Date.parse(retry) - now();
         const retryAt = now() + Math.max(60000, Number.isFinite(delay) ? delay : 0);
         await write({ readerPanelBudget: { ...readerPanelBudget, blockedUntil: retryAt } });
-        throw error('rate_limited', { retryAt });
+        throw error('rate_limited', { retryAt, rateLimitSource: 'reader' });
       }
       if ([401, 403].includes(response.status)) throw error('unauthorized');
       if (response.status === 404) throw error('not_found');
@@ -173,6 +185,7 @@
       await storageQueue;
       const mapped = (await read({ [KEY]: {} }))[KEY]?.[url]?.id;
       if (mapped && mapped !== id) throw error('document_changed');
+      if (requireDelete) await capacity({ list: 2, delete: 1 });
       let data;
       try { data = await api(`list/?id=${encodeURIComponent(id)}`); }
       catch (e) { if (e.code !== 'not_found') throw e; }
@@ -207,7 +220,7 @@
         // id can produce a hover success receipt. Never retry a mutation.
         let verification;
         try { verification = await api(`list/?id=${encodeURIComponent(id)}`); }
-        catch (e) { if (e.code !== 'not_found') throw error('delete_uncertain', { retryAt: e.retryAt }); }
+        catch (e) { if (e.code !== 'not_found') throw error('delete_uncertain', { retryAt: e.retryAt, rateLimitSource: e.rateLimitSource }); }
         const remaining = verification?.results.find(item => item.id === id);
         if (remaining && !remaining.is_deleted) throw error('delete_still_present');
         if (verification?.results.length && !remaining) throw error('delete_uncertain');
@@ -281,9 +294,10 @@
         if (message.type === 'reader-panel-save-note') return saveNote(message);
         if (message.type === 'reader-panel-delete') return deleteDocument(message);
         if (message.type === 'reader-panel-move') return moveLocation(message);
-        if (message.type === 'reader-watch-get') {
+        if (['reader-watch-get', 'reader-watch-prepare-delete'].includes(message.type)) {
           const url = C.canonical(message.pageUrl);
           if (!url || !C.validId(message.id)) throw error('invalid_request');
+          if (message.type === 'reader-watch-prepare-delete') await capacity({ list: 3, delete: 1 });
           return { ok: true, document: await byId(url, message.id) };
         }
         if (message.type === 'reader-watch-move') return moveLocation(message);
@@ -292,7 +306,7 @@
         if (message.type === 'reader-card-delete') return deleteCard(message);
         throw error('invalid_request');
       })
-        .catch(e => ({ ok: false, code: e.code || 'storage_error', retryAt: e.retryAt }));
+        .catch(e => ({ ok: false, code: e.code || 'storage_error', retryAt: e.retryAt, rateLimitSource: e.rateLimitSource }));
       operationQueue = result.then(() => {});
       if (key) { pending.set(key, result); result.finally(() => pending.delete(key)); }
       return result;
