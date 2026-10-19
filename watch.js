@@ -70,8 +70,8 @@
     const card = node('article', '', null, 'video'); card.dataset.url = item.videoUrl;
     const mediaBox = node('div', '', card, 'video-media'), thumbnailLink = node('a', '', mediaBox, 'thumbnail-link');
     thumbnailLink.href = item.videoUrl; thumbnailLink.target = '_blank'; thumbnailLink.rel = 'noopener noreferrer';
-    const image = node('img', '', thumbnailLink, 'thumbnail'); image.alt = ''; image.loading = 'lazy'; image.decoding = 'async'; image.width = 480; image.height = 270;
-    image.referrerPolicy = 'no-referrer'; image.src = `https://i.ytimg.com/vi/${encodeURIComponent(new URL(item.videoUrl).searchParams.get('v'))}/mqdefault.jpg`;
+    const image = node('img', '', thumbnailLink, 'thumbnail');
+    const thumbnail = globalThis.MVSWatchThumbnail.attach(image, item.videoUrl, { onUnavailable: () => { thumbnailLink.dataset.thumbnailUnavailable = 'true'; } });
     const copy = node('div', '', card, 'video-copy'), heading = node('h2', '', copy), link = node('a', '', heading);
     link.href = item.videoUrl; link.target = '_blank'; link.rel = 'noopener noreferrer';
     const metadata = node('dl', '', copy, 'metadata');
@@ -102,11 +102,11 @@
       if (['ArrowDown', 'ArrowUp'].includes(event.key)) { event.preventDefault(); const captured = target(); if (captured) locationMenu.open(captured, event.key === 'ArrowUp' ? 'last' : 'first'); }
     });
     refresh.addEventListener('click', () => void refreshCard(item.videoUrl, refresh));
-    return { card, link, channel, date, checked, summary, move, readerLink, refresh, trash, note, thumbnailLink };
+    return { card, link, channel, date, checked, summary, move, readerLink, refresh, trash, note, thumbnailLink, thumbnail };
   };
   const render = () => {
     const order = items.map(item => item.videoUrl);
-    for (const url of rows.keys()) if (!order.includes(url)) rows.delete(url);
+    for (const url of rows.keys()) if (!order.includes(url)) { rows.get(url).thumbnail.destroy(); rows.delete(url); }
     const cards = [];
     for (const item of items) {
       let row = rows.get(item.videoUrl); if (!row) { row = makeRow(item); rows.set(item.videoUrl, row); }

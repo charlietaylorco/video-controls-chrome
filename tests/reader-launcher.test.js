@@ -82,7 +82,7 @@ test('SPA/removal/root remount/repeated injection never duplicates or integrates
   vm.runInContext(f.source,f.context); assert.equal(f.nodes.filter(n=>n.id==='mvs-recent-saves-launcher').length,1);
   assert.ok(f.observers[0].targets.every(row=>!row.options.subtree));
   f.observers[0].callback(); assert.equal(f.timers.size,0);
-  f.navigate('/embed/video'); assert.equal(host.isConnected,false); f.navigate('/watch'); assert.equal(host.isConnected,true);
+  f.navigate('/embed/video'); assert.equal(host.isConnected,false); f.navigate('/results'); assert.equal(host.isConnected,true);
 });
 
 test('themes update without reading credentials; a late initial settings read cannot undo a live opt-out', () => {
@@ -102,4 +102,27 @@ test('themes update without reading credentials; a late initial settings read ca
 test('standalone embed and music pages do not auto-mount the Recent saves shortcut', () => {
   assert.equal(fixture({pathname:'/embed/video'}).host,undefined);
   assert.equal(fixture({hostname:'music.youtube.com'}).host,undefined);
+});
+
+
+test('direct watch/live routes keep only Recent saves hidden and browsing SPA navigation reuses the same host', () => {
+  for (const pathname of ['/watch','/watch/','/live','/live/','/live/video']) {
+    const f = fixture({pathname,saved:{showReaderPanel:true,recentSavesLauncherPosition:'top-right'}}), host=f.host;
+    const panel=f.document.createElement('reader-panel');f.document.documentElement.append(panel);
+    assert.equal(host.isConnected,false);assert.ok(f.context.__mvsRecentLauncher);f.mutate();assert.equal(host.isConnected,false);
+    for (const route of ['/','/results','/feed/subscriptions','/@channel','/watching','/live_chat']) {
+      f.navigate(route);assert.equal(host.isConnected,true);assert.equal(host.attributes['data-position'],'top-right');assert.equal(panel.isConnected,true);
+      f.location.pathname=pathname;f.events.get('yt-navigate-finish')();assert.equal(host.isConnected,false);assert.equal(panel.isConnected,true);
+    }
+    f.navigate('/');vm.runInContext(f.source,f.context);assert.equal(f.nodes.filter(n=>n.id==='mvs-recent-saves-launcher').length,1);assert.equal(f.messages.length,0);assert.equal(f.timers.size,0);
+  }
+});
+
+test('watch/live visibility never overrides saved opt-out, corner or fullscreen and adds no polling', () => {
+  const f=fixture({pathname:'/watch',saved:{showRecentSavesLauncher:false,recentSavesLauncherPosition:'bottom-right'}});
+  f.navigate('/');assert.equal(f.host.isConnected,false);
+  f.navigate('/live/video');f.change({showRecentSavesLauncher:true,recentSavesLauncherPosition:'top-left'});assert.equal(f.host.isConnected,false);
+  f.navigate('/feed/subscriptions');assert.equal(f.host.isConnected,true);assert.equal(f.host.attributes['data-position'],'top-left');
+  f.fullscreen({});f.navigate('/watch');f.navigate('/results');assert.equal(f.host.isConnected,false);
+  f.fullscreen(null);assert.equal(f.host.isConnected,true);assert.equal(f.host.attributes['data-position'],'top-left');assert.equal(f.timers.size,0);
 });
