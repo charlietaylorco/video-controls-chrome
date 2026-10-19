@@ -115,7 +115,7 @@
     view.location.setAttribute('aria-expanded', 'false'); view.more.setAttribute('aria-expanded', 'false');
     if (focus) (kind === 'location' ? view.location : view.more).focus();
   };
-  const menuItems = () => (menu?.kind === 'location' ? view.locationItems : [view.link, view.settings])
+  const menuItems = () => (menu?.kind === 'location' ? view.locationItems : [view.link, view.settings, view.watchList])
     .filter(item => !item.disabled && item.getAttribute('aria-disabled') !== 'true');
   const openMenu = (kind, last = false) => {
     if (!open || !sameVideo() || (kind === 'location' ? view.location.disabled : view.more.disabled)) return;
@@ -224,6 +224,7 @@
     icon(link, ['M14 3h7v7', 'M10 14 21 3', 'M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5']);
     const settings = element('button', 'Options', moreMenu, { class: 'menu-item', role: 'menuitem', type: 'button', title: 'Options', 'aria-label': 'Extension options', tabindex: '-1' });
     icon(settings, ['M10 2h4l.6 2.7L17 6.1l2.6-.8 2 3.4-2 1.9v2.8l2 1.9-2 3.4-2.6-.8-2.4 1.4L14 22h-4l-.6-2.7L7 17.9l-2.6.8-2-3.4 2-1.9v-2.8l-2-1.9 2-3.4 2.6.8 2.4-1.4L10 2Z', 'M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0']);
+    const watchList = element('button', 'Recent saves', moreMenu, { class: 'menu-item', role: 'menuitem', type: 'button', tabindex: '-1' });
     const close = element('button', '', actions, { class: 'icon close', type: 'button', title: 'Close', 'aria-label': 'Close Reader' });
     icon(close, ['m6 6 12 12', 'M6 18 18 6']);
     const content = element('div', '', body, { class: 'content' });
@@ -269,6 +270,7 @@
     });
     header.addEventListener('lostpointercapture', endDrag);
     settings.addEventListener('click', () => { closeMenu(); void send({ type: 'open-options' }); });
+    watchList.addEventListener('click', () => { closeMenu(); void send({ type: 'open-watch-list' }); });
     more.addEventListener('click', () => openMenu('more'));
     locationButton.addEventListener('click', () => openMenu('location'));
     for (const [button, kind] of [[more, 'more'], [locationButton, 'location']]) button.addEventListener('keydown', event => {
@@ -316,7 +318,7 @@
     save.addEventListener('click', () => void saveNote());
     useRemote.addEventListener('click', () => resolveConflict(false));
     keepDraft.addEventListener('click', () => resolveConflict(true));
-    view = { header, content, toggle, dot, body, close, refresh, link, trash, settings, more, moreMenu, location: locationButton, locationLabel, locationMenu, locationItems, status, next, details, summary, tags, tagToggle, tagName, tagCount, tagTotal, summaryTab, noteTab, noteDot, summaryView, noteView, note, conflict, remote, save, dirty,
+    view = { header, content, toggle, dot, body, close, refresh, link, trash, settings, watchList, more, moreMenu, location: locationButton, locationLabel, locationMenu, locationItems, status, next, details, summary, tags, tagToggle, tagName, tagCount, tagTotal, summaryTab, noteTab, noteDot, summaryView, noteView, note, conflict, remote, save, dirty,
       deletion, deleteTitle, deleteIdentity, deleteDraft, cancelDelete, confirmDelete };
     peek = globalThis.MVSReaderPeek?.create({ toggle, root, send, beforePeek: () => sync(false), getTarget: () => {
       const s = current();

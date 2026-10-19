@@ -1,0 +1,9 @@
+# Confirmed extension-origin embed limitation
+
+Charlie’s real extension-origin test showed **Video player configuration error / Error 153**. This was a failed playback attempt, not a success. The earlier local synthetic-frame checks verified lifecycle/focus only and did not establish YouTube playback. No live playback fix has been validated.
+
+[YouTube’s official identification guidance](https://developers.google.com/youtube/terms/required-minimum-functionality#api-client-identity-and-credentials) requires Referer or supported client identification and recommends `strict-origin-when-cross-origin`, which the trial already used. It documents native WebView header/base-URL mechanisms and a specific SFSafariViewController `origin` fallback, not a general Chrome-extension plain-iframe replacement for Referer. The [player `origin` parameter](https://developers.google.com/youtube/player_parameters#origin) is documented as an IFrame API security parameter; inventing an HTTPS site origin is not a supported fix for this extension page.
+
+Chrome request-header modification requires [declarativeNetRequest permissions](https://developer.chrome.com/docs/extensions/reference/api/declarativeNetRequest), which this extension does not have. Adding permissions, spoofing identity, relaxing security/CSP or deploying a hosted wrapper is outside the approved scope. A bounded review found no documented supported fix within those constraints; this is not a claim that all extension embedding is impossible.
+
+The current build therefore removes the failing inline-player path and its “opened” feedback. Both thumbnail and title are ordinary YouTube watch-page links and work independently of embedded-player identification. No duplicate Open on YouTube link is shown. Reader data, permissions and production CSP remain unchanged. The toolbar/header shortcut, summaries, custom location menu and safe Trash flow remain available.

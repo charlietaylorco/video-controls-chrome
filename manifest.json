@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "description": "A minimal top-left overlay for controlling HTML video playback speed.",
   "action": {
-    "default_title": "Video Controls"
+    "default_title": "Recent saves"
   },
   "permissions": [
     "storage",
@@ -60,6 +60,7 @@
       ],
       "js": [
         "reader-core.js",
+        "reader-header.js",
         "reader-editor.js",
         "reader-peek.js",
         "reader-panel.js"

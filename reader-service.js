@@ -1,6 +1,6 @@
 /* Runs only in the extension service worker. All authenticated requests stay here. */
 (() => {
-  const create = ({ storage, fetch: request, now = Date.now }) => {
+  const create = ({ storage, fetch: request, now = Date.now, history = null }) => {
     const C = globalThis.MVSReaderCore;
     const KEY = 'readerDocuments';
     let storageQueue = Promise.resolve();
@@ -52,7 +52,7 @@
       patch.readerSavedUrls = flags;
       // Absence alone is not evidence that this extension performed a deletion.
       if (confirmedDeletion && !replacement) deleted[url] = { id, at: now() };
-    });
+    }).then(async () => { try { await history?.mark(url, id, confirmedDeletion ? 'deleted' : 'missing'); } catch { /* optional history must not alter existing Reader transport */ } });
     const savedState = async value => {
       const url = C.canonical(value);
       if (!url) return { saved: false, deleted: false };
@@ -114,10 +114,14 @@
       const clean = C.cleanDocument(doc, url);
       if (!clean) {
         if (!doc || doc.is_deleted) await forgetDeleted(url, id);
-        else await forget(url, id);
+        else {
+          await forget(url, id);
+          try { await history?.mark(url, id, 'missing'); } catch { /* optional cache */ }
+        }
         throw error('not_found');
       }
       if ((await read({ readerDeletedVideos: {} })).readerDeletedVideos?.[url]) await remember(url, clean.id);
+      try { await history?.verify(url, clean); } catch { /* Watch list surfaces required cache errors in its own route */ }
       return clean;
     };
     const get = async (message) => {
@@ -144,7 +148,10 @@
           }
         }
       });
-      if (matches[0]) return { ok: true, document: matches[0] };
+      if (matches[0]) {
+        try { await history?.verify(url, matches[0]); } catch { /* optional cache */ }
+        return { ok: true, document: matches[0] };
+      }
       return { ok: true, document: null, nextCursor: typeof data.nextPageCursor === 'string' ? data.nextPageCursor : null };
     };
     const saveNote = async (message) => {
@@ -274,6 +281,13 @@
         if (message.type === 'reader-panel-save-note') return saveNote(message);
         if (message.type === 'reader-panel-delete') return deleteDocument(message);
         if (message.type === 'reader-panel-move') return moveLocation(message);
+        if (message.type === 'reader-watch-get') {
+          const url = C.canonical(message.pageUrl);
+          if (!url || !C.validId(message.id)) throw error('invalid_request');
+          return { ok: true, document: await byId(url, message.id) };
+        }
+        if (message.type === 'reader-watch-move') return moveLocation(message);
+        if (message.type === 'reader-watch-delete') return deleteDocument(message, { requireDelete: true });
         if (message.type === 'reader-card-get') return getCard(message);
         if (message.type === 'reader-card-delete') return deleteCard(message);
         throw error('invalid_request');

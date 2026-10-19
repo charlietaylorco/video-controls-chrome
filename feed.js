@@ -2071,13 +2071,13 @@ async function saveToReadwise(item) {
   if (response?.ok && !response.alreadyExists) {
     markLocalUrlState(READER_SAVED_URLS_KEY, item.link);
     markLocalUrlState(READER_SAVED_URLS_KEY, response.url);
-    return { status: 'saved' };
+    return { status: 'saved', historyWarning: response.historyWarning };
   }
 
   if (response?.ok && response.alreadyExists) {
     markLocalUrlState(READER_SAVED_URLS_KEY, item.link);
     markLocalUrlState(READER_SAVED_URLS_KEY, response.url);
-    return { status: 'exists' };
+    return { status: 'exists', historyWarning: response.historyWarning };
   }
 
   if (response?.code === 'missing_token') {
@@ -2129,7 +2129,7 @@ async function handleSaveToReadwise(item, button) {
 
     if (result.status === 'saved') {
       setReaderButtonState(button, 'saved');
-      showToast(`Saved "${item.title}" to Reader.`);
+      showToast(result.historyWarning ? 'Saved to Reader, but Recent saves storage could not be updated.' : `Saved "${item.title}" to Reader.`);
       item.isSavedToReader = true;
       scheduleReaderButtonReset(button);
       renderLists();
@@ -2138,7 +2138,7 @@ async function handleSaveToReadwise(item, button) {
 
     if (result.status === 'exists') {
       setReaderButtonState(button, 'exists');
-      showToast('This video is already in Reader.');
+      showToast(result.historyWarning ? 'Already in Reader, but Recent saves storage could not be updated.' : 'This video is already in Reader.');
       item.isSavedToReader = true;
       scheduleReaderButtonReset(button);
       renderLists();

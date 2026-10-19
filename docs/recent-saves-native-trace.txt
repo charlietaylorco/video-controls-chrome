@@ -1,0 +1,35 @@
+Fixture ready. No real Reader data.
+Local page: 12 cards
+Local page: 12 cards
+GET list/?id=mock-25
+HTTP 200
+Local page: 12 cards
+Local page: 12 cards
+GET list/?id=mock-26
+HTTP 401
+Local page: 12 cards
+GET list/?id=mock-26
+HTTP 200
+PATCH update/mock-26/
+HTTP 200
+GET list/?id=mock-26
+HTTP 200
+Local page: 12 cards
+GET list/?id=mock-26
+HTTP 200
+Local page: 12 cards
+GET list/?id=mock-26
+HTTP 200
+GET list/?id=mock-26
+HTTP 200
+DELETE delete/mock-26/
+HTTP 204
+GET list/?id=mock-26
+HTTP 200
+Local page: 12 cards
+Local page: 12 cards
+Local page: 12 cards
+GET list/?id=mock-3
+HTTP 200
+Local page: 12 cards
+Local page: 12 cards
