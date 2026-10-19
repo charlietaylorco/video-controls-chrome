@@ -54,13 +54,6 @@ Object.defineProperty(HTMLImageElement.prototype, 'src', { get: imageSource.get,
   const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="224" height="126"><rect width="224" height="126" fill="#505d48"/><circle cx="176" cy="32" r="13" fill="#d6dfca"/><path d="M0 126 60 44 117 108 155 73 224 126Z" fill="#718267"/></svg>';
   imageSource.set.call(this, 'data:image/svg+xml,' + encodeURIComponent(svg));
 } });
-const frameSource = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'src');
-Object.defineProperty(HTMLIFrameElement.prototype, 'src', { get: frameSource.get, set(value) {
-  const url = new URL(value);
-  if (url.origin !== 'https://www.youtube.com' || !url.pathname.startsWith('/embed/')) throw Error('Fixture blocks external frames');
-  report('Mock player request: ' + url.pathname + ' autoplay=' + url.searchParams.get('autoplay'));
-  frameSource.set.call(this, 'player.html?' + new URLSearchParams({ video: url.pathname.split('/').at(-1), unavailable: options.get('player_error') || '' }));
-} });
 ${source('reader-core.js')}
 ${source('reader-watch-core.js')}
 ${source('reader-watch-store.js')}
@@ -95,11 +88,12 @@ document.getElementById('fixture-auth').addEventListener('click', () => chrome.s
 document.addEventListener('click', event => { if (event.target.closest('a')) { event.preventDefault(); report('Fixture blocked link navigation'); } }, true);
 `;
 let html = fs.readFileSync(path.join(root, 'watch.html'), 'utf8').replace(/<script[^>]*src="[^"]+"[^>]*><\/script>/g, '');
-html = html.replace('<head>', '<head><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\' \'unsafe-inline\'; style-src \'self\' \'unsafe-inline\'; img-src data:; frame-src \'self\'; connect-src \'none\'">');
+html = html.replace('<head>', '<head><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\' \'unsafe-inline\'; style-src \'self\' \'unsafe-inline\'; img-src data:; connect-src \'none\'">');
 const tools = '<aside style="font:11px system-ui;padding:10px 20px;background:#e5e8df;color:#25301d"><strong>Mock data only · isolated native browser check</strong> · <span id="fixture-count">Mock Reader requests: 0</span> <button id="fixture-add" type="button">Add a mock save</button> <button id="fixture-auth" type="button">Change mock connection</button> <label><input type="checkbox" id="fixture-slow"> Slow responses</label> <label><input type="checkbox" id="fixture-fail"> Reject Reader requests</label><details><summary>Mock trace</summary><ol id="fixture-log"></ol></details></aside>';
-html = html.replace('<body>', '<body>' + tools).replace('</body>', '<script>' + bootstrap + '</script><script src="watch-player.js"></script><script src="watch.js"></script></body>');
+html = html.replace('<body>', '<body>' + tools).replace('</body>', '<script>' + bootstrap + '</script><script src="watch-location-menu.js"></script><script src="watch.js"></script></body>');
 fs.writeFileSync(path.join(destination, 'index.html'), html);
-for (const file of ['watch.css', 'watch-player.js', 'watch.js']) fs.copyFileSync(path.join(root, file), path.join(destination, file));
+for (const file of ['watch.css', 'watch-location-menu.js', 'watch.js']) fs.copyFileSync(path.join(root, file), path.join(destination, file));
 console.log(destination);
 
-fs.writeFileSync(path.join(destination, 'player.html'), `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"><style>body{margin:0;padding:14px;background:#19221a;color:#e8eee2;font:12px system-ui}h1{font-size:16px;margin:8px 0}p{margin:8px 0}button{padding:8px;font:inherit}</style></head><body><h1>Mock YouTube player</h1><p id="identity"></p><p id="state">Paused · autoplay off · synthetic data only</p><button id="play">Play mock video</button><script>const q=new URLSearchParams(location.search);document.querySelector('#identity').textContent='Fixture video: '+q.get('video');if(q.get('unavailable')){document.querySelector('#state').textContent='Mock unavailable player (simulates identification error 153)';document.querySelector('#play').hidden=true;}document.querySelector('#play').onclick=()=>document.querySelector('#state').textContent='Playing mock video · no real media/network';</script></body></html>`);
+fs.copyFileSync(path.join(root, 'reader-header.js'), path.join(destination, 'reader-header.js'));
+fs.writeFileSync(path.join(destination, 'header.html'), `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'"><style>body{margin:0;background:#fafafa;color:#222;font:14px system-ui}aside{padding:18px;background:#eceee7}button{padding:8px}ytd-masthead{display:block;padding:12px 24px;border-bottom:1px solid #ddd}#end{display:flex;justify-content:flex-end}#buttons{display:flex;align-items:center;gap:10px}main{padding:32px}</style></head><body><aside>Mock YouTube header · <span id="requests">Recent saves requests: 0</span> <button id="remount">Remount header</button> <button id="navigate">Simulate navigation</button></aside><div id="mount"></div><main><h1>Mock YouTube page</h1><p>Native controls and extension icon should remain available across remounts/navigation.</p></main><script>let requests=0;window.chrome={runtime:{lastError:null,sendMessage(message,cb){if(message.type==='open-watch-list')document.querySelector('#requests').textContent='Recent saves requests: '+ ++requests;cb({ok:true});}}};function mount(){document.querySelector('#mount').innerHTML='<ytd-masthead><div id="end"><div id="buttons"><button>Native search</button><button>Native account</button></div></div></ytd-masthead>';}mount();document.querySelector('#remount').onclick=mount;document.querySelector('#navigate').onclick=()=>window.dispatchEvent(new Event('yt-navigate-finish'));</script><script src="reader-header.js"></script><script>window.fixtureHeader=MVSRecentHeader.create();</script></body></html>`);

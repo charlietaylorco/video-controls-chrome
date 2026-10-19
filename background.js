@@ -19,6 +19,41 @@ const MAX_READER_SAVED_URLS = 2000;
 const DOWNIE_SENT_URLS_KEY = "downieSentUrls";
 const MAX_DOWNIE_SENT_URLS = 2000;
 const FEED_URL = chrome.runtime.getURL("feed.html");
+const WATCH_URL = chrome.runtime.getURL("watch.html");
+const openingRecentSaves = new Map();
+const openRecentSaves = (sourceTab) => {
+  const privateContext = Boolean(sourceTab?.incognito);
+  if (openingRecentSaves.has(privateContext)) return openingRecentSaves.get(privateContext);
+  const work = new Promise(resolve => {
+    const finish = ok => resolve(ok ? { ok: true } : { ok: false, code: "runtime_error" });
+    const create = () => {
+      const options = { url: WATCH_URL };
+      if (Number.isInteger(sourceTab?.windowId) && sourceTab.windowId >= 0) options.windowId = sourceTab.windowId;
+      try { chrome.tabs.create(options, tab => finish(!chrome.runtime.lastError && Boolean(tab))); } catch { finish(false); }
+    };
+    const matches = tab => Number.isInteger(tab?.id) && tab.id >= 0 && tab.url === WATCH_URL && !tab.pendingUrl && Boolean(tab.incognito) === privateContext;
+    try {
+      chrome.tabs.query({}, tabs => {
+        if (chrome.runtime.lastError) { create(); return; }
+        const candidates = (tabs || []).filter(matches);
+        const match = candidates.find(tab => tab.windowId === sourceTab?.windowId) || candidates.find(tab => tab.active) || candidates[0];
+        if (!match) { create(); return; }
+        chrome.tabs.get(match.id, current => {
+          if (chrome.runtime.lastError || !matches(current)) { create(); return; }
+          chrome.tabs.update(current.id, { active: true }, activated => {
+            if (chrome.runtime.lastError || !activated) { create(); return; }
+            if (Number.isInteger(activated.windowId) && chrome.windows?.update) {
+              chrome.windows.update(activated.windowId, { focused: true }, () => { void chrome.runtime.lastError; finish(true); });
+            } else finish(true);
+          });
+        });
+      });
+    } catch { create(); }
+  });
+  openingRecentSaves.set(privateContext, work);
+  work.finally(() => openingRecentSaves.delete(privateContext));
+  return work;
+};
 
 const isHttpUrl = (value) => {
   if (typeof value !== "string") return false;
@@ -493,7 +528,7 @@ const pickTargetUrl = (message, sender) => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "open-watch-list") {
     if (sender.id !== chrome.runtime.id) { sendResponse({ ok: false, code: "invalid_sender" }); return undefined; }
-    chrome.tabs.create({ url: chrome.runtime.getURL("watch.html") }); sendResponse({ ok: true }); return undefined;
+    openRecentSaves(sender.tab).then(sendResponse); return true;
   }
   if (typeof message?.type === "string" && message.type.startsWith("watch-list-")) {
     const trusted = sender.id === chrome.runtime.id && sender.url === chrome.runtime.getURL("watch.html") &&
@@ -763,6 +798,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true;
 });
 
-chrome.action?.onClicked?.addListener(() => {
-  chrome.tabs.create({ url: FEED_URL });
+chrome.action?.onClicked?.addListener(tab => {
+  void openRecentSaves(tab);
 });

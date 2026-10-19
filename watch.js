@@ -41,7 +41,17 @@
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('d', commands); svg.append(path); parent.append(svg);
   };
-  const player = globalThis.MVSWatchPlayer.create({ announce });
+  const menuCurrent = target => loaded && !refreshing && !pending.size && !deletion && items.some(item => item.videoUrl === target.videoUrl && item.readerId === target.id && item.location === target.location && item.status === 'saved');
+  const locationMenu = globalThis.MVSWatchLocationMenu.create({ isCurrent: menuCurrent, choose: (target, value) => {
+    if (value === 'trash') void prepareDelete(target.videoUrl, target.trigger);
+    else void mutate(target.videoUrl, value, target.trigger);
+  } });
+  const restoreActionFocus = origin => {
+    const active = document.activeElement;
+    if (active && active !== document.body && active !== origin && !$('deletion').contains(active) && active.isConnected) return;
+    if (origin?.isConnected && !origin.disabled) origin.focus({ preventScroll: true });
+    else $('filters').querySelector('[aria-pressed="true"]')?.focus({ preventScroll: true });
+  };
   const controls = () => {
     $('refresh').disabled = refreshing || pending.size > 0 || Boolean(deletion);
     $('refresh').textContent = refreshing ? 'Refreshing…' : 'Refresh this page';
@@ -52,74 +62,60 @@
   };
   const makeRow = item => {
     const card = node('article', '', null, 'video'); card.dataset.url = item.videoUrl;
-    const mediaBox = node('div', '', card, 'video-media'), thumbnailButton = node('button', '', mediaBox, 'thumbnail-button'); thumbnailButton.type = 'button';
-    const image = node('img', '', thumbnailButton, 'thumbnail'); image.alt = ''; image.loading = 'lazy'; image.decoding = 'async'; image.width = 480; image.height = 270;
+    const mediaBox = node('div', '', card, 'video-media'), thumbnailLink = node('a', '', mediaBox, 'thumbnail-link');
+    thumbnailLink.href = item.videoUrl; thumbnailLink.target = '_blank'; thumbnailLink.rel = 'noopener noreferrer';
+    const image = node('img', '', thumbnailLink, 'thumbnail'); image.alt = ''; image.loading = 'lazy'; image.decoding = 'async'; image.width = 480; image.height = 270;
     image.referrerPolicy = 'no-referrer'; image.src = `https://i.ytimg.com/vi/${encodeURIComponent(new URL(item.videoUrl).searchParams.get('v'))}/mqdefault.jpg`;
-    const playPrompt = node('span', '', thumbnailButton, 'play-prompt'); playPrompt.setAttribute('aria-hidden', 'true'); icon(playPrompt, 'm9 6 10 6-10 6Z');
     const copy = node('div', '', card, 'video-copy'), heading = node('h2', '', copy), link = node('a', '', heading);
     link.href = item.videoUrl; link.target = '_blank'; link.rel = 'noopener noreferrer';
     const metadata = node('dl', '', copy, 'metadata');
     const field = label => { const group = node('div', '', metadata); node('dt', label, group, 'sr-only'); return node('dd', '', group); };
-    const channel = field('Channel'), tags = field('Tags'); channel.className = 'channel-name';
-    const locationRow = node('div', '', copy, 'location-row'), locationLabel = node('label', '', locationRow);
-    node('span', 'Saved location', locationLabel, 'sr-only');
-    const move = node('select', '', locationLabel);
-    const placeholder = node('option', 'Not checked', move); placeholder.value = ''; placeholder.disabled = true;
-    for (const [value, label] of Object.entries(C.locations)) { const option = node('option', label, move); option.value = value; }
-    const removeGroup = node('optgroup', '', move); removeGroup.label = 'Remove document';
-    const trash = node('option', 'Trash…', removeGroup, 'trash-option'); trash.value = 'trash';
+    const channel = field('Channel'); channel.className = 'channel-name';
+    const locationRow = node('div', '', copy, 'location-row'), move = node('button', '', locationRow, 'location-trigger'); move.type = 'button';
+    move.setAttribute('aria-haspopup', 'menu'); move.setAttribute('aria-expanded', 'false'); move.setAttribute('aria-controls', locationMenu.id);
     const locationActions = node('div', '', locationRow, 'location-actions');
-    const youtubeLink = node('a', 'Open on YouTube', locationActions, 'youtube-link'); youtubeLink.href = item.videoUrl; youtubeLink.target = '_blank'; youtubeLink.rel = 'noopener noreferrer';
     const readerLink = node('a', '', locationActions, 'reader-link'); readerLink.target = '_blank'; readerLink.rel = 'noopener noreferrer'; readerLink.title = 'Open in Reader';
     icon(readerLink, 'M14 3h7v7M10 14 21 3M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5');
-    const closePlayer = node('button', '', locationActions, 'player-close'); closePlayer.type = 'button'; closePlayer.title = 'Close player'; closePlayer.setAttribute('aria-label', 'Close YouTube player'); closePlayer.hidden = true;
-    icon(closePlayer, 'm6 6 12 12M6 18 18 6');
     const summary = node('p', '', copy, 'summary-text');
     const footer = node('div', '', copy, 'card-footer'), footerDetails = node('div', '', footer, 'footer-details');
     const note = node('p', '', footerDetails, 'row-status'); note.setAttribute('role', 'status');
     const footerMeta = node('div', '', footerDetails, 'footer-meta'), date = node('time', '', footerMeta), checked = node('span', '', footerMeta);
-    const refresh = node('button', '', footer, 'card-refresh'); refresh.type = 'button';
+    const footerActions = node('div', '', footer, 'footer-actions');
+    const refresh = node('button', '', footerActions, 'card-refresh'); refresh.type = 'button';
     icon(refresh, 'M20 7v5h-5M20 12a8 8 0 1 0-2.3 5.7');
-    move.addEventListener('change', () => {
-      const destination = move.value, current = items.find(row => row.videoUrl === item.videoUrl);
-      move.value = current && Object.hasOwn(C.locations, current.location) ? current.location : '';
-      if (destination === 'trash') void prepareDelete(item.videoUrl);
-      else if (destination) void mutate(item.videoUrl, destination);
+    const trash = node('button', '', footerActions, 'card-trash'); trash.type = 'button'; trash.title = 'Delete from Reader';
+    icon(trash, 'M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7');
+    trash.addEventListener('click', () => void prepareDelete(item.videoUrl, trash));
+    const target = () => {
+      const current = items.find(row => row.videoUrl === item.videoUrl);
+      return current && { videoUrl: current.videoUrl, id: current.readerId, location: current.location, title: current.title, trigger: move };
+    };
+    move.addEventListener('click', () => { const captured = target(); if (captured) locationMenu.toggle(captured); });
+    move.addEventListener('keydown', event => {
+      if (['ArrowDown', 'ArrowUp'].includes(event.key)) { event.preventDefault(); const captured = target(); if (captured) locationMenu.open(captured, event.key === 'ArrowUp' ? 'last' : 'first'); }
     });
-    refresh.addEventListener('click', () => void refreshCard(item.videoUrl));
-    thumbnailButton.addEventListener('click', () => {
-      const current = items.find(row => row.videoUrl === item.videoUrl); if (!current || !loaded || deletion) return;
-      player.open({ videoUrl: current.videoUrl, title: current.title, host: mediaBox, trigger: thumbnailButton, close: closePlayer });
-    });
-    closePlayer.addEventListener('click', () => player.clear({ focus: true }));
-    closePlayer.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); player.clear({ focus: true }); } });
-    return { card, link, channel, tags, date, checked, placeholder, summary, move, readerLink, refresh, note, thumbnailButton, youtubeLink };
+    refresh.addEventListener('click', () => void refreshCard(item.videoUrl, refresh));
+    return { card, link, channel, date, checked, summary, move, readerLink, refresh, trash, note, thumbnailLink };
   };
   const render = () => {
     const order = items.map(item => item.videoUrl);
-    player.keep(order);
     for (const url of rows.keys()) if (!order.includes(url)) rows.delete(url);
     const cards = [];
     for (const item of items) {
       let row = rows.get(item.videoUrl); if (!row) { row = makeRow(item); rows.set(item.videoUrl, row); }
       row.link.textContent = item.title || `YouTube video · ${new URL(item.videoUrl).searchParams.get('v')}`;
-      row.thumbnailButton.setAttribute('aria-label', `Load YouTube player for ${item.title || 'video'}`); row.thumbnailButton.title = 'Load YouTube player';
-      row.youtubeLink.setAttribute('aria-label', `Open ${item.title || 'video'} on YouTube`);
+      row.thumbnailLink.setAttribute('aria-label', `Watch ${item.title || 'video'} on YouTube`); row.thumbnailLink.title = 'Open on YouTube';
       row.channel.textContent = item.author || 'Not retained';
-      const tags = Array.isArray(item.tags) ? W.tags(item.tags) : null;
-      row.tags.textContent = tags ? tags.length ? tags.slice(0, 3).join(' · ') + (tags.length > 3 ? ` +${tags.length - 3}` : '') : 'None' : 'Not fetched';
-      row.tags.title = tags?.join(' · ') || '';
       const savedDate = new Date(item.savedAt), hasSavedDate = Number.isFinite(savedDate.getTime());
       row.date.textContent = hasSavedDate ? `Saved ${savedDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}` : 'Saved date unavailable';
       row.date.dateTime = hasSavedDate ? savedDate.toISOString() : ''; row.date.setAttribute('aria-label', hasSavedDate ? `Saved date: ${savedDate.toLocaleString()}` : 'Saved date unavailable');
       row.checked.textContent = item.checkedAt ? `Checked ${new Date(item.checkedAt).toLocaleString()}` : 'Not checked';
-      row.placeholder.textContent = item.status === 'missing' ? 'Not found in Reader' : item.checkedAt ? C.locationLabel(item.location) : 'Not checked';
-      row.placeholder.hidden = Object.hasOwn(C.locations, item.location) && item.status === 'saved';
-      row.move.value = Object.hasOwn(C.locations, item.location) && item.status === 'saved' ? item.location : '';
+      row.move.textContent = item.status === 'missing' ? 'Not found in Reader' : item.checkedAt ? C.locationLabel(item.location) : 'Not checked';
       const text = item.summary == null ? 'Summary not fetched. Refresh this card to check Reader.' : item.summary || 'Summary not available yet. Reader may still be processing it. Refresh this card to check again.';
       row.summary.textContent = text + (item.summaryTruncated ? '\n\nCached excerpt. Open Reader for the full summary.' : '');
       row.summary.dataset.empty = String(!item.summary);
       row.move.disabled = pending.size > 0 || refreshing || Boolean(deletion) || !item.readerId || item.status !== 'saved' || !loaded;
+      row.trash.disabled = row.move.disabled; row.trash.setAttribute('aria-label', `Trash ${item.title || 'video'} from Reader`);
       row.refresh.disabled = pending.size > 0 || refreshing || Boolean(deletion) || !item.readerId || item.status === 'deleted' || !loaded;
       row.move.setAttribute('aria-label', `Saved location for ${item.title || 'video'}`);
       row.refresh.setAttribute('aria-label', `Refresh ${item.title || 'video'} from Reader`); row.refresh.title = 'Refresh this card from Reader';
@@ -130,9 +126,9 @@
       row.note.dataset.error = String(errors.has(item.videoUrl)); cards.push(row.card);
     }
     if (Array.from(grid.children).map(n => n.dataset.url).join('|') !== order.join('|')) {
-      // Reparenting an iframe can restart navigation. Unmount before reordering.
-      player.clear(); grid.replaceChildren(...cards);
+      locationMenu.close(); grid.replaceChildren(...cards);
     }
+    locationMenu.refresh();
     grid.hidden = loaded && items.length === 0; $('empty').hidden = !loaded || items.length > 0;
     grid.setAttribute('aria-busy', String(!loaded)); controls();
   };
@@ -145,8 +141,8 @@
     if (clearStatus && !refreshing && pending.size === 0 && !deletion) announce('');
   };
   const reloadLocal = () => { clearTimeout(reloadTimer); reloadTimer = setTimeout(() => { if (!refreshing && !pending.size && !deletion) void load(); }, 100); };
-  const changePage = () => { player.clear(); refreshRequest++; refreshing = false; loaded = false; render(); void load({ clearStatus: true }); };
-  const refreshCard = async url => {
+  const changePage = () => { locationMenu.close(); refreshRequest++; refreshing = false; loaded = false; render(); void load({ clearStatus: true }); };
+  const refreshCard = async (url, origin) => {
     const item = items.find(row => row.videoUrl === url);
     if (!item?.readerId || !loaded || refreshing || pending.size || deletion) return;
     const request = refreshRequest, id = item.readerId;
@@ -155,9 +151,9 @@
     pending.delete(url);
     if (request !== refreshRequest || !items.some(row => row.videoUrl === url && row.readerId === id)) { render(); return; }
     if (!reply.ok) rememberError(url, messageFor(reply));
-    await load(); announce(reply.ok ? 'Card updated from Reader.' : messageFor(reply), !reply.ok);
+    await load(); announce(reply.ok ? 'Card updated from Reader.' : messageFor(reply), !reply.ok); restoreActionFocus(origin);
   };
-  const mutate = async (url, destination) => {
+  const mutate = async (url, destination, origin) => {
     const item = items.find(row => row.videoUrl === url); if (!item || pending.has(url)) return;
     const request = refreshRequest;
     pending.add(url); errors.delete(url); render();
@@ -165,22 +161,26 @@
     pending.delete(url);
     if (request !== refreshRequest) { render(); return; }
     if (!reply.ok) rememberError(url, messageFor(reply));
-    await load(); announce(reply.ok ? `Moved to ${C.locationLabel(destination)}.` : messageFor(reply), !reply.ok);
+    await load(); announce(reply.ok ? `Moved to ${C.locationLabel(destination)}.` : messageFor(reply), !reply.ok); restoreActionFocus(origin);
   };
-  const prepareDelete = async url => {
+  const prepareDelete = async (url, origin) => {
     const item = items.find(row => row.videoUrl === url); if (!item || pending.has(url)) return;
     const request = refreshRequest;
     pending.add(url); errors.delete(url); render();
     const reply = await send({ type: 'watch-list-prepare-delete', videoUrl: url, id: item.readerId });
     pending.delete(url); render();
     if (request !== refreshRequest) return;
-    if (!reply.ok) { rememberError(url, messageFor(reply)); render(); announce(messageFor(reply), true); return; }
-    deletion = reply; $('delete-title').textContent = reply.title || 'Untitled Reader video';
+    if (!reply.ok) { rememberError(url, messageFor(reply)); render(); announce(messageFor(reply), true); restoreActionFocus(origin); return; }
+    deletion = { ...reply, origin }; $('delete-title').textContent = reply.title || 'Untitled Reader video';
     $('delete-identity').textContent = `${reply.videoUrl} · Reader ID: ${reply.id}`;
     $('delete-status').textContent = ''; $('delete-status').dataset.error = 'false'; $('confirm-delete').disabled = false; $('cancel-delete').disabled = false;
     $('deletion').showModal(); $('cancel-delete').focus(); render();
   };
-  const closeDelete = () => { if (deleting) return; $('deletion').close(); deletion = null; controls(); void load(); };
+  const closeDelete = () => {
+    if (deleting) return;
+    const origin = deletion?.origin; $('deletion').close(); deletion = null; controls();
+    void load().then(() => restoreActionFocus(origin));
+  };
   $('cancel-delete').addEventListener('click', closeDelete);
   $('deletion').addEventListener('cancel', event => { event.preventDefault(); closeDelete(); });
   $('confirm-delete').addEventListener('click', async () => {
@@ -222,7 +222,7 @@
     if (changes.readerPanelTheme) { theme = ['system', 'dark', 'light'].includes(changes.readerPanelTheme.newValue) ? changes.readerPanelTheme.newValue : 'system'; applyTheme(); }
     if (changes.readerWatchChanged || changes.readerDocuments || changes.readerDocumentUpdates || changes.readerDeletedVideos) reloadLocal();
     if (changes.readerToken) {
-      refreshRequest++; refreshing = false;
+      locationMenu.close(); refreshRequest++; refreshing = false;
       if (deletion && !deleting) closeDelete();
       render(); announce('Reader connection changed. Refresh to check current data.');
     }

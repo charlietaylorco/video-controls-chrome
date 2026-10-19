@@ -4,7 +4,7 @@
 <body>
   <main class="watch-app">
     <header class="page-header">
-      <h1>Recent saves</h1>
+      <h1>Recent saves</h1><a class="yt-lists-link" href="feed.html">YT Lists</a>
     </header>
     <section class="toolbar" aria-label="Recent saves controls"><div id="filters" class="filters" role="group" aria-label="Saved video views"></div><button id="refresh" class="primary" type="button">Refresh this page</button></section>
     <div class="notice-area"><p id="status" role="status" aria-live="polite">Loading your saved videos…</p></div>
@@ -13,5 +13,5 @@
     <nav class="pagination" aria-label="Recent saves pages"><button id="previous" type="button" disabled>Previous</button><span id="page-label">Page 1</span><button id="next" type="button" disabled>Next</button></nav>
   </main>
   <dialog id="deletion" aria-labelledby="delete-heading" aria-describedby="delete-effects"><form method="dialog"><p class="eyebrow">Reader document</p><h2 id="delete-heading">Delete from Reader?</h2><p id="delete-title" class="delete-title"></p><p id="delete-identity" class="identity"></p><p id="delete-effects">This deletes the Reader document, including its highlights and notes. The extension cannot undo it. Unsaved note drafts in other tabs stay there; copy them before reloading or closing those tabs.</p><p id="delete-status" class="dialog-status" role="status" aria-live="polite"></p><div class="dialog-actions"><button id="cancel-delete" type="button" autofocus>Cancel</button><button id="confirm-delete" class="destructive" type="button">Delete document</button></div></form></dialog>
-  <script src="reader-core.js"></script><script src="reader-watch-core.js"></script><script src="watch-player.js"></script><script src="watch.js"></script>
+  <script src="reader-core.js"></script><script src="reader-watch-core.js"></script><script src="watch-location-menu.js"></script><script src="watch.js"></script>
 </body></html>
