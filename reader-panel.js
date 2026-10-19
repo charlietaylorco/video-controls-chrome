@@ -180,7 +180,7 @@
       .draft-dot{width:5px;height:5px;border-radius:50%;background:#c5912e}.body{pointer-events:auto;margin-top:4px;max-height:min(680px,calc(100dvh - 40px));overflow:auto;overscroll-behavior:contain;border:1px solid var(--reader-border);border-radius:12px 0 12px 12px;background:var(--reader-bg);box-shadow:0 10px 36px var(--reader-shadow)}
       .header{cursor:grab;touch-action:none;user-select:none;display:grid;grid-template-columns:auto auto minmax(0,1fr) auto;gap:6px;align-items:center;padding:6px 6px 0;position:sticky;top:0;background:var(--reader-bg);z-index:1;border-bottom:1px solid var(--reader-border)}.header[data-dragging="true"]{cursor:grabbing}.tabs{grid-column:1;display:flex;gap:8px;white-space:nowrap}.tab{display:flex;align-items:center;gap:4px;height:32px;padding:0 2px;background:transparent;border:0;border-bottom:2px solid transparent;font-size:12px;color:var(--reader-muted)}.tab[aria-selected="true"]{color:var(--reader-text);border-bottom-color:currentColor;font-weight:600}
       .actions{grid-column:4;display:flex;gap:2px;align-items:center}.icon{display:grid;place-items:center;width:28px;height:28px;flex-shrink:0;padding:0;border:0;border-radius:6px;background:transparent;text-decoration:none}.icon[aria-disabled="true"]{opacity:.4;pointer-events:none}
-      .location{grid-column:2;display:flex;align-items:center;gap:2px;width:86px;height:25px;padding:0 5px;background:var(--reader-chip);border:0;border-radius:6px;font-size:11px}.location-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.location svg{width:12px;height:12px;margin-left:auto}.popup-menu{pointer-events:auto;position:fixed;z-index:5;width:180px;max-height:calc(100dvh - 16px);overflow:auto;padding:4px;background:var(--reader-bg);border:1px solid var(--reader-border);border-radius:9px;box-shadow:0 5px 20px var(--reader-shadow)}.menu-item{display:flex;align-items:center;gap:7px;width:100%;min-height:32px;padding:5px 9px;border:0;border-radius:5px;background:transparent;text-decoration:none;text-align:left;font-size:12px}.menu-item[aria-checked="true"]{font-weight:600;background:var(--reader-chip)}.menu-item[aria-disabled="true"]{opacity:.4;pointer-events:none}.peek{pointer-events:auto;position:absolute;top:40px;right:0;width:100%;height:min(260px,calc(100dvh - 48px));overflow:auto;overscroll-behavior:contain;padding:12px;border:1px solid var(--reader-border);border-radius:12px 0 12px 12px;background:var(--reader-bg);box-shadow:0 8px 28px var(--reader-shadow)}.peek-label{font-size:11px;color:var(--reader-muted);margin-bottom:7px}.peek-summary{white-space:pre-wrap;overflow-wrap:anywhere;user-select:text}
+      .location{grid-column:2;display:flex;align-items:center;gap:2px;width:86px;height:25px;padding:0 5px;background:transparent;border:0;border-radius:6px;font-size:11px;color:var(--reader-muted)}.location-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.location svg{width:12px;height:12px;margin-left:auto}.location[aria-expanded="true"]{background:var(--reader-hover);color:var(--reader-text)}.popup-menu{pointer-events:auto;position:fixed;z-index:5;width:180px;max-height:calc(100dvh - 16px);overflow:auto;padding:4px;background:var(--reader-bg);border:1px solid var(--reader-border);border-radius:9px;box-shadow:0 5px 20px var(--reader-shadow)}.menu-item{display:flex;align-items:center;gap:7px;width:100%;min-height:32px;padding:5px 9px;border:0;border-radius:5px;background:transparent;text-decoration:none;text-align:left;font-size:12px}.menu-item[aria-checked="true"]{font-weight:600}.menu-item[aria-disabled="true"]{opacity:.4;pointer-events:none}.location-menu{width:148px}.location-menu .menu-item{min-height:29px;padding:4px 8px}.location-menu .menu-item::after{content:"";width:12px;margin-left:auto}.location-menu .menu-item[aria-checked="true"]::after{content:"✓"}.menu-separator{height:1px;margin:4px;background:var(--reader-border)}.peek{pointer-events:auto;position:absolute;top:40px;right:0;width:100%;height:min(260px,calc(100dvh - 48px));overflow:auto;overscroll-behavior:contain;padding:12px;border:1px solid var(--reader-border);border-radius:12px 0 12px 12px;background:var(--reader-bg);box-shadow:0 8px 28px var(--reader-shadow)}.peek-label{font-size:11px;color:var(--reader-muted);margin-bottom:7px}.peek-summary{white-space:pre-wrap;overflow-wrap:anywhere;user-select:text}
       .tag-toggle{grid-column:3;display:flex;align-items:center;gap:4px;justify-self:start;min-width:0;max-width:100%;height:25px;padding:0 6px;border:0;border-radius:6px;font-size:11px;background:var(--reader-chip)}.tag-toggle svg{width:12px;height:12px}.tag-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tag-count{flex-shrink:0;font-size:10px;color:var(--reader-muted)}.tag-total{display:none}.tags{display:flex;gap:5px;flex-wrap:wrap;max-height:130px;overflow:auto;margin:0 0 10px}.tag{font-size:11px;padding:2px 8px;border-radius:6px;background:var(--reader-chip);overflow-wrap:anywhere;max-width:100%}
       button:hover,a:hover{background:var(--reader-hover)}.toggle:hover,.toggle:active{background:var(--reader-hover);color:var(--reader-text)}button:disabled{opacity:.5;cursor:default}button:focus-visible,a:focus-visible,textarea:focus-visible{outline:2px solid var(--reader-focus);outline-offset:-2px}
       .content{padding:12px;position:relative}.content[data-empty="true"]{min-height:160px}.content[data-empty="true"] .status{max-height:100px}.content[data-empty="true"] > .small{position:absolute;bottom:12px;left:12px}.summary{white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;line-height:1.75}.editor{height:160px;min-height:160px;max-height:320px;resize:vertical;overflow:hidden;border:1px solid var(--reader-border);border-radius:9px}.editor iframe{display:block;width:100%;height:100%;border:0}.note-view{position:relative}
@@ -213,11 +213,12 @@
     icon(refresh, ['M20 7v5h-5', 'M20 12a8 8 0 1 0-2 5', 'M20 7v5']);
     const more = element('button', '', actions, { class: 'icon', type: 'button', title: 'More Reader actions', 'aria-label': 'More Reader actions', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-controls': 'reader-more-menu' });
     icon(more, ['M5 12h.01', 'M12 12h.01', 'M19 12h.01']);
-    const locationMenu = element('div', '', root, { class: 'popup-menu', role: 'menu', id: 'reader-location-menu', 'aria-label': 'Reader location' }); locationMenu.hidden = true;
+    const locationMenu = element('div', '', root, { class: 'popup-menu location-menu', role: 'menu', id: 'reader-location-menu', 'aria-label': 'Reader location' }); locationMenu.hidden = true;
     const locationItems = Object.entries(C.locations).map(([value, label]) => {
       const item = element('button', label, locationMenu, { class: 'menu-item', type: 'button', role: 'menuitemradio', 'data-location': value, tabindex: '-1' });
       item.addEventListener('click', () => selectLocation(value)); return item;
     });
+    element('div', '', locationMenu, { class: 'menu-separator', role: 'separator' });
     const trash = element('button', 'Trash', locationMenu, { class: 'menu-item destructive', type: 'button', role: 'menuitem', 'aria-label': 'Delete from Reader', tabindex: '-1' }); locationItems.push(trash);
     const moreMenu = element('div', '', root, { class: 'popup-menu', role: 'menu', id: 'reader-more-menu', 'aria-label': 'More Reader actions' }); moreMenu.hidden = true;
     const link = element('a', 'Open in Reader', moreMenu, { class: 'menu-item', role: 'menuitem', title: 'Open in Reader', 'aria-label': 'Open in Reader', target: '_blank', rel: 'noopener noreferrer', tabindex: '-1' });
@@ -320,6 +321,15 @@
     keepDraft.addEventListener('click', () => resolveConflict(true));
     view = { header, content, toggle, dot, body, close, refresh, link, trash, settings, watchList, more, moreMenu, location: locationButton, locationLabel, locationMenu, locationItems, status, next, details, summary, tags, tagToggle, tagName, tagCount, tagTotal, summaryTab, noteTab, noteDot, summaryView, noteView, note, conflict, remote, save, dirty,
       deletion, deleteTitle, deleteIdentity, deleteDraft, cancelDelete, confirmDelete };
+    // Only listeners inside the closed root can inspect its internal targets.
+    // A document listener sees the host instead; hiding the menu there on
+    // pointerdown prevents its item's later click from reaching the action.
+    const dismissInternalMenu = event => {
+      const path = event.composedPath();
+      if (menu && ![view.moreMenu, view.locationMenu, view.more, view.location].some(node => path.includes(node))) closeMenu();
+    };
+    root.addEventListener('pointerdown', dismissInternalMenu, true);
+    root.addEventListener('focusin', dismissInternalMenu);
     peek = globalThis.MVSReaderPeek?.create({ toggle, root, send, beforePeek: () => sync(false), getTarget: () => {
       const s = current();
       return !open && !s?.busy && enabled && host.isConnected && !document.fullscreenElement && C.canonical(location.href) === activeUrl
@@ -637,12 +647,11 @@
   document.addEventListener('yt-page-data-updated', () => sync());
   document.addEventListener('fullscreenchange', schedule);
   document.addEventListener('pointerdown', event => {
-    if (menu && !event.composedPath().includes(view.moreMenu) && !event.composedPath().includes(view.locationMenu) && !event.composedPath().includes(view.more) && !event.composedPath().includes(view.location)) closeMenu();
-    if (peek?.active() && !event.composedPath().includes(host)) peek.close();
-    if (open && !event.composedPath().includes(host)) dismiss();
+    if (event.composedPath().includes(host)) return;
+    if (peek?.active()) peek.close();
+    if (open) dismiss();
   }, true);
   document.addEventListener('focusin', event => {
-    if (menu && !event.composedPath().includes(view.moreMenu) && !event.composedPath().includes(view.locationMenu) && !event.composedPath().includes(view.more) && !event.composedPath().includes(view.location)) closeMenu();
     if (open && !event.composedPath().includes(host)) dismiss();
   });
   document.addEventListener('keydown', event => {
