@@ -31,7 +31,8 @@
     for (const event of ['keydown', 'keyup', 'keypress']) button.addEventListener(event, key => key.stopPropagation());
     const media = window.matchMedia('(prefers-color-scheme: dark)'), settings = { ...defaults }, changed = new Set();
     let ready = false, destroyed = false, timer = null;
-    const visible = () => ready && settings.showRecentSavesLauncher !== false && !document.fullscreenElement && !document.webkitFullscreenElement && !document.webkitIsFullScreen && !window.location?.pathname?.startsWith('/embed/');
+    const browsingRoute = () => !/^\/(?:watch|live)(?:\/|$)/.test(window.location?.pathname || '') && !window.location?.pathname?.startsWith('/embed/');
+    const visible = () => ready && settings.showRecentSavesLauncher !== false && !document.fullscreenElement && !document.webkitFullscreenElement && !document.webkitIsFullScreen && browsingRoute();
     const observer = new window.MutationObserver(() => { if (visible() && (!host.isConnected || host.parentElement !== document.documentElement)) schedule(); });
     const sync = () => {
       if (destroyed) return;
@@ -59,12 +60,12 @@
     });
     media.addEventListener('change', sync);
     for (const event of ['fullscreenchange', 'webkitfullscreenchange']) document.addEventListener(event, sync);
-    document.addEventListener('DOMContentLoaded', schedule); window.addEventListener('yt-navigate-finish', schedule);
+    document.addEventListener('DOMContentLoaded', schedule); window.addEventListener('yt-navigate-finish', sync);
     const controller = { refresh: sync, destroy() {
       destroyed = true; if (timer !== null) window.clearTimeout(timer); observer.disconnect(); host.remove();
       chrome.storage.onChanged.removeListener(onStorage); media.removeEventListener('change', sync);
       for (const event of ['fullscreenchange', 'webkitfullscreenchange']) document.removeEventListener(event, sync);
-      document.removeEventListener('DOMContentLoaded', schedule); window.removeEventListener('yt-navigate-finish', schedule);
+      document.removeEventListener('DOMContentLoaded', schedule); window.removeEventListener('yt-navigate-finish', sync);
       if (globalThis.__mvsRecentLauncher === controller) delete globalThis.__mvsRecentLauncher;
     } };
     return controller;

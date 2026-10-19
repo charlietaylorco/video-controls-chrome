@@ -25,10 +25,15 @@ The image keeps a 1280×720 layout hint, while media/link/image keep the same 16
 
 ## Verification
 
-- `npm test`: **242 tests pass**, including seven source/fallback/placeholder/error/cleanup/URL-safety tests and a real-card controller test proving fallback/removal adds no Reader messages.
+- `npm test`: **244 tests pass**, including seven source/fallback/placeholder/error/cleanup/URL-safety tests and a real-card controller test proving fallback/removal adds no Reader messages.
 - Existing playback, save, notes, pacing, search, toast and floating-shortcut regressions remain passing.
 - Root/test JavaScript syntax, Watch script/style references, manifest assets, unchanged manifest/permissions/CSP and diff whitespace checked. No configured build/lint script exists.
 - Public source JPEG dimensions checked as above. No live private Reader documents or user-browser extension state were modified for tests.
 - Offline browser fixture supports `?mode=layout&thumbnail=available`, `thumbnail=placeholder` (tiny maxres followed by a usable standard image) and `thumbnail=unavailable` (all sizes tiny). It intercepts image sources into local synthetic SVG data, logs the chosen source/size, and blocks outbound network/navigation.
 
 Native browser layout/visual validation is not claimed unless an isolated browser becomes available. In particular, high-resolution availability on the two screenshot videos and every saved video is not verified; fallback quality depends on what YouTube supplies.
+
+
+## Small launcher visibility refinement in this PR
+
+The Recent saves floating shortcut is now hidden on top-level `/watch` and `/live` routes, including trailing slashes and `/live/<id>`. A direct visit still initializes its controller so later YouTube SPA navigation back to browsing can restore the same host. Navigation-finish events synchronize visibility immediately using the existing event; no extra observer, timer loop or polling is added. Enable/position/fullscreen settings remain authoritative, and the separate Reader panel launcher is not modified. Route-prefix boundaries keep browsing paths such as `/watching` or `/live_chat` visible. Regression cases cover direct visits, SPA transitions both ways, repeated injection, separate panel preservation, stored opt-out/corner and fullscreen interactions.
