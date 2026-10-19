@@ -75,7 +75,7 @@
     unauthorized: 'Reader rejected the token. Check Extension options, then refresh.',
     network_error: 'Reader could not be reached. Check your connection, then refresh.',
     save_uncertain: 'Save could not be confirmed. Your draft is kept. Refresh to check Reader before trying again.',
-    delete_uncertain: 'Deletion could not be confirmed. Refresh to check Reader before trying again. Your draft is kept.',
+    delete_uncertain: 'Deletion could not be confirmed. Refresh to check Reader before trying again. Your draft is kept.' + (response.rateLimitSource ? ' ' + C.rateLimitMessage(response) : ''),
     delete_cache_error: 'Reader confirmed deletion, but the local saved indicator could not be cleared. Refresh to check Reader. Your draft is kept.',
     document_changed: 'The matched document changed. Refresh and review it before deleting. Your draft is kept.',
     invalid_delete: 'Deletion was not sent. Reopen the confirmation for this document.',
@@ -90,7 +90,7 @@
     invalid_request: 'The note could not be sent. Notes must be text and no longer than 500,000 characters.',
     reader_error: 'Reader returned an error. Your draft is kept. Try Refresh later.'
   })[response.code] || (response.code === 'rate_limited'
-    ? `Reader rate limit reached. Try again after ${new Date(response.retryAt || Date.now() + 60000).toLocaleTimeString()}.`
+    ? C.rateLimitMessage(response)
     : 'Could not complete the request. Your draft is kept.');
   const element = (tag, text, parent, attrs = {}) => {
     const node = document.createElement(tag);

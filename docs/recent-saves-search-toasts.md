@@ -1,6 +1,6 @@
 # Recent saves: local search and toast feedback
 
-This independent PR starts from merged main `8668c6a`. PR #13 remains separate and unmerged. A local-only combined preview can include both changes; no Reader data or browser permissions are changed by preparing that checkout.
+This change was developed from main `8668c6a`. Final integration pairs PR #13’s Reader pacing fix with PR #14’s search, toast and floating-shortcut refinements; both change sets are covered by the combined checks below. No Reader data or browser permissions are changed.
 
 ## Behavior
 
@@ -35,3 +35,5 @@ When an isolated browser is available, verify: full-history title/channel/summar
 The former header integration is replaced by `reader-launcher.js` in the same existing YouTube content-script scope (no permission expansion). A 32px native button lives in its own closed shadow root, fixed to the viewport/document root; native header/body layout is not modified. The legacy header node/style are removed. The existing open/focus Recent saves route is reused. Options default to enabled/bottom-left and persist four corners and opt-out independently of the Reader panel. Theme follows the Reader UI setting/system. Fullscreen removes the host until exit; disabling never remounts it. Root/SPA remounts reuse one host with direct-child observers and no feed-subtree observation or polling. Late initial settings reads cannot undo a live change. Destroy removes owned UI/listeners.
 
 Regression coverage includes default/backcompat, all positions, opt-out/re-enable, theme events, fullscreen entry/exit, native-header preservation, root/SPA/removal/repeated injection, no duplicate host, exact routing, settings-read races and cleanup. `launcher.html` is an offline manual mock fixture; native button keyboard behavior/visual placement still needs an isolated-browser check. The Reader panel launcher is unchanged and separate.
+
+Final integration checks: PR #13 passed 219 tests standalone, refined PR #14 passed 224 standalone, and the resolved combined candidate passed 234. Syntax/assets and unchanged permission/CSP scope also passed. The empty-state regression records no grid/empty visibility toggles through successive nonmatching queries, debounce and stale matching replies, then one transition for current results. No real Reader request or mutation was used. Native visual checks remain unavailable.

@@ -161,7 +161,7 @@ test('expired or unverified deletion never creates success or local deletion his
   const a = app(); await a.record(); const prepared = await a.call('watch-list-prepare-delete', { videoUrl: A }); a.advance(120001);
   assert.equal((await a.call('watch-list-delete', { token: prepared.token, confirmed: true })).code, 'invalid_confirmation');
   assert.equal(a.requests.filter(r => r.method === 'DELETE').length, 0);
-  const fakeReader = { handle: async m => m.type === 'reader-watch-get' ? { ok: true, document: { ...raw(), videoUrl: A, updatedAt: 'v1' } } : { ok: true, id: 'doc-a' } };
+  const fakeReader = { handle: async m => m.type === 'reader-watch-prepare-delete' ? { ok: true, document: { ...raw(), videoUrl: A, updatedAt: 'v1' } } : { ok: true, id: 'doc-a' } };
   const bridge = a.context.MVSReaderWatchService.create({ store: a.store, reader: fakeReader, uuid: () => 'unverified' });
   const ticket = await bridge.handle({ type: 'watch-list-prepare-delete', videoUrl: A }, scope);
   assert.equal((await bridge.handle({ type: 'watch-list-delete', token: ticket.token, confirmed: true }, scope)).code, 'delete_unverified');
@@ -342,4 +342,110 @@ test('superseded local scans stop per page scope without cancelling another tab 
   assert.equal((await old).code, 'stale_search'); assert.equal((await latest).items.length, 2); assert.equal((await other).items.length, 2);
   const stopped = await a.store.page({ query: 'anything', isCurrent: () => false }); assert.equal(stopped.stale, true);
   assert.equal(a.requests.length, 0);
+});
+
+async function seedDeletionTrace(a, count = 8) {
+  const rows = [];
+  for (let i = 0; i < count; i++) {
+    const videoUrl = `https://www.youtube.com/watch?v=trace_${i}`, id = `trace-${i}`;
+    a.documents.set(id, raw(id, videoUrl)); await a.record(videoUrl, id); rows.push({ videoUrl, id });
+  }
+  return rows;
+}
+const methods = a => a.requests.map(request => request.method || 'GET');
+async function deleteRow(a, row) {
+  const prepared = await a.call('watch-list-prepare-delete', row);
+  if (!prepared.ok) return prepared;
+  return a.call('watch-list-delete', { token: prepared.token, confirmed: true });
+}
+
+test('consecutive Recent saves deletes use three exact-ID reads and one DELETE each; initial/cache/redraw pages make zero HTTP requests', async () => {
+  const a = app(), rows = await seedDeletionTrace(a);
+  for (const filter of ['watch', 'all', 'archive']) await a.call('watch-list-page', { filter });
+  assert.equal(a.requests.length, 0);
+  for (let i = 0; i < 6; i++) {
+    assert.equal((await deleteRow(a, rows[i])).ok, true);
+    await a.call('watch-list-page', { filter: 'all' });
+    assert.deepEqual(methods(a).slice(i * 4), ['GET', 'GET', 'DELETE', 'GET']);
+    assert.ok(a.requests.slice(i * 4).every(request => request.url.includes(rows[i].id)));
+  }
+  const blocked = await deleteRow(a, rows[6]);
+  assert.equal(blocked.code, 'rate_limited'); assert.equal(blocked.rateLimitSource, 'local'); assert.equal(blocked.retryAt, 160000);
+  assert.equal(a.requests.length, 24); assert.equal((await a.store.get(rows[6].videoUrl)).status, 'saved');
+  a.advance(60000); assert.equal((await deleteRow(a, rows[6])).ok, true);
+});
+
+test('twelve explicit refreshes leave room for two strict deletes; blocked preparation wastes no reads and never reports a Reader 429', async () => {
+  const a = app(), rows = await seedDeletionTrace(a, 12);
+  for (const row of rows) assert.equal((await a.call('watch-list-refresh', row)).ok, true);
+  for (const row of rows.slice(0, 2)) assert.equal((await deleteRow(a, row)).ok, true);
+  const blocked = await deleteRow(a, rows[2]);
+  assert.equal(blocked.rateLimitSource, 'local'); assert.equal(a.requests.length, 20);
+  assert.equal(a.requests.filter(request => request.method === 'DELETE').length, 2);
+  assert.equal(a.data.readerPanelBudget.blockedUntil, undefined);
+});
+
+test('shared panel/hover reads during confirmation cannot strand a DELETE without local verification capacity', async () => {
+  const a = app(), [row] = await seedDeletionTrace(a, 1);
+  await a.reader.remember(row.videoUrl, row.id);
+  const prepared = await a.call('watch-list-prepare-delete', row);
+  for (let i = 0; i < 16; i++) {
+    const type = i % 2 ? 'reader-card-get' : 'reader-panel-get';
+    assert.equal((await a.reader.handle({ type, pageUrl: row.videoUrl, targetUrl: row.videoUrl })).ok, true);
+  }
+  const blocked = await a.call('watch-list-delete', { token: prepared.token, confirmed: true });
+  assert.equal(blocked.rateLimitSource, 'local'); assert.equal(blocked.retryAt, 160000);
+  assert.equal(a.requests.length, 17); assert.equal(a.requests.filter(r => r.method === 'DELETE').length, 0);
+  assert.equal(a.documents.has(row.id), true);
+  // A blocked one-use ticket is not replayed after the cooldown.
+  a.advance(60000); assert.equal((await a.call('watch-list-delete', { token: prepared.token, confirmed: true })).code, 'invalid_confirmation');
+  assert.equal((await deleteRow(a, row)).ok, true);
+});
+
+test('prepare capacity waits for all three read slots and the delete slot, without consuming available requests', async () => {
+  const a = app({ stored: { readerPanelBudget: { list: Array.from({ length: 17 }, (_, i) => 50000 + i * 1000), delete: Array(18).fill(70000) } } });
+  await a.record(); const blocked = await a.call('watch-list-prepare-delete', { videoUrl: A });
+  assert.equal(blocked.rateLimitSource, 'local'); assert.equal(blocked.retryAt, 130000); assert.equal(a.requests.length, 0);
+  a.advance(30000); assert.equal((await a.call('watch-list-prepare-delete', { videoUrl: A })).ok, true);
+});
+
+test('upstream 429 during verification remains uncertain, persists Reader cooldown across restart and never retries DELETE', async () => {
+  let deleted = false;
+  const a = app({ responder: (url, init) => {
+    if (init.method === 'DELETE') { deleted = true; return { status: 204 }; }
+    if (deleted) return { status: 429, retryAfter: '120' };
+  } });
+  await a.record(); const result = await deleteRow(a, { videoUrl: A });
+  assert.equal(result.code, 'delete_uncertain'); assert.equal(result.rateLimitSource, 'reader'); assert.equal(result.retryAt, 220000);
+  assert.deepEqual(methods(a), ['GET', 'GET', 'DELETE', 'GET']);
+  assert.notEqual((await a.store.get(A)).status, 'deleted');
+  const blocked = await a.call('watch-list-prepare-delete', { videoUrl: A });
+  assert.equal(blocked.rateLimitSource, 'reader'); assert.equal(a.requests.length, 4);
+  const restarted = app({ stored: a.data }); await restarted.record();
+  assert.equal((await restarted.call('watch-list-refresh', { videoUrl: A })).rateLimitSource, 'reader'); assert.equal(restarted.requests.length, 0);
+});
+
+test('confirmation retry time frees enough staggered read slots, and remains locally sourced after a worker restart', async () => {
+  const stored = { readerPanelBudget: { list: Array.from({ length: 17 }, (_, i) => 50000 + i * 1000) } };
+  const a = app({ stored }); await a.record();
+  const result = await a.call('watch-list-prepare-delete', { videoUrl: A });
+  assert.equal(result.retryAt, 111000); assert.equal(result.rateLimitSource, 'local'); assert.equal(a.requests.length, 0);
+  const restarted = app({ stored: a.data }); await restarted.record();
+  assert.equal((await restarted.call('watch-list-prepare-delete', { videoUrl: A })).rateLimitSource, 'local');
+  assert.equal(restarted.requests.length, 0);
+  a.advance(11000); assert.equal((await a.call('watch-list-prepare-delete', { videoUrl: A })).ok, true);
+});
+
+test('a queued hover read cannot consume the strict deletion verification slot', async () => {
+  let release, reads = 0;
+  const a = app({ stored: { readerPanelBudget: { list: Array(15).fill(100000) } }, responder: async (url, init) => {
+    if (!init.method && ++reads === 2) await new Promise(resolve => { release = resolve; });
+  } });
+  await a.record(); await a.record(B, 'doc-b'); await a.reader.remember(B, 'doc-b');
+  const prepared = await a.call('watch-list-prepare-delete', { videoUrl: A });
+  const deletion = a.call('watch-list-delete', { token: prepared.token, confirmed: true });
+  while (!release) await new Promise(setImmediate);
+  const hover = a.reader.handle({ type: 'reader-card-get', pageUrl: B, targetUrl: B }); release();
+  assert.equal((await deletion).ok, true); assert.equal((await hover).rateLimitSource, 'local');
+  assert.deepEqual(methods(a), ['GET', 'GET', 'DELETE', 'GET']);
 });

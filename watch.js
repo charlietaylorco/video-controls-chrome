@@ -28,7 +28,7 @@
     delete_target_missing: 'The matched document was not found; no DELETE was sent. Refresh before trying again.',
     delete_not_confirmed: 'Reader did not confirm deletion. Refresh to check its current state.',
     delete_still_present: 'Reader accepted DELETE but still returns the document. Refresh to verify its state.',
-    delete_uncertain: 'Deletion could not be confirmed. Refresh to check Reader before trying again.',
+    delete_uncertain: 'Deletion could not be confirmed. Refresh to check Reader before trying again.' + (result.rateLimitSource ? ' ' + C.rateLimitMessage(result) : ''),
     delete_unverified: 'The extension did not verify deletion. Refresh before trying again.',
     delete_cache_error: 'Reader confirmed deletion, but local indicators could not be updated. Refresh to check.',
     watch_storage_error: 'Local Recent saves storage is unavailable or full. Reader may already have changed; check Reader before retrying. Free storage and reopen this page.',
@@ -37,7 +37,7 @@
     location_uncertain: 'The move could not be confirmed. Refresh before moving again.', location_cache_error: 'Reader changed, but the local list could not be updated. Refresh to check.',
     auth_changed: 'Reader credentials changed. Refresh before continuing.', invalid_sender: 'This extension page is no longer current. Reopen Recent saves.',
     request_uncertain: 'The request could not be confirmed. Refresh before trying again.', runtime_error: 'The extension is unavailable. Reload the extension and reopen Recent saves.'
-  })[result.code] || (result.code === 'rate_limited' ? `Reader rate limit reached. Try after ${new Date(result.retryAt || Date.now() + 60000).toLocaleTimeString()}.` : 'Reader could not complete this request. Try Refresh.');
+  })[result.code] || (result.code === 'rate_limited' ? C.rateLimitMessage(result) : 'Reader could not complete this request. Try Refresh.');
   const announce = (text, error = false) => feedback.show(text, error);
   const node = (tag, text, parent, className) => { const n = document.createElement(tag); if (text) n.textContent = text; if (className) n.className = className; parent?.append(n); return n; };
   const icon = (parent, commands) => {

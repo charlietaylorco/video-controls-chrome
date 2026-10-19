@@ -19,7 +19,7 @@
       if (refreshing.has(key)) return refreshing.get(key);
       const work = (async () => {
         const result = await reader.handle({ type: 'reader-watch-get', pageUrl: row.videoUrl, id: row.readerId }, context);
-        if (!result.ok) return { ok: false, code: result.code, retryAt: result.retryAt };
+        if (!result.ok) return { ok: false, code: result.code, retryAt: result.retryAt, rateLimitSource: result.rateLimitSource };
         const current = await store.get(row.videoUrl);
         if (current?.readerId !== row.readerId) throw error('document_changed');
         if (!await store.verify(row.videoUrl, result.document)) throw error('document_changed');
@@ -44,12 +44,12 @@
           const result = await reader.handle({ type: 'reader-watch-move', pageUrl: row.videoUrl, id: row.readerId,
             location: message.location, baseLocation: message.baseLocation }, context);
           if (result.document && !await store.verify(row.videoUrl, result.document)) throw error('document_changed');
-          return { ok: result.ok, code: result.code, retryAt: result.retryAt };
+          return { ok: result.ok, code: result.code, retryAt: result.retryAt, rateLimitSource: result.rateLimitSource };
         }
         if (message.type === 'watch-list-prepare-delete') {
           const row = await target(message);
-          const result = await reader.handle({ type: 'reader-watch-get', pageUrl: row.videoUrl, id: row.readerId }, context);
-          if (!result.ok) return { ok: false, code: result.code, retryAt: result.retryAt };
+          const result = await reader.handle({ type: 'reader-watch-prepare-delete', pageUrl: row.videoUrl, id: row.readerId }, context);
+          if (!result.ok) return { ok: false, code: result.code, retryAt: result.retryAt, rateLimitSource: result.rateLimitSource };
           const doc = result.document;
           if ((await store.get(row.videoUrl))?.readerId !== doc.id) throw error('document_changed');
           for (const [key, ticket] of tickets) if (ticket.expires < now()) tickets.delete(key);
@@ -69,7 +69,7 @@
               throw error('delete_unverified');
             await store.mark(row.videoUrl, doc.id, 'deleted');
           }
-          return { ok: result.ok, code: result.code, retryAt: result.retryAt };
+          return { ok: result.ok, code: result.code, retryAt: result.retryAt, rateLimitSource: result.rateLimitSource };
         }
         throw error('invalid_request');
       } catch (e) { return { ok: false, code: e.code || 'watch_storage_error' }; }

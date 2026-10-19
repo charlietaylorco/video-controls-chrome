@@ -11,6 +11,7 @@ const options = new URL(location.href).searchParams;
 const mode = options.get('mode') || 'normal';
 const listeners = [], storageListeners = [], documents = new Map();
 const data = { readerToken: 'fixture-token-not-real', readerPanelTheme: options.get('theme') || 'system', readerSavedUrls: {}, readerDocuments: {} };
+if (options.get('rate') === 'local') data.readerPanelBudget = { list: Array(18).fill(Date.now()) };
 let calls = 0, fixtureClock = Date.now() - 3600000, added = 0;
 const report = text => { const row = document.createElement('li'); row.textContent = text; document.getElementById('fixture-log').append(row); };
 window.fetch = async (url, init = {}) => {
@@ -19,7 +20,8 @@ window.fetch = async (url, init = {}) => {
   report((init.method || 'GET') + ' ' + url.replace('https://readwise.io/api/v3/', ''));
   if (document.getElementById('fixture-slow').checked) await new Promise(resolve => setTimeout(resolve, 600));
   let value, status = 200;
-  if (document.getElementById('fixture-fail').checked) status = 401;
+  if (options.get('rate') === 'reader') status = 429;
+  else if (document.getElementById('fixture-fail').checked) status = 401;
   else if (url.endsWith('/save/')) {
     const body = JSON.parse(init.body), id = 'added-' + ++added;
     documents.set(id, { id, source_url: body.url, title: body.title, author: body.author, location: 'later', summary: 'A newly saved mock summary.', notes: 'Private fixture note', updated_at: 'v1' });
@@ -31,7 +33,7 @@ window.fetch = async (url, init = {}) => {
     else value = { results: documents.has(id) ? [structuredClone(documents.get(id))] : [] };
   }
   report('HTTP ' + status);
-  return { status, ok: status >= 200 && status < 300, headers: { get: () => null }, json: async () => value, text: async () => JSON.stringify(value) };
+  return { status, ok: status >= 200 && status < 300, headers: { get: () => status === 429 ? '120' : null }, json: async () => value, text: async () => JSON.stringify(value) };
 };
 let seeded;
 window.chrome = { runtime: { id: 'extension', lastError: null, getURL: file => 'chrome-extension://extension/' + file,
