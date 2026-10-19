@@ -37,7 +37,7 @@
         if (!valid(s)) return;
         const doc = reply.ok && reply.document?.videoUrl === s.url && globalThis.MVSReaderCore.validId(reply.document.id) ? reply.document : null;
         text.textContent = doc?.summary || (reply.ok ? 'Summary not available yet. Open Reader to check processing or save status.'
-          : reply.code === 'rate_limited' ? 'Reader rate limit reached. Try again later.' : 'Summary unavailable. Click the icon to open the panel for details.');
+          : reply.code === 'rate_limited' ? globalThis.MVSReaderCore.rateLimitMessage(reply, now()) : 'Summary unavailable. Click the icon to open the panel for details.');
         cache.delete(s.url);
         if (reply.ok) cache.set(s.url, { reply: { ...reply, document: doc }, at, expires: at + (doc?.summary ? 60000 : 15000) });
         while (cache.size > 20) cache.delete(cache.keys().next().value);

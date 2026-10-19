@@ -1,0 +1,28 @@
+[
+  {
+    "version": "merged main baseline",
+    "prepare": "ok",
+    "delete": "delete_uncertain",
+    "requests": [
+      [
+        "GET",
+        "list/?id=doc-a"
+      ],
+      [
+        "GET",
+        "list/?id=doc-a"
+      ],
+      [
+        "DELETE",
+        "delete/doc-a/"
+      ]
+    ],
+    "remoteStillPresent": false
+  },
+  {
+    "version": "focused fix",
+    "prepare": "rate_limited",
+    "requests": [],
+    "remoteStillPresent": true
+  }
+]

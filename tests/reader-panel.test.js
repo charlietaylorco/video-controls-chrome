@@ -499,3 +499,14 @@ test('reusing and pinning cached peeks cannot renew verified freshness or postpo
     assert.equal(f.messages.filter(m => m.type === 'reader-panel-get').length, 2);
   }
 });
+
+test('panel and temporary summary peek display local versus upstream rate sources without retrying', async () => {
+  for (const [rateLimitSource, prefix] of [['local', 'Extension'], ['reader', 'Reader']]) {
+    for (const open of ['open', 'hover']) {
+      const f = fixture(); f.responder = () => ({ ok: false, code: 'rate_limited', rateLimitSource, retryAt: 160000 });
+      await f[open]();
+      assert.match(f.byClass(open === 'open' ? 'status' : 'peek-summary').textContent, new RegExp('^' + prefix + ' rate limit reached'));
+      f.runTimers(250); await tick(); assert.equal(f.messages.length, 1);
+    }
+  }
+});
