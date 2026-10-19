@@ -1,0 +1,32 @@
+# Sandboxed Note editor warning investigation
+
+Base: merged main `9e06946`. The supplied screenshot was privately materialized through Library and inspected. It shows repeated Chromium errors that script execution in `about:blank` was blocked because `allow-scripts` is absent, with the extension error view pointing at `if (url === activeUrl) render()` after a Reader lookup. The screenshot is not committed or uploaded.
+
+## What the source establishes
+
+- The Reader panel contains a native textarea in a same-origin, script-disabled iframe. `reader-editor.js` sets exactly `sandbox="allow-same-origin"`, leaves `src`/`srcdoc` unset (initial `about:blank`), creates style/textarea nodes through DOM methods and treats notes as textarea values. There is no child script element, eval, document write or note HTML parsing.
+- The parent registers input/composition/Escape/blur callbacks to drive drafts. Keeping a separate browsing context isolates the native keyboard event path from YouTube's host shortcuts; replacing it with a textarea directly in the host shadow root would lose that architectural protection.
+- Previously `createView()` appended this frame even with the launcher collapsed or Summary selected, and `sync()` called its idempotent mount routine. The iframe was not recreated on every render: mount skips the same Document, but detaching/reinserting the panel host can create a new frame document.
+- The reported render line is a caller location, not the source text of the script that Chromium refused. Chromium's [CanExecuteScripts implementation](https://chromium.googlesource.com/chromium/src/+/4778c3539efd8603b157ae5d2d4555122ea25f7c/third_party/blink/renderer/core/frame/local_dom_window.cc) emits this message when a script execution check is rejected by sandbox policy. The message alone does not establish whether note input callbacks failed, another script attempted to run, or functionality remained intact.
+- The extension's generic all-frame group targets related blank frames (`match_about_blank` and `match_origin_as_fallback`), which [Chrome documents](https://developer.chrome.com/docs/extensions/develop/concepts/content-scripts#inject-in-related-frames). That is a candidate interaction, not a proven culprit: privileged isolated-world exceptions exist, and the blocked caller/world has not been observed. Injection policy is unchanged.
+- No evidence ties this error to the removed Recent saves YouTube-player trial. That was a different page/frame and a different error.
+
+## Bounded mitigation, not a confirmed root-cause fix
+
+Do not attach/mount the Note frame until an open panel actually selects Note (outside deletion confirmation). Before first Note activation, closed/Summary-only renders now contain no attached iframe or child browsing context. The [HTML iframe connection model](https://html.spec.whatwg.org/multipage/iframe-embed-object.html#the-iframe-element) creates the child navigable on connection. Draft value/theme updates can remain cached before that point.
+
+Once Note is opened, retain the same frame through later renders/tab changes/closing and reopening, and retain the existing idempotent editor mounting/value checks. This avoids trading an initialization warning for lost focus, selection, draft or IME behavior. Native document replacement on a later panel-host remount still needs the existing editor load handler.
+
+`reader-editor.js`, sandbox flags, CSP, manifest/injection policy, Reader transport and note-save/conflict logic are unchanged. No `allow-scripts`, capability expansion, console suppression or error filtering is introduced. This reduces unnecessary initialization of a plausible warning context; it does **not** prove that warnings stop after Note is opened or identify the attempted script.
+
+## Verification and remaining gap
+
+- `npm test`: **249 passing tests**. New panel regression proves zero attached frames through collapsed/Summary/refresh/theme renders, one frame on first Note activation without a Reader read, and stable frame/draft/focus through later edit/tab/close/reopen renders.
+- Four focused tests exercise the actual editor module: exact script-blocking sandbox and no document access on creation; cached pre-mount value/theme; literal hostile note text; same-document mount/equal-value updates preserving selection nodes; document replacement restoring draft/theme; native editing-key defaults and IME/Escape/blur callback behavior.
+- These DOM fixtures do **not** emulate Chromium's sandbox enforcement or prove native keyboard propagation/console behavior. Existing optional real-browser keyboard/selection/IME tests remain, and the browser fixture now collects sandbox console messages and includes a deferred-frame scenario. That optional suite was not run.
+- All JS syntax/assets, unchanged editor source/manifest/security scope and whitespace checked. No configured lint/build script exists.
+- Native reproduction is blocked: the connected-browser inventory is empty. Normal Arc was not automated and no extension was loaded into the user's browser. No native console-disappearance, actual Notes interaction or harmless-noise diagnosis is claimed. No real Reader reads/mutations or credentials were used.
+
+Offline diagnostic: `node tests/reader-editor-browser-fixture.cjs`; serve only `output/editor-browser` on loopback. Its static parent page loads the actual editor with synthetic text, uses the same sandbox, counts host key events and input/Escape callbacks, and offers same-document mount/remount/theme controls. It blocks outbound connections and has no Reader transport. It runs in the parent main world, so it cannot reproduce extension isolated-world injection by itself.
+
+When an isolated authorized browser is connected, compare: before first Note, after first Note, ordinary Summary/Note refreshes, and panel detach/remount. Record exact native security messages and their frame/world/caller alongside successful native textarea input, selection, draft updates and host-shortcut isolation. If a warning appears after Note activation but editing works, it may be a rejected unrelated attempt; if input/draft callbacks fail, treat that as a functional bug. Until that evidence exists, keep both possibilities open.

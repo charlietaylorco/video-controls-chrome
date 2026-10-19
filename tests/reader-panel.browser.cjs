@@ -20,7 +20,8 @@ async function fixture({ enabled = true, width = 1100, height = 1100, theme = 's
     <button id="outside" type="button">Outside control</button><main><p class="fixture">Mock YouTube layout · Reader fixtures only</p><video muted></video><ytd-watch-metadata><div id="above-the-fold"><h1>How attention shapes the way we learn</h1><p>Example channel &nbsp; · &nbsp; Like &nbsp; Share &nbsp; Save</p></div></ytd-watch-metadata></main>` }));
   const page = await context.newPage();
   page.setDefaultTimeout(5000);
-  const errors = []; page.on('pageerror', e => errors.push(e.message));
+  const errors = [], sandboxMessages = []; page.on('pageerror', e => errors.push(e.message));
+  page.on('console', message => { if (message.type() === 'error' && message.text().includes('Blocked script execution')) sandboxMessages.push({ text: message.text(), location: message.location() }); });
   await page.addInitScript(({ enabled, theme }) => {
     // Expose only this test's closed roots to automation; production remains closed.
     const attach = Element.prototype.attachShadow;
@@ -79,7 +80,7 @@ async function fixture({ enabled = true, width = 1100, height = 1100, theme = 's
     await page.evaluate(url => { history.pushState({}, '', url); document.dispatchEvent(new Event('yt-navigate-finish')); }, url);
   };
   const trash = async () => { await panel.locator('.location').click(); await panel.getByRole('menuitem', { name: 'Delete from Reader', exact: true }).click(); };
-  return { page, panel, editor, open, trash, navigate, errors, close: () => context.close() };
+  return { page, panel, editor, open, trash, navigate, errors, sandboxMessages, close: () => context.close() };
 }
 
 test('launcher is opt-in, collapsed, and opens without creating a Reader document', async () => {
@@ -771,4 +772,18 @@ test('persistent errors/conflicts and late replies keep fixed note geometry and 
   await f.navigate(B); await f.page.clock.runFor(160); await f.open('note');
   assert.notEqual(await f.panel.locator('.footer [role="status"]').innerText(), 'Saved');
   assert.deepEqual(f.errors, []); await f.close();
+});
+
+
+test('Summary-only renders defer the sandboxed editor context; opening Note retains script blocking and stable editing', async () => {
+  const f=await fixture();assert.equal(await f.panel.locator('iframe').count(),0);await f.open();
+  await f.panel.getByRole('button',{name:'Refresh',exact:true}).click();assert.equal(await f.panel.locator('iframe').count(),0);
+  assert.deepEqual(f.sandboxMessages,[]);
+  await f.open('note');assert.equal(await f.panel.locator('iframe').count(),1);
+  assert.equal(await f.panel.locator('iframe').getAttribute('sandbox'),'allow-same-origin');
+  await f.editor.fill('A native note draft');await f.editor.press('ControlOrMeta+a');
+  assert.equal(await f.editor.evaluate(el=>el.selectionEnd-el.selectionStart),(await f.editor.inputValue()).length);
+  await f.panel.getByRole('tab',{name:'Summary',exact:true}).click();await f.open('note');
+  assert.equal(await f.editor.inputValue(),'A native note draft');assert.equal(await f.panel.locator('iframe').count(),1);
+  assert.deepEqual(f.errors,[]);await f.close();
 });
