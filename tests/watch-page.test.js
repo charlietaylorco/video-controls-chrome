@@ -2,9 +2,10 @@
 const test = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
 const tick = () => new Promise(setImmediate);
-function fixture() {
+function fixture({ settings = {}, deferSettings = false } = {}) {
   let clock = 1000, sequence = 0, responder;
-  const timers = new Map(), messages = [], listeners = new Map(), storageListeners = [], ids = new Map();
+  const timers = new Map(), messages = [], listeners = new Map(), storageListeners = [], ids = new Map(), storageReads = [];
+  let releaseSettings;
   class Node {
     constructor(tag) { this.tagName = tag; this.children = []; this.attrs = {}; this.dataset = {}; this.style = {}; this.listeners = new Map(); this.hidden = false; this.value = ''; this.ownText = ''; }
     set textContent(value) { this.ownText = String(value); this.replaceChildren(); }
@@ -15,7 +16,7 @@ function fixture() {
     getAttribute(key) { return this.attrs[key] ?? null; }
     addEventListener(key, fn) { this.listeners.set(key, [...this.listeners.get(key) || [], fn]); }
     removeEventListener(key, fn) { this.listeners.set(key, (this.listeners.get(key) || []).filter(callback => callback !== fn)); }
-    fire(type, extra = {}) { const event = { key: '', relatedTarget: null, preventDefault() {}, ...extra }; for (const fn of this.listeners.get(type) || []) fn(event); }
+    fire(type, extra = {}) { const event = { key: '', relatedTarget: null, preventDefault() { this.prevented = true; }, stopPropagation() { this.stopped = true; }, ...extra }; for (const fn of this.listeners.get(type) || []) fn(event); return event; }
     click() { if (!this.disabled && !this.hidden) this.fire('click'); }
     get isConnected() { return this === document.body || Boolean(this.parentElement?.isConnected); }
     contains(node) { return node === this || this.children.some(n => n.contains(node)); }
@@ -40,24 +41,104 @@ function fixture() {
   const context = vm.createContext({ document, URL, Date: ClockDate, console,
     setTimeout(fn, delay) { const id = ++sequence; timers.set(id, { fn, at: clock + delay, delay }); return id; }, clearTimeout(id) { timers.delete(id); },
     matchMedia: () => ({ matches: false, addEventListener() {} }),
-    chrome: { runtime: { lastError: null, sendMessage(message, cb) { messages.push(message); Promise.resolve(responder ? responder(message, reply) : reply(message)).then(cb); } }, storage: { local: { get(defaults, cb) { cb(defaults); } }, onChanged: { addListener(fn) { storageListeners.push(fn); } } } },
+    chrome: { runtime: { lastError: null, sendMessage(message, cb) { messages.push(message); Promise.resolve(responder ? responder(message, reply) : reply(message)).then(cb); } }, storage: { local: { get(defaults, cb) {
+      storageReads.push(Object.keys(defaults)); const reply = { ...defaults, ...Object.fromEntries(Object.entries(settings).filter(([key]) => key in defaults)) };
+      if (deferSettings && 'showRaindrop' in defaults) releaseSettings = () => cb(reply); else cb(reply);
+    } }, onChanged: { addListener(fn) { storageListeners.push(fn); } } } },
     MVSWatchLocationMenu: { create: () => ({ id: 'location-menu', close() {}, refresh() {}, toggle() {}, open() {} }) },
   });
-  for (const file of ['reader-core.js','reader-watch-core.js','watch-feedback.js','watch-search.js','watch-thumbnail.js','watch.js']) vm.runInContext(fs.readFileSync(path.join(__dirname,'..',file),'utf8'), context);
+  for (const file of ['reader-core.js','reader-watch-core.js','watch-feedback.js','watch-search.js','watch-thumbnail.js','watch-card-actions.js','watch.js']) vm.runInContext(fs.readFileSync(path.join(__dirname,'..',file),'utf8'), context);
   const flush = async () => { await tick(); await tick(); };
   const run = async delay => {
     clock += delay;
     for (const [id, timer] of [...timers].sort((a,b) => a[1].at - b[1].at)) if (timer.at <= clock && timers.has(id)) { timers.delete(id); timer.fn(); }
     await flush();
   };
-  return { ids, document, messages, defaultItems, context, timers, flush, run,
+  return { ids, document, messages, defaultItems, context, timers, flush, run, storageReads, releaseSettings: () => releaseSettings(),
     set responder(fn) { responder = fn; },
     input(value) { ids.get('search').value = value; ids.get('search').fire('input'); },
     visibility(hidden) { document.hidden = hidden; (listeners.get('visibilitychange') || []).forEach(fn => fn()); },
     change(values) { storageListeners.forEach(fn => fn(values, 'local')); },
+    activate(target) {
+      const path = []; for (let n = target; n; n = n.parentElement) path.push(n);
+      const event = { target, prevented: false, stopped: false, preventDefault() { this.prevented = true; }, stopPropagation() { this.stopped = true; } };
+      if (path.some(n => n.disabled || n.hidden)) return event;
+      for (const n of path) { Object.assign(event, n.fire('click', event)); if (event.stopped) break; }
+      return event;
+    },
     findClass(name) { return all(document.body).filter(n => (n.className || '').split(' ').includes(name)); },
   };
 }
+
+test('thumbnail actions dispatch the captured canonical video and isolate nested-icon clicks from navigation', async () => {
+  const f = fixture(); await f.flush();
+  const card = f.findClass('video')[0], media = f.findClass('video-media')[0], link = f.findClass('thumbnail-link')[0], buttons = f.findClass('thumbnail-action');
+  assert.equal(buttons.length, 4); assert.equal(buttons[0].parentElement.parentElement, media);
+  assert.ok(!link.contains(buttons[0])); assert.equal(link.href, f.defaultItems[0].videoUrl);
+  const receipt = f.activate(buttons[0].children[0].children[0]); await f.flush();
+  assert.equal(receipt.prevented, true); assert.equal(receipt.stopped, true);
+  assert.equal(f.messages.at(-1).type, 'watch-card-action'); assert.equal(f.messages.at(-1).action, 'raindrop'); assert.equal(f.messages.at(-1).pageUrl, f.defaultItems[0].videoUrl);
+  assert.equal(buttons[0].dataset.saved, 'true'); assert.match(buttons[0].attrs['aria-label'], /Saved in Raindrop: Design practice/);
+  f.activate(buttons[1]); await f.flush();
+  assert.equal(f.messages.at(-1).action, 'downie'); assert.equal(buttons[1].title, 'Sent to Downie');
+  assert.equal(f.findClass('video')[0], card); assert.equal(link.href, f.defaultItems[0].videoUrl);
+  assert.equal(f.ids.get('toast').querySelector('p').textContent, 'Sent to Downie.');
+  assert.equal(f.messages.filter(m => m.type.startsWith('watch-list-')).length, 1, 'no Reader refresh/save caused by card actions');
+});
+
+test('thumbnail actions reuse visibility settings and canonical saved flags, including live changes', async () => {
+  const url = 'https://www.youtube.com/watch?v=item_0';
+  const f = fixture({ settings: { showDownie: false, raindropSavedUrls: { [url + '&t=20']: 1 }, downieSentUrls: { [url]: 1 } } }); await f.flush();
+  const [rain, downie] = f.findClass('thumbnail-action');
+  assert.equal(rain.title, 'Saved in Raindrop'); assert.equal(downie.hidden, true);
+  f.activate(downie); await f.flush(); assert.equal(f.messages.length, 1);
+  f.change({ showRaindrop: { newValue: false }, showDownie: { newValue: true } });
+  assert.equal(rain.hidden, true); assert.equal(downie.hidden, false); assert.equal(downie.title, 'Sent to Downie');
+  f.change({ downieSentUrls: { newValue: {} } }); assert.equal(downie.title, 'Send to Downie');
+  assert.equal(downie.type, 'button'); assert.equal(downie.children[0].attrs.focusable, 'false');
+});
+
+test('late initial settings cannot override newer visibility changes; the page reads no credentials', async () => {
+  const f = fixture({ deferSettings: true }); await f.flush();
+  const [rain, downie] = f.findClass('thumbnail-action'); assert.equal(rain.hidden, true); assert.equal(downie.hidden, true);
+  f.change({ showRaindrop: { newValue: false } }); f.releaseSettings();
+  assert.equal(rain.hidden, true); assert.equal(downie.hidden, false);
+  assert.ok(!f.storageReads.flat().some(key => /token/i.test(key)));
+});
+
+test('pending thumbnail actions suppress duplicate sends and stay bound to removed cards across search', async () => {
+  const f = fixture(); await f.flush(); let release;
+  f.responder = (message, normal) => message.type === 'watch-card-action' ? new Promise(resolve => { release = () => resolve({ ok: true }); })
+    : message.type === 'watch-list-page' ? { ok: true, items: [f.defaultItems[1]], hasNext: false } : normal(message);
+  const rain = f.findClass('thumbnail-action')[0]; f.activate(rain); f.activate(rain);
+  assert.equal(rain.disabled, true); assert.equal(f.messages.filter(m => m.type === 'watch-card-action').length, 1);
+  f.input('craft'); await f.run(180); const current = f.findClass('thumbnail-action')[0];
+  release(); await f.flush(); assert.equal(current.dataset.saved, 'false');
+  const count = f.messages.length; rain.click(); await f.flush(); assert.equal(f.messages.length, count);
+  assert.equal(f.messages.find(m => m.type === 'watch-card-action').pageUrl, f.defaultItems[0].videoUrl);
+});
+
+test('settled thumbnail actions recover focus lost while disabled without stealing another control’s focus', async () => {
+  for (const movedFocus of [false, true]) {
+    const f = fixture(); await f.flush(); let release;
+    f.responder = (message, normal) => message.type === 'watch-card-action' ? new Promise(resolve => { release = () => resolve({ ok: true }); }) : normal(message);
+    const button = f.findClass('thumbnail-action')[0]; button.focus(); f.activate(button);
+    f.document.activeElement = f.document.body; // Native buttons may lose focus when disabled.
+    if (movedFocus) f.ids.get('search').focus();
+    release(); await f.flush(); assert.equal(f.document.activeElement, movedFocus ? f.ids.get('search') : button);
+  }
+});
+
+test('action-specific missing-token, rejected-token, launch and uncertain feedback leave Reader/card state unchanged', async () => {
+  for (const [action, code, expected] of [['raindrop', 'missing_token', /Add your Raindrop token/], ['raindrop', 'unauthorized', /Check your Raindrop token/],
+    ['downie', 'launch_failed', /Check that Downie is installed/], ['downie', 'request_uncertain', /Check Downie before/]]) {
+    const f = fixture(); await f.flush(); const card = f.findClass('video')[0];
+    f.responder = (message, normal) => message.type === 'watch-card-action' ? { ok: false, code } : normal(message);
+    const button = f.findClass('thumbnail-action').find(n => n.dataset.action === action); f.activate(button); await f.flush();
+    assert.match(f.ids.get('error-toast').querySelector('p').textContent, expected); assert.equal(button.dataset.saved, 'false'); assert.equal(button.disabled, false);
+    assert.equal(f.findClass('video')[0], card); assert.equal(f.messages.length, 2);
+  }
+});
 
 test('typing invalidates old replies before debounce; newer query/filter/paging responses always win', async () => {
   const f = fixture(); await f.flush(); const replies = [];
