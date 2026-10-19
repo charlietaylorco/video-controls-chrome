@@ -39,6 +39,7 @@
     request_uncertain: 'The request could not be confirmed. Refresh before trying again.', runtime_error: 'The extension is unavailable. Reload the extension and reopen Recent saves.'
   })[result.code] || (result.code === 'rate_limited' ? C.rateLimitMessage(result) : 'Reader could not complete this request. Try Refresh.');
   const announce = (text, error = false) => feedback.show(text, error);
+  const cardActions = globalThis.MVSWatchCardActions.create({ send, announce });
   const node = (tag, text, parent, className) => { const n = document.createElement(tag); if (text) n.textContent = text; if (className) n.className = className; parent?.append(n); return n; };
   const icon = (parent, commands) => {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
@@ -80,9 +81,11 @@
     channel.addEventListener('click', () => { const current = items.find(row => row.videoUrl === item.videoUrl); if (loaded && current?.author && !pending.size && !deletion) search.setChannel(current.author); });
     const locationRow = node('div', '', copy, 'location-row'), move = node('button', '', locationRow, 'location-trigger'); move.type = 'button';
     move.setAttribute('aria-haspopup', 'menu'); move.setAttribute('aria-expanded', 'false'); move.setAttribute('aria-controls', locationMenu.id);
-    const locationActions = node('div', '', locationRow, 'location-actions');
-    const readerLink = node('a', '', locationActions, 'reader-link'); readerLink.target = '_blank'; readerLink.rel = 'noopener noreferrer'; readerLink.title = 'Open in Reader';
+    const locationActions = node('div', '', locationRow, 'location-actions destination-actions');
+    locationActions.setAttribute('role', 'group'); locationActions.setAttribute('aria-label', 'Video destinations');
+    const readerLink = node('a', '', locationActions, 'reader-link destination-action'); readerLink.target = '_blank'; readerLink.rel = 'noopener noreferrer'; readerLink.title = 'Open in Reader';
     icon(readerLink, 'M14 3h7v7M10 14 21 3M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5');
+    const actions = cardActions.attach(locationActions, item.videoUrl);
     const summary = node('p', '', copy, 'summary-text');
     const footer = node('div', '', copy, 'card-footer'), footerDetails = node('div', '', footer, 'footer-details');
     const note = node('p', '', footerDetails, 'row-status'); note.setAttribute('role', 'status');
@@ -102,14 +105,15 @@
       if (['ArrowDown', 'ArrowUp'].includes(event.key)) { event.preventDefault(); const captured = target(); if (captured) locationMenu.open(captured, event.key === 'ArrowUp' ? 'last' : 'first'); }
     });
     refresh.addEventListener('click', () => void refreshCard(item.videoUrl, refresh));
-    return { card, link, channel, date, checked, summary, move, readerLink, refresh, trash, note, thumbnailLink, thumbnail };
+    return { card, link, channel, date, checked, summary, move, readerLink, refresh, trash, note, thumbnailLink, thumbnail, actions };
   };
   const render = () => {
     const order = items.map(item => item.videoUrl);
-    for (const url of rows.keys()) if (!order.includes(url)) { rows.get(url).thumbnail.destroy(); rows.delete(url); }
+    for (const url of rows.keys()) if (!order.includes(url)) { rows.get(url).thumbnail.destroy(); rows.get(url).actions.destroy(); rows.delete(url); }
     const cards = [];
     for (const item of items) {
       let row = rows.get(item.videoUrl); if (!row) { row = makeRow(item); rows.set(item.videoUrl, row); }
+      row.actions.update(item.title, loaded && !refreshing && !deletion && !pending.size);
       row.link.textContent = item.title || `YouTube video · ${new URL(item.videoUrl).searchParams.get('v')}`;
       row.thumbnailLink.setAttribute('aria-label', `Watch ${item.title || 'video'} on YouTube`); row.thumbnailLink.title = 'Open on YouTube';
       row.channel.textContent = item.author || 'Not retained';
