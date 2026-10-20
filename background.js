@@ -1,12 +1,15 @@
-importScripts("x-video-download.js", "reader-core.js", "reader-watch-core.js", "reader-watch-store.js", "reader-service.js", "reader-watch-service.js");
+importScripts("x-video-download.js", "reader-core.js", "reader-watch-core.js", "reader-watch-store.js", "reader-service.js", "reader-watch-service.js", "reader-summary-service.js");
 
 let readerPanelService, readerWatchStore, readerWatchService, watchRevision = 0, watchAuthRevision = 0;
 chrome.storage?.onChanged?.addListener((changes, area) => {
-  if (area === 'local' && changes.readerToken) watchAuthRevision++;
+  if (area === 'local' && changes.readerToken) { watchAuthRevision++; void readerPanelService?.invalidateAuth(); }
 });
 const getReaderWatchStore = () => readerWatchStore ||= MVSReaderWatchStore.create({ storage: chrome.storage.local,
   notify: videoUrl => new Promise(resolve => chrome.storage.local.set({ readerWatchChanged: { videoUrl, at: Date.now(), revision: ++watchRevision } }, resolve)) });
-const getReaderPanelService = () => readerPanelService ||= MVSReaderService.create({ storage: chrome.storage.local, fetch, history: getReaderWatchStore() });
+const getReaderPanelService = () => readerPanelService ||= MVSReaderSummaryService.create({ storage: chrome.storage.local, alarms: chrome.alarms,
+  reader: MVSReaderService.create({ storage: chrome.storage.local, fetch, history: getReaderWatchStore() }) });
+chrome.alarms?.onAlarm?.addListener(alarm => { if (alarm.name === 'reader-summary') void getReaderPanelService().resume(); });
+if (chrome.alarms) void getReaderPanelService().resume();
 const getReaderWatchService = () => readerWatchService ||= MVSReaderWatchService.create({ store: getReaderWatchStore(), reader: getReaderPanelService() });
 
 const DOWNIE_PREFIX = "downie://XUOpenLink?url=";
@@ -804,6 +807,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         result = null;
       }
 
+      // Publish the delay before saved flags can provoke an open surface's read.
+      let existingSummary = false;
+      try { existingSummary = Boolean(await getReaderWatchStore().cachedSummary(MVSReaderCore.canonical(targetUrl), result?.id)); } catch { /* optional cache */ }
+      try { await getReaderPanelService().recordSave(targetUrl, result?.id, { alreadyExists: response.status === 200, existingSummary }); } catch { /* optional summary refresh */ }
       // Serialize flags with panel deletion invalidation. Saving stays successful
       // if the optional document index is unavailable.
       try { await getReaderPanelService().remember(targetUrl, result?.id, () => markReaderUrlSaved(targetUrl, result?.url)); }

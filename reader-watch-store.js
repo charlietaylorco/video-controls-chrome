@@ -98,6 +98,13 @@
         const request = tx.objectStore('items').get(videoUrl); request.onsuccess = () => done(request.result || null);
       });
     };
+    const cachedSummary = async (videoUrl, id) => {
+      await ready();
+      return transaction(['summaries'], 'readonly', (tx, done) => {
+        const request = tx.objectStore('summaries').get(videoUrl);
+        request.onsuccess = () => done(request.result?.id === id ? request.result.summary : null);
+      });
+    };
     const page = async ({ filter = 'watch', cursor = null, query = '', channel = '', tag = '', isCurrent = () => true } = {}) => {
       const definition = W.indexFor(filter), criteria = W.searchCriteria(query, channel, tag);
       if (!definition || !W.validCursor(cursor) || !criteria) throw Object.assign(fail(), { code: 'invalid_request' });
@@ -147,7 +154,7 @@
         }
       });
     };
-    return { ready, recordSave, verify, mark, get, page };
+    return { ready, recordSave, verify, mark, get, cachedSummary, page };
   };
   globalThis.MVSReaderWatchStore = { create };
 })();

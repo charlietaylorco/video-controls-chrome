@@ -41,6 +41,8 @@ function harness({ stored = {}, responder, tabUrl = A, cardValid = true } = {}) 
   const service = context.MVSReaderService.create({ storage: context.chrome.storage.local, fetch: context.fetch, now: () => clock });
   const create = context.MVSReaderService.create;
   context.MVSReaderService.create = options => create({ ...options, now: () => clock });
+  const summaryCreate = context.MVSReaderSummaryService.create;
+  context.MVSReaderSummaryService.create = options => summaryCreate({ ...options, now: () => clock });
   return { data, requests, challenges, context, service, advance(ms) { clock += ms; }, setTab(value) { tab = value; },
     get: (pageUrl = A, cursor) => service.handle({ type: 'reader-panel-get', pageUrl, cursor }),
     note: (values = {}) => service.handle({ type: 'reader-panel-save-note', pageUrl: A, id: 'doc-a', notes: 'Edited', baseNotes: 'Original', ...values }),
@@ -760,5 +762,19 @@ test('upstream HTTP-date and missing Retry-After retain their source and bounded
     const app = harness({ responder: () => ({ status: 429, retryAfter }) });
     const reply = await app.get(); assert.equal(reply.rateLimitSource, 'reader'); assert.equal(reply.retryAt, retryAt);
     assert.equal((await app.get()).rateLimitSource, 'reader'); assert.equal(app.requests.length, 1);
+  }
+});
+
+test('successful 201 save schedules delay before publishing its saved identity; existing/failed saves do not', async () => {
+  for (const status of [201, 200, 500]) {
+    const app = harness({ responder: url => url.endsWith('/save/') ? { status, id: 'doc-a', url: 'https://read.readwise.io/read/doc-a' } : { results: [doc()] } });
+    const result = await app.message({ type: 'save-to-reader', pageUrl: A, title: 'Title', author: 'Author' });
+    assert.equal(result.ok, status < 300);
+    if (status === 201) {
+      assert.equal(app.data.readerSummaryJobs[A].nextAt, 115000);
+      const reply = await app.message({ type: 'reader-panel-get', pageUrl: A, visit: 1 });
+      assert.equal(reply.summaryState, 'pending'); assert.equal(reply.document, null);
+    } else assert.equal(app.data.readerSummaryJobs, undefined);
+    assert.equal(app.requests.filter(request => request.url.includes('/list/')).length, 0);
   }
 });

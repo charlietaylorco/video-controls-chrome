@@ -118,13 +118,16 @@
         return data;
       } catch { throw error('reader_error'); }
     };
-    const byId = async (url, id) => {
+    const byId = async (url, id, { retainMissing = false } = {}) => {
       let data;
       try { data = await api(`list/?id=${encodeURIComponent(id)}`); }
       catch (e) { if (e.code !== 'not_found') throw e; }
+      if (!(await operationIsCurrent())) throw error('invalid_sender');
+      if ((await read({ readerToken: '' })).readerToken !== operationToken) throw error('auth_changed');
       const doc = data?.results.find(item => item.id === id);
       const clean = C.cleanDocument(doc, url);
       if (!clean) {
+        if (retainMissing) throw error('not_found');
         if (!doc || doc.is_deleted) await forgetDeleted(url, id);
         else {
           await forget(url, id);
@@ -149,6 +152,8 @@
       // One page per panel lookup. Never sweep the library in a navigation loop.
       const cursor = typeof message.cursor === 'string' && message.cursor.length < 1000 ? message.cursor : '';
       const data = await api(`list/?category=video&limit=100${cursor ? `&pageCursor=${encodeURIComponent(cursor)}` : ''}`);
+      if (!(await operationIsCurrent())) throw error('invalid_sender');
+      if ((await read({ readerToken: '' })).readerToken !== operationToken) throw error('auth_changed');
       const matches = data.results.map(doc => C.cleanDocument(doc, url)).filter(Boolean);
       if (matches.length > 1) throw error('ambiguous');
       await mutate((index, deleted) => {
@@ -290,6 +295,15 @@
         operationIsCurrent = isCurrent;
         if (!(await operationIsCurrent())) throw error('invalid_sender');
         operationToken = (await read({ readerToken: '' })).readerToken;
+        if (message.type === 'reader-summary-get') {
+          const url = C.canonical(message.pageUrl);
+          if (!url) throw error('invalid_url');
+          await storageQueue;
+          const id = (await read({ [KEY]: {} }))[KEY]?.[url]?.id;
+          if (!C.validId(id)) return getCard({ targetUrl: url });
+          try { return { ok: true, document: await byId(url, id, { retainMissing: true }) }; }
+          catch (e) { if (e.code === 'not_found') return { ok: true, document: null }; throw e; }
+        }
         if (message.type === 'reader-panel-get') return get(message);
         if (message.type === 'reader-panel-save-note') return saveNote(message);
         if (message.type === 'reader-panel-delete') return deleteDocument(message);

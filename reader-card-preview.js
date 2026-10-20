@@ -119,7 +119,7 @@
       ui.refresh.disabled = s.busy || Boolean(s.confirm);
       ui.trash.disabled = s.busy || !s.doc || Boolean(s.confirm);
       ui.link.href = s.doc ? C.readerUrl(s.doc.id) : 'https://read.readwise.io/';
-      const status = s.busy ? (s.action === 'delete' ? 'Deleting…' : 'Loading…') : s.error ? 'Check Reader' : s.deleted ? 'Removed from Reader' : s.doc ? 'Saved in Reader' : 'Summary unavailable';
+      const status = s.busy ? (s.action === 'delete' ? 'Deleting…' : 'Loading…') : s.error ? 'Check Reader' : s.deleted ? 'Removed from Reader' : s.summaryState === 'pending' ? 'Preparing summary' : s.doc ? 'Saved in Reader' : 'Summary unavailable';
       if (ui.status.textContent !== status) ui.status.textContent = status;
       place();
     };
@@ -135,19 +135,20 @@
       s.started = true; s.deleted = false;
       startRequest(s, 'read', 'Loading Reader summary…', interactive); render();
       const cached = cache.get(s.url);
-      const reply = cached?.expires > now() ? cached.reply : await send({ type: 'reader-card-get', pageUrl: s.page, targetUrl: s.url, lease: s.lease });
+      const reply = cached?.expires > now() ? cached.reply : await send({ type: 'reader-card-get', pageUrl: s.page, targetUrl: s.url, lease: s.lease, fresh: interactive });
       if (!valid(s)) { if (session === s) close(); return; }
-      s.busy = false; s.holdRequest = false;
+      s.busy = false; s.holdRequest = false; s.summaryState = reply.summaryState;
       if (!reply.ok) { s.error = true; s.doc = null; s.text = errorText(reply); }
       else {
         s.doc = reply.document && reply.document.videoUrl === s.url && C.validId(reply.document.id) ? reply.document : null;
-        s.text = s.doc ? '' : reply.code === 'not_saved' ? 'This video is not marked saved in Reader.' : 'This older save could not be linked. Open Reader or use the watch-page Reader panel to find it.';
+        s.text = reply.summaryState === 'pending' && !s.doc?.summary ? C.summaryMessage(reply) : s.doc ? '' : reply.code === 'not_saved' ? 'This video is not marked saved in Reader.' : 'This older save could not be linked. Open Reader or use the watch-page Reader panel to find it.';
       }
       cache.delete(s.url);
       if (!['invalid_sender', 'auth_changed', 'runtime_error'].includes(reply.code))
         cache.set(s.url, { reply, expires: now() + (reply.code === 'rate_limited' ? Math.max(1000, (reply.retryAt || now() + 60000) - now()) : reply.ok ? (s.doc?.summary ? 60000 : 15000) : 5000) });
       while (cache.size > 50) cache.delete(cache.keys().next().value);
       render();
+      if (s.summaryRefresh) { s.summaryRefresh = false; cache.delete(s.url); void load(s); }
     };
     const remove = async () => {
       const s = session;
@@ -260,6 +261,21 @@
         cache.clear();
         const marked = (flags, url) => Object.entries(flags || {}).some(([key, saved]) => saved && C.canonical(key) === url);
         if (session && marked(changes.readerSavedUrls.oldValue, session.url) && !marked(changes.readerSavedUrls.newValue, session.url)) invalidated = true;
+      }
+      if (changes.readerSummaryJobs) {
+        const { oldValue = {}, newValue = {} } = changes.readerSummaryJobs;
+        for (const url of new Set([...Object.keys(oldValue), ...Object.keys(newValue)])) {
+          if (JSON.stringify(oldValue[url]) === JSON.stringify(newValue[url])) continue;
+          cache.delete(url);
+          const s = session, job = newValue[url];
+          if (!s || s.url !== url || !valid(s) || s.confirm || s.deleted || !job) continue;
+          s.summaryState = job.status;
+          if (job.status === 'ready') {
+            if (s.busy) s.summaryRefresh = true; else void load(s);
+          } else if (!s.busy && !s.doc?.summary) {
+            s.error = Boolean(job.code); s.text = job.code ? errorText(job) : C.summaryMessage(job); render();
+          }
+        }
       }
       // A discovery lookup's own newly linked id must not erase the summary
       // when its storage event arrives after the response. Only invalidate an
