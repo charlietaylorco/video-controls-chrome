@@ -18,7 +18,7 @@ A small bottom-right thumbnail badge shows known runtime as `m:ss` / `h:mm:ss`. 
 
 Native Chromium: `tests/watch-duration.browser.cjs` passes all three cases; the existing two toast browser checks pass too. The fixture uses actual DOM, worker routes and IndexedDB with synthetic data and blocked external traffic. Checks cover 320/390/1100px, light/dark themes, known/unknown/live badges, unavailable thumbnails, constant 16:9 geometry, overlay bounds, no horizontal overflow, automatic local-cache updates, and actual browser metadata/navigation events. Screenshots are synthetic, not private library data.
 
-The existing Reader browser suite has one unrelated failure on unchanged main (`00e3062`): “late save stays on its captured video and preserves edits made while saving” expects “Unsaved draft” but gets “Review conflict.” Its 35 other checks pass. This change does not modify Reader panel/editor code; compare its result separately from the new duration fixture.
+The existing Reader browser suite has one unrelated failure on unchanged main (`00e3062`): “late save stays on its captured video and preserves edits made while saving” expects “Unsaved draft” but gets “Review conflict.” Its 35 other checks pass. This change does not modify Reader panel/editor code; compare its result separately from the new duration fixture. The combined preview passes 320 unit tests and all five duration/toast browser checks. Its existing Reader suite passes 35/37: the same late-save failure plus “remote HTML stays inert text…” timing out while waiting for the deferred Note iframe. Both failures reproduce on unchanged preview `b53d13e`, before this change.
 
 Reproduce with the repository's optional Playwright runtime:
 
