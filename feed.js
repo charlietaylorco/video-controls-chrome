@@ -2062,6 +2062,9 @@ async function saveToReadwise(item) {
     pageUrl: normalizeVideoUrl(item.link),
     title: item.title || undefined,
     author: item.channelTitle || undefined,
+    durationVideoUrl: item.link,
+    durationSeconds: item.durationSeconds,
+    durationIsLive: item.isLive === true,
   });
 
   if (error) {

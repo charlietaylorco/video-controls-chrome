@@ -79,6 +79,7 @@ const createWatch = MVSReaderWatchStore.create;
 MVSReaderWatchStore.create = opts => createWatch({ ...opts, name: 'mvs-watch-offline-fixture', now: () => ++fixtureClock });
 ${source('reader-service.js')}
 ${source('reader-watch-service.js')}
+${fs.existsSync(path.join(root, 'reader-summary-service.js')) ? source('reader-summary-service.js') : ''}
 ${source('background.js')}
 seeded = (async () => {
   await new Promise((resolve, reject) => { const r = indexedDB.deleteDatabase('mvs-watch-offline-fixture'); r.onsuccess = resolve; r.onerror = reject; });
@@ -92,7 +93,8 @@ seeded = (async () => {
       summary: i === 3 ? '<img src=x onerror=alert(1)> is inert fixture text.' : i % 11 === 0 ? '' : 'A saved idea worth returning to. This mock summary explores practical ways to make room for focused work, thoughtful decisions, and a little more curiosity.\\n\\nThe useful takeaway: start with one small change you can actually try.',
       notes: 'Private fixture note', updated_at: 'v1' };
     documents.set(id, doc); data.readerSavedUrls[videoUrl] = fixtureClock; data.readerDocuments[videoUrl] = { id, at: fixtureClock };
-    await store.recordSave(videoUrl, mode === 'unlinked' ? null : id, { title: doc.title, author: doc.author });
+    await store.recordSave(videoUrl, mode === 'unlinked' ? null : id, { title: doc.title, author: doc.author, durationVideoUrl: videoUrl,
+      durationSeconds: i % 4 === 0 ? 65 : i % 4 === 1 ? 3661 : null, durationIsLive: i % 4 === 3 });
     if (mode !== 'unlinked' && (i % 2 === 0 || mode === 'layout')) await store.verify(videoUrl, MVSReaderCore.cleanDocument(doc, videoUrl));
   }
   report('Fixture ready. No real Reader data.');

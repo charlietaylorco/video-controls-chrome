@@ -74,15 +74,29 @@
       if (result) { try { await notify(videoUrl); } catch { /* history committed; notifications are best effort */ } }
       return result;
     };
-    const recordSave = (videoUrl, id, metadata = {}, { openExisting = false } = {}) => update(videoUrl, previous => {
-      const at = now();
-      return { ...previous, videoUrl, readerId: C.validId(id) ? id : previous?.status === 'saved' ? previous.readerId : null,
-        savedAt: openExisting && previous ? previous.savedAt : at, firstSavedAt: previous?.firstSavedAt || at,
-        title: W.text(metadata.title, 500) || previous?.title || '', author: W.text(metadata.author, 300) || previous?.author || '',
-        tags: previous?.readerId === id && previous.status === 'saved' ? previous.tags : null,
-        location: previous?.readerId === id && previous.status === 'saved' ? previous.location : '',
-        checkedAt: previous?.readerId === id && previous.status === 'saved' ? previous.checkedAt : 0, status: 'saved', provenance: 'extension' };
-    });
+    const durationCache = async () => {
+      if (!storage) return {};
+      try { return await new Promise(resolve => storage.get({ ytListsDurationCache: {}, ytListsFeedCache: {} }, data =>
+        resolve(globalThis.chrome?.runtime?.lastError ? {} : data))); } catch { return {}; }
+    };
+    const recordSave = async (videoUrl, id, metadata = {}, { openExisting = false } = {}) => {
+      const bound = C.canonical(metadata.durationVideoUrl) === videoUrl;
+      const live = bound && metadata.durationIsLive === true;
+      const captured = bound ? C.durationSeconds(metadata.durationSeconds) : null;
+      const seconds = live ? null : captured || W.cachedDuration(videoUrl, await durationCache());
+      return update(videoUrl, previous => {
+        const at = now();
+        const keepLive = live || (!captured && previous?.durationIsLive === true);
+        return { ...previous, videoUrl, readerId: C.validId(id) ? id : previous?.status === 'saved' ? previous.readerId : null,
+          savedAt: openExisting && previous ? previous.savedAt : at, firstSavedAt: previous?.firstSavedAt || at,
+          title: W.text(metadata.title, 500) || previous?.title || '', author: W.text(metadata.author, 300) || previous?.author || '',
+          durationSeconds: keepLive ? null : seconds || C.durationSeconds(previous?.durationSeconds),
+          durationIsLive: keepLive,
+          tags: previous?.readerId === id && previous.status === 'saved' ? previous.tags : null,
+          location: previous?.readerId === id && previous.status === 'saved' ? previous.location : '',
+          checkedAt: previous?.readerId === id && previous.status === 'saved' ? previous.checkedAt : 0, status: 'saved', provenance: 'extension' };
+      });
+    };
     const verify = (videoUrl, doc) => {
       if (doc.videoUrl !== videoUrl || !C.validId(doc.id)) return Promise.reject(fail());
       const at = now(), summary = W.text(doc.summary, W.SUMMARY_LIMIT);
@@ -102,7 +116,7 @@
       const definition = W.indexFor(filter), criteria = W.searchCriteria(query, channel, tag);
       if (!definition || !W.validCursor(cursor) || !criteria) throw Object.assign(fail(), { code: 'invalid_request' });
       await ready();
-      return transaction(['items', 'summaries'], 'readonly', (tx, done) => {
+      const result = await transaction(['items', 'summaries'], 'readonly', (tx, done) => {
         const [index, prefix] = definition, rows = [];
         const range = keyRange.bound([prefix, 0, ''], cursor ? [prefix, ...cursor] : [prefix, Number.MAX_SAFE_INTEGER, '\uffff'], false, Boolean(cursor));
         // Only the bounded summary cache is searched up front. Stream retained
@@ -146,6 +160,14 @@
           };
         }
       });
+      // Enrich only this bounded page from existing local caches. Old records
+      // need no schema rewrite, Reader request or YouTube fetch.
+      if (!result.stale) {
+        const missing = result.items.some(item => !item.durationIsLive && !C.durationSeconds(item.durationSeconds));
+        const cached = missing ? await durationCache() : {};
+        for (const item of result.items) item.durationSeconds = item.durationIsLive ? null : C.durationSeconds(item.durationSeconds) || W.cachedDuration(item.videoUrl, cached);
+      }
+      return isCurrent() ? result : { stale: true };
     };
     return { ready, recordSave, verify, mark, get, page };
   };

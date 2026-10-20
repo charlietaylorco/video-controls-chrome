@@ -31,6 +31,14 @@
     const source = response.rateLimitSource === 'local' ? 'Extension' : response.rateLimitSource === 'reader' ? 'Reader' : 'Request';
     return `${source} rate limit reached. Try again after ${new Date(response.retryAt || now + 60000).toLocaleTimeString()}.`;
   };
+  const durationSeconds = value => typeof value === 'number' && Number.isFinite(value) && value > 0 && Number.isSafeInteger(Math.round(value))
+    ? Math.max(1, Math.round(value)) : null;
+  const formatVideoDuration = value => {
+    const seconds = durationSeconds(value);
+    if (!seconds) return '';
+    const hours = Math.floor(seconds / 3600), minutes = Math.floor(seconds / 60) % 60;
+    return `${hours ? `${hours}:${String(minutes).padStart(2, '0')}` : Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  };
   const cleanDocument = (doc, videoUrl) => {
     if (!doc || !validId(doc.id) || doc.is_deleted || doc.parent_id || canonical(doc.source_url) !== videoUrl) return null;
     const tags = Array.isArray(doc.tags) ? doc.tags : Object.entries(doc.tags || {}).map(([key, tag]) =>
@@ -65,7 +73,7 @@
     if (!state.dirty) state.value = state.base = '';
     return true;
   };
-  const api = { youtubeOrigin, pageKey, canonical, validId, readerUrl, locations, locationLabel, rateLimitMessage, cleanDocument, draft, edit, receive, saved, removed };
+  const api = { youtubeOrigin, pageKey, canonical, validId, readerUrl, locations, locationLabel, rateLimitMessage, durationSeconds, formatVideoDuration, cleanDocument, draft, edit, receive, saved, removed };
   globalThis.MVSReaderCore = api;
   if (typeof module !== 'undefined') module.exports = api;
 })();

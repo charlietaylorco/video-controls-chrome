@@ -483,3 +483,42 @@ test('unavailable/failing tag reads preserve same-document tags, explicit empty 
   await a.store.verify(A,{id:'doc-a',videoUrl:A,tags:['Learning'],location:'later'});
   await a.record(A,'replacement'); assert.equal((await a.call('watch-list-page',{tag:'Learning',filter:'all'})).items.length,0);
 });
+
+test('saved durations persist with source association and survive Reader verification without changing freshness semantics', async () => {
+  const a = app(); await a.record(A, 'doc-a', { durationVideoUrl: A, durationSeconds: 3661 });
+  assert.equal((await a.store.get(A)).durationSeconds, 3661); assert.equal((await a.store.get(A)).checkedAt, 0);
+  await a.store.verify(A, a.context.MVSReaderCore.cleanDocument(raw(), A));
+  assert.equal((await a.store.get(A)).durationSeconds, 3661); assert.equal((await a.store.get(A)).checkedAt, 100000);
+  await a.record(A, 'doc-a', { durationVideoUrl: B, durationSeconds: 99 }); assert.equal((await a.store.get(A)).durationSeconds, 3661);
+  await a.record(A, 'doc-a', { durationVideoUrl: A, durationSeconds: Infinity }); assert.equal((await a.store.get(A)).durationSeconds, 3661);
+  await a.record(A, 'doc-a', { durationVideoUrl: A, durationIsLive: true, durationSeconds: 600 });
+  assert.equal((await a.store.get(A)).durationSeconds, null); assert.equal((await a.store.page({filter:'all'})).items[0].durationSeconds, null);
+});
+test('old records use existing YT Lists caches only for matching IDs without network or history migration/rewrite', async () => {
+  const a = app({stored:{ readerSavedUrls: {[A]:1,[B]:2}, ytListsDurationCache: {alpha:65, beta:Infinity}, ytListsFeedCache:{channel:{items:[
+    {videoId:'alpha',link:B,durationSeconds:999}, {videoId:'beta',link:B,durationSeconds:3661}
+  ]}} }});
+  const page = await a.store.page({filter:'all'});
+  assert.equal(page.items.find(item=>item.videoUrl===A).durationSeconds,65); assert.equal(page.items.find(item=>item.videoUrl===B).durationSeconds,3661);
+  assert.equal((await a.store.get(A)).durationSeconds,undefined); assert.equal(a.requests.length,0);
+  a.data.ytListsDurationCache.alpha = -1; a.data.ytListsFeedCache.channel.items = [{videoId:'alpha',link:B,durationSeconds:999}];
+  assert.equal((await a.store.page({filter:'all'})).items.find(item=>item.videoUrl===A).durationSeconds,null);
+  await a.record(B); assert.equal((await a.store.get(B)).durationSeconds,null);
+});
+test('cache reuse on a new save remains local, and a captured live state suppresses cached DVR lengths', async () => {
+  const a = app({stored:{ytListsDurationCache:{alpha:65}}}); await a.record(); assert.equal((await a.store.get(A)).durationSeconds,65);
+  await a.record(A,'doc-a',{durationVideoUrl:A,durationIsLive:true}); assert.equal((await a.store.get(A)).durationSeconds,null);
+  await a.record(A,'doc-a',{}); assert.equal((await a.store.get(A)).durationIsLive,true);
+  await a.record(A,'doc-a',{durationVideoUrl:A,durationSeconds:90}); assert.equal((await a.store.get(A)).durationSeconds,90); assert.equal((await a.store.get(A)).durationIsLive,false);
+  assert.equal(a.requests.length,0);
+});
+test('background save retains only duration metadata explicitly tied to its captured target URL', async () => {
+  for (const durationVideoUrl of [A, B]) {
+    const a = app({responder: url => url.endsWith('/save/') ? {status:201,id:'doc-a'} : null}); a.loadBackground();
+    const result = await a.message({type:'save-to-reader',pageUrl:A,title:'Synthetic video',author:'Synthetic channel',durationVideoUrl,durationSeconds:65},
+      {id:'extension',frameId:0,url:A,tab:{id:1,url:A}});
+    assert.equal(result.ok,true); assert.equal((await a.store.get(A)).durationSeconds,durationVideoUrl===A?65:null);
+    const sent = JSON.parse(a.requests.find(request=>request.url.endsWith('/save/')).body);
+    assert.equal(sent.durationSeconds,undefined); assert.equal(sent.durationVideoUrl,undefined);
+  }
+});

@@ -5,6 +5,18 @@
   const filters = Object.freeze({ watch: 'To watch', later: 'Later', shortlist: 'Shortlist', archive: 'Archive', all: 'All saves' });
   const text = (value, limit) => typeof value === 'string' ? value.slice(0, limit) : '';
   const tags = value => Array.isArray(value) ? value.filter(tag => typeof tag === 'string' && tag.trim()).slice(0, 100).map(tag => text(tag, 200)) : [];
+  const cachedDuration = (videoUrl, { ytListsDurationCache = {}, ytListsFeedCache = {} } = {}) => {
+    const url = C.canonical(videoUrl);
+    if (!url) return null;
+    const id = new URL(url).searchParams.get('v'), direct = C.durationSeconds(ytListsDurationCache?.[id]);
+    if (direct) return direct;
+    for (const feed of Object.values(ytListsFeedCache || {})) for (const item of Array.isArray(feed?.items) ? feed.items : []) {
+      if (item.videoId !== id || item.link && C.canonical(item.link) !== url || item.isLive === true) continue;
+      const seconds = C.durationSeconds(item.durationSeconds);
+      if (seconds) return seconds;
+    }
+    return null;
+  };
   const decorate = row => ({ ...row, active: row.status === 'deleted' ? 0 : 1,
     queue: !['deleted', 'missing'].includes(row.status) && !['archive', 'feed'].includes(row.location) ? 1 : 0,
     filterLocation: row.status === 'saved' ? row.location : '' });
@@ -39,7 +51,7 @@
     const metadata = normalize(`${item.title || ''} ${item.author || ''} ${retainedTags.join(' ')}`);
     return criteria.terms.every(term => metadata.includes(term) || summaryTerms.includes(term));
   };
-  const api = { PAGE_SIZE, CACHE_SIZE, SUMMARY_LIMIT, filters, text, tags, decorate, seeds, indexFor, cursor, validCursor, normalize, searchCriteria, matches };
+  const api = { PAGE_SIZE, CACHE_SIZE, SUMMARY_LIMIT, filters, text, tags, cachedDuration, decorate, seeds, indexFor, cursor, validCursor, normalize, searchCriteria, matches };
   globalThis.MVSReaderWatchCore = api;
   if (typeof module !== 'undefined') module.exports = api;
 })();
