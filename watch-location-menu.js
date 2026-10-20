@@ -10,10 +10,10 @@
       button.setAttribute('role', value === 'trash' ? 'menuitem' : 'menuitemradio'); button.setAttribute('aria-label', label);
       const text = document.createElement('span'); text.textContent = label; button.append(text);
       const check = document.createElement('span'); check.className = 'menu-check'; check.setAttribute('aria-hidden', 'true'); button.append(check);
-      button.addEventListener('click', () => {
+      button.addEventListener('click', event => {
         const captured = current;
         if (!captured || !isCurrent(captured)) { close(true); return; }
-        close(true); choose(captured, value);
+        close(true); choose(captured, value, event);
       });
       root.append(button); return { button, check, value, label };
     });

@@ -828,3 +828,20 @@ test('persistent errors/conflicts and late replies keep fixed note geometry and 
   assert.notEqual(await f.panel.locator('.footer [role="status"]').innerText(), 'Saved');
   assert.deepEqual(f.errors, []); await f.close();
 });
+
+test('closed production shadow: native Cmd-click skips confirmation, locks pending deletion and preserves errors', async () => {
+  for (const deleteError of [null, 'unauthorized']) {
+    const f = await fixture({ closedRoot: true });
+    await closedClick(f, '.toggle'); await closedClick(f, '.location');
+    await f.page.evaluate(error => { mock.defer = true; mock.deleteError = error; }, deleteError);
+    await f.page.keyboard.down('Meta');
+    try { await closedClick(f, '.location-menu .destructive'); }
+    finally { await f.page.keyboard.up('Meta'); }
+    assert.equal(await f.page.evaluate(() => mock.panelRoot.querySelector('.delete-confirm').hidden), true);
+    assert.equal(await f.page.evaluate(() => mock.panelRoot.querySelector('.location').disabled), true);
+    assert.equal(await f.page.evaluate(() => mock.messages.filter(m => m.type === 'reader-panel-delete').length), 1);
+    await f.page.evaluate(() => mock.release());
+    assert.match(await f.page.evaluate(() => mock.panelRoot.querySelector('.status').textContent), deleteError ? /rejected the token/ : /Deleted from Reader/);
+    assert.deepEqual(f.errors, []); await f.close();
+  }
+});

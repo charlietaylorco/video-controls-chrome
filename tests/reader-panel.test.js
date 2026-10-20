@@ -33,7 +33,7 @@ function fixture({ url = A, width = 1100, height = 900, transport = false } = {}
     getAttribute(key) { return this.attrs[key]; }
     addEventListener(key, fn) { this.listeners.set(key, [...(this.listeners.get(key) || []), fn]); }
     fire(key, extra = {}) { const event = { key: '', preventDefault() { this.prevented = true; }, stopPropagation() {}, composedPath: () => [this], ...extra }; for (const fn of this.listeners.get(key) || []) fn(event); return event; }
-    click() { if (!this.disabled && !this.hidden) this.fire('click'); }
+    click(modifiers = {}) { if (!this.disabled && !this.hidden) this.fire('click', modifiers); }
     focus() { active = this; }
     blur() { if (active === this) active = null; }
     attachShadow() { this.shadowRoot = new Node('shadow'); this.shadowRoot.host = this; return this.shadowRoot; }
@@ -130,7 +130,7 @@ function fixture({ url = A, width = 1100, height = 900, transport = false } = {}
     key(key, node = active) { const event = dispatch(node, 'keydown', { key }); if (!event.prevented && ['Enter', ' '].includes(key) && visible(node)) node.click(); },
     focus,
     async open() { if (byClass('body').hidden) byClass('toggle').click(); await tick(); },
-    trash() { byClass('location').click(); button('Delete from Reader').click(); },
+    trash(modifiers = {}) { byClass('location').click(); button('Delete from Reader').click(modifiers); },
     move(value) { byClass('location').click(); button(value).click(); },
     async hover() { byClass('toggle').fire('pointerenter'); this.runTimers(300); await tick(); },
     advance(ms) { clock += ms; },
@@ -621,5 +621,40 @@ test('panel and temporary summary peek display local versus upstream rate source
       assert.match(f.byClass(open === 'open' ? 'status' : 'peek-summary').textContent, new RegExp('^' + prefix + ' rate limit reached'));
       f.runTimers(250); await tick(); assert.equal(f.messages.length, 1);
     }
+  }
+});
+
+test('Cmd-click Trash skips the prompt and uses the exact mocked Reader deletion route while keeping drafts', async () => {
+  const f = fixture({ transport: true }); await f.open(); f.edit('Keep Cmd-click draft');
+  f.trash({ metaKey: true }); await tick();
+  assert.equal(f.byClass('delete-confirm').hidden, true);
+  assert.equal(f.requests.filter(r => r.method === 'DELETE').length, 1);
+  assert.equal(new URL(f.requests.find(r => r.method === 'DELETE').url).pathname, '/api/v3/delete/doc-a/');
+  assert.equal(f.docs.has('doc-a'), false); assert.equal(f.docs.has('doc-b'), true);
+  assert.equal(f.value, 'Keep Cmd-click draft'); assert.match(f.byClass('status').textContent, /Deleted from Reader/);
+});
+
+test('Cmd-click Trash stays pending, rejects duplicates, and retains errors and local drafts', async () => {
+  for (const code of ['unauthorized', 'delete_uncertain', 'delete_conflict']) {
+    const f = fixture(); await f.open(); f.edit('Keep draft'); let release;
+    f.responder = (message, normal) => message.type === 'reader-panel-delete' ? new Promise(resolve => { release = () => resolve({ ok: false, code }); }) : normal();
+    f.trash({ metaKey: true });
+    f.button('Delete from Reader').fire('click', { metaKey: true }); f.button('Delete document').fire('click');
+    assert.equal(f.byClass('delete-confirm').hidden, true); assert.equal(f.byClass('location').disabled, true);
+    assert.equal(f.messages.filter(m => m.type === 'reader-panel-delete').length, 1);
+    assert.match(f.byClass('status').textContent, /Checking Reader before deleting/);
+    release(); await tick();
+    assert.equal(f.value, 'Keep draft'); assert.equal(f.docs.has('doc-a'), true); assert.equal(f.byClass('location').disabled, false);
+    assert.equal(f.messages.filter(m => m.type === 'reader-panel-delete').length, 1);
+    assert.ok(f.byClass('status').textContent); assert.equal(f.byClass('status').dataset.kind, 'error');
+  }
+});
+
+test('watch-page Ctrl/Alt/Shift Trash clicks preserve the cancellable confirmation', async () => {
+  for (const modifiers of [{ ctrlKey: true }, { altKey: true }, { shiftKey: true }]) {
+    const f = fixture(); await f.open(); f.trash(modifiers);
+    assert.equal(f.byClass('delete-confirm').hidden, false); assert.equal(f.messages.filter(m => m.type === 'reader-panel-delete').length, 0);
+    f.button('Cancel').click(); await tick(); assert.equal(f.docs.has('doc-a'), true);
+    assert.equal(f.messages.filter(m => m.type === 'reader-panel-delete').length, 0);
   }
 });

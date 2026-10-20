@@ -21,6 +21,8 @@ function fixture({ settings = {}, deferSettings = false } = {}) {
     get isConnected() { return this === document.body || Boolean(this.parentElement?.isConnected); }
     contains(node) { return node === this || this.children.some(n => n.contains(node)); }
     focus() { const previous = document.activeElement; document.activeElement = this; for (let n = previous; n; n = n.parentElement) n.fire('focusout', {relatedTarget:this}); for (let n = this; n; n = n.parentElement) n.fire('focusin', {relatedTarget:previous}); }
+    getBoundingClientRect() { return { left: 60, top: 100, bottom: 132 }; }
+    get scrollHeight() { return 154; }
     showModal() { this.open = true; }
     close() { this.open = false; }
     querySelector(selector) { return this.children.flatMap(all).find(n => selector === '[aria-pressed="true"]' ? n.attrs['aria-pressed'] === 'true' : n.tagName === selector) || null; }
@@ -34,6 +36,9 @@ function fixture({ settings = {}, deferSettings = false } = {}) {
     const node = new Node(id === 'search' ? 'input' : ['clear-search','channel-filter','refresh','previous','next','reset-view','cancel-delete','confirm-delete'].includes(id) ? 'button' : 'div');
     ids.set(id, node); document.body.append(node);
   }
+  for (const id of ['delete-title','delete-identity','delete-status','cancel-delete','confirm-delete']) {
+    const child = ids.get(id); document.body.children = document.body.children.filter(node => node !== child); ids.get('deletion').append(child);
+  }
   for (const id of ['toast', 'error-toast']) { const box = ids.get(id); box.hidden = true; box.append(new Node('p'), new Node('button')); }
   const defaultItems = Array.from({length: 2}, (_, i) => ({ videoUrl: `https://www.youtube.com/watch?v=item_${i}`, readerId: `doc-${i}`, title: i ? 'Focus and craft' : 'Design practice', author: i ? 'Maker Extra' : 'Maker', summary: 'Cached attention', status: 'saved', location: 'later', checkedAt: 1000, savedAt: 1000 - i }));
   const reply = message => message.type === 'watch-list-page' ? { ok: true, items: defaultItems, hasNext: false, nextCursor: null } : { ok: true };
@@ -45,9 +50,9 @@ function fixture({ settings = {}, deferSettings = false } = {}) {
       storageReads.push(Object.keys(defaults)); const reply = { ...defaults, ...Object.fromEntries(Object.entries(settings).filter(([key]) => key in defaults)) };
       if (deferSettings && 'showRaindrop' in defaults) releaseSettings = () => cb(reply); else cb(reply);
     } }, onChanged: { addListener(fn) { storageListeners.push(fn); } } } },
-    MVSWatchLocationMenu: { create: () => ({ id: 'location-menu', close() {}, refresh() {}, toggle() {}, open() {} }) },
+    window: { innerWidth: 1100, innerHeight: 900, addEventListener() {}, removeEventListener() {} },
   });
-  for (const file of ['reader-core.js','reader-watch-core.js','watch-feedback.js','watch-search.js','watch-thumbnail.js','watch-card-actions.js','watch.js']) vm.runInContext(fs.readFileSync(path.join(__dirname,'..',file),'utf8'), context);
+  for (const file of ['reader-core.js','reader-watch-core.js','watch-feedback.js','watch-search.js','watch-thumbnail.js','watch-card-actions.js','watch-location-menu.js','watch.js']) vm.runInContext(fs.readFileSync(path.join(__dirname,'..',file),'utf8'), context);
   const flush = async () => { await tick(); await tick(); };
   const run = async delay => {
     clock += delay;
@@ -59,9 +64,9 @@ function fixture({ settings = {}, deferSettings = false } = {}) {
     input(value) { ids.get('search').value = value; ids.get('search').fire('input'); },
     visibility(hidden) { document.hidden = hidden; (listeners.get('visibilitychange') || []).forEach(fn => fn()); },
     change(values) { storageListeners.forEach(fn => fn(values, 'local')); },
-    activate(target) {
+    activate(target, modifiers = {}) {
       const path = []; for (let n = target; n; n = n.parentElement) path.push(n);
-      const event = { target, prevented: false, stopped: false, preventDefault() { this.prevented = true; }, stopPropagation() { this.stopped = true; } };
+      const event = { ...modifiers, target, prevented: false, stopped: false, preventDefault() { this.prevented = true; }, stopPropagation() { this.stopped = true; } };
       if (path.some(n => n.disabled || n.hidden)) return event;
       for (const n of path) { Object.assign(event, n.fire('click', event)); if (event.stopped) break; }
       return event;
@@ -270,4 +275,74 @@ test('real card thumbnails fall back without Reader messages and removed rows ca
   const last=image.src;f.responder=(message,normal)=>message.type==='watch-list-page'?{ok:true,items:[],hasNext:false}:normal(message);
   f.input('no retained rows');await f.run(180);image.currentSrc=last;image.fire('error');assert.equal(image.src,last);
   assert.ok(f.messages.every(message=>message.type==='watch-list-page'));assert.equal(f.findClass('video').length,0);
+});
+
+// Real location-menu clicks and footer clicks must share the same deletion route.
+for (const surface of ['footer', 'menu']) {
+  const trash = (f, modifiers = {}) => {
+    if (surface === 'footer') return f.activate(f.findClass('card-trash')[0].children[0], modifiers);
+    f.activate(f.findClass('location-trigger')[0]);
+    f.activate(f.findClass('destructive-item')[0].children[0], modifiers);
+  };
+  const mockDelete = f => {
+    f.responder = (message, normal) => message.type === 'watch-list-prepare-delete'
+      ? { ok: true, token: 'fixture-ticket', videoUrl: f.defaultItems[0].videoUrl, id: 'doc-0', title: 'Fixture document' }
+      : normal(message);
+  };
+  test(`Recent saves ${surface}: normal click confirms; cancelling sends no delete; confirmed click uses prepared ticket`, async () => {
+    const f = fixture(); await f.flush(); mockDelete(f);
+    trash(f); await f.flush();
+    assert.equal(f.ids.get('deletion').open, true); assert.equal(f.document.activeElement, f.ids.get('cancel-delete'));
+    assert.equal(f.ids.get('delete-title').textContent, 'Fixture document');
+    assert.match(f.ids.get('delete-identity').textContent, /item_0.*doc-0/);
+    assert.equal(f.messages.filter(m => m.type === 'watch-list-delete').length, 0);
+    f.ids.get('cancel-delete').click(); await f.flush();
+    assert.equal(f.ids.get('deletion').open, false); assert.equal(f.messages.filter(m => m.type === 'watch-list-delete').length, 0);
+    assert.equal(f.document.activeElement, f.findClass(surface === 'footer' ? 'card-trash' : 'location-trigger')[0]);
+    trash(f); await f.flush(); f.ids.get('confirm-delete').click(); await f.flush();
+    const writes = f.messages.filter(m => m.type === 'watch-list-delete');
+    assert.equal(writes.length, 1); assert.equal(writes[0].token, 'fixture-ticket'); assert.equal(writes[0].confirmed, true);
+  });
+  test(`Recent saves ${surface}: Cmd-click bypasses modal after preflight, locks pending action, and sends once`, async () => {
+    const f = fixture(); await f.flush(); let prepare, remove;
+    f.responder = (message, normal) => message.type === 'watch-list-prepare-delete'
+      ? new Promise(resolve => { prepare = () => resolve({ ok: true, token: 'fixture-ticket', videoUrl: f.defaultItems[0].videoUrl, id: 'doc-0' }); })
+      : message.type === 'watch-list-delete' ? new Promise(resolve => { remove = () => resolve({ ok: true }); }) : normal(message);
+    trash(f, { metaKey: true }); trash(f, { metaKey: true });
+    assert.equal(f.messages.filter(m => m.type === 'watch-list-prepare-delete').length, 1);
+    assert.equal(f.findClass('card-trash')[0].disabled, true); assert.notEqual(f.ids.get('deletion').open, true);
+    prepare(); await f.flush();
+    assert.notEqual(f.ids.get('deletion').open, true); assert.equal(f.messages.filter(m => m.type === 'watch-list-delete').length, 1);
+    assert.equal(f.findClass('video')[0].attrs['aria-busy'], 'true'); assert.equal(f.findClass('row-status')[0].textContent, 'Working…');
+    f.findClass('card-trash')[0].fire('click', { metaKey: true }); f.ids.get('confirm-delete').fire('click');
+    assert.equal(f.messages.filter(m => m.type === 'watch-list-delete').length, 1);
+    remove(); await f.flush(); assert.equal(f.ids.get('toast').querySelector('p').textContent, 'Deleted from Reader.');
+    assert.equal(f.findClass('card-trash')[0].disabled, false);
+  });
+  test(`Recent saves ${surface}: Ctrl/Alt/Shift alone retain confirmation; Cmd errors stay visible`, async () => {
+    for (const modifiers of [{ ctrlKey: true }, { altKey: true }, { shiftKey: true }]) {
+      const f = fixture(); await f.flush(); mockDelete(f); trash(f, modifiers); await f.flush();
+      assert.equal(f.ids.get('deletion').open, true); assert.equal(f.messages.filter(m => m.type === 'watch-list-delete').length, 0);
+    }
+    for (const code of ['unauthorized', 'delete_uncertain', 'delete_conflict']) {
+      const f = fixture(); await f.flush(); mockDelete(f);
+      f.responder = (message, fallback) => message.type === 'watch-list-delete' ? { ok: false, code }
+        : message.type === 'watch-list-prepare-delete' ? { ok: true, token: 'fixture-ticket', videoUrl: f.defaultItems[0].videoUrl, id: 'doc-0' } : fallback(message);
+      trash(f, { metaKey: true }); await f.flush();
+      assert.notEqual(f.ids.get('deletion').open, true); assert.equal(f.ids.get('error-toast').hidden, false);
+      assert.equal(f.findClass('row-status')[0].dataset.error, 'true'); assert.equal(f.messages.filter(m => m.type === 'watch-list-delete').length, 1);
+    }
+  });
+}
+
+test('Cmd-click never deletes when prepare fails or its page/credentials become stale', async () => {
+  for (const mode of ['failed', 'navigation', 'credentials']) {
+    const f = fixture(); await f.flush(); let release;
+    f.responder = (message, normal) => message.type === 'watch-list-prepare-delete' ? new Promise(resolve => { release = resolve; }) : normal(message);
+    f.activate(f.findClass('card-trash')[0], { metaKey: true });
+    if (mode === 'navigation') f.input('changed');
+    if (mode === 'credentials') f.change({ readerToken: { newValue: 'fixture-only' } });
+    release(mode === 'failed' ? { ok: false, code: 'unauthorized' } : { ok: true, token: 'fixture-ticket', videoUrl: f.defaultItems[0].videoUrl, id: 'doc-0' });
+    await f.flush(); assert.equal(f.messages.filter(m => m.type === 'watch-list-delete').length, 0); assert.notEqual(f.ids.get('deletion').open, true);
+  }
 });
