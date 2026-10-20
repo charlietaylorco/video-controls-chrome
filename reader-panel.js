@@ -306,7 +306,7 @@
       selectTab(tab, true);
     });
     refresh.addEventListener('click', () => void load());
-    trash.addEventListener('click', () => selectLocation('trash'));
+    trash.addEventListener('click', event => selectLocation('trash', event.metaKey === true));
     cancelDelete.addEventListener('click', cancelDeletion);
     confirmDelete.addEventListener('click', () => void deleteDocument());
     deletion.addEventListener('keydown', event => {
@@ -454,14 +454,14 @@
     } else { s.status = messageFor(response); s.statusKind = 'error'; }
     if (url === activeUrl) render();
   };
-  const selectLocation = async value => {
+  const selectLocation = async (value, skipConfirmation = false) => {
     const selected = menu;
     if (selected?.kind !== 'location') return;
     closeMenu();
     if (!sameVideo()) return;
     const url = activeUrl, s = current();
     if (!s?.doc || s.busy || s.doc.id !== selected.id || selected.url !== url) return;
-    if (value === 'trash') { requestDeletion(); return; }
+    if (value === 'trash') { requestDeletion(skipConfirmation); return; }
     if (!Object.hasOwn(C.locations, value) || s.locationUncertain) return;
     peek?.invalidate(url);
     clearFeedback(s); s.action = 'location'; s.statusKind = 'info'; s.status = 'Checking Reader before moving…';
@@ -517,12 +517,13 @@
     }
     if (url === activeUrl) render();
   };
-  const requestDeletion = () => {
+  const requestDeletion = (skipConfirmation = false) => {
     if (!sameVideo()) return;
     const s = current();
     if (!s?.doc || s.busy || C.canonical(location.href) !== activeUrl) return;
     closeMenu(); peek?.invalidate(activeUrl); clearFeedback(s);
     s.deleteConfirm = { url: activeUrl, id: s.doc.id, title: s.doc.title || '', baseNotes: s.doc.notes, updatedAt: s.doc.updatedAt || '' };
+    if (skipConfirmation) { void deleteDocument(); return; }
     render(); view.cancelDelete.focus();
   };
   const cancelDeletion = () => {

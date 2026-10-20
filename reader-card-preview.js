@@ -89,9 +89,12 @@
         const s = session; if (!s || s.busy || s.confirm) return;
         cache.delete(s.url); void load(s, true);
       });
-      trash.addEventListener('click', () => {
-        const s = session; if (!s?.doc || s.busy || !valid(s)) { close(); return; }
-        s.confirm = true; render(); cancel.focus();
+      trash.addEventListener('click', event => {
+        const s = session; if (s?.busy) return;
+        if (!s?.doc || !valid(s)) { close(); return; }
+        s.confirm = true;
+        if (event.metaKey === true) { void remove(); return; }
+        render(); cancel.focus();
       });
       cancel.addEventListener('click', () => { if (session) { session.confirm = false; render(); trash.focus(); } });
       confirm.addEventListener('click', () => void remove());

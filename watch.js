@@ -23,8 +23,8 @@
   const messageFor = result => ({ missing_token: 'Add your Reader token in Options, then refresh.', unauthorized: 'Reader rejected the token. Check Options.',
     unlinked: 'Reader ID not retained. Open the video page to link it; this list does not scan Reader history.',
     not_found: 'The matched Reader document is no longer available.', document_changed: 'The document changed. Refresh and review it before trying again.',
-    delete_conflict: 'Reader changed since confirmation. Close this dialog and review a fresh confirmation.',
-    invalid_confirmation: 'Confirmation expired or was already used. Close and choose Trash again.',
+    delete_conflict: 'Reader changed since it was checked. Review the current document before choosing Trash again.',
+    invalid_confirmation: 'Deletion approval expired or was already used. Choose Trash again to check the current document.',
     delete_target_missing: 'The matched document was not found; no DELETE was sent. Refresh before trying again.',
     delete_not_confirmed: 'Reader did not confirm deletion. Refresh to check its current state.',
     delete_still_present: 'Reader accepted DELETE but still returns the document. Refresh to verify its state.',
@@ -46,8 +46,8 @@
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('d', commands); svg.append(path); parent.append(svg);
   };
   const menuCurrent = target => loaded && !refreshing && !pending.size && !deletion && items.some(item => item.videoUrl === target.videoUrl && item.readerId === target.id && item.location === target.location && item.status === 'saved');
-  const locationMenu = globalThis.MVSWatchLocationMenu.create({ isCurrent: menuCurrent, choose: (target, value) => {
-    if (value === 'trash') void prepareDelete(target.videoUrl, target.trigger);
+  const locationMenu = globalThis.MVSWatchLocationMenu.create({ isCurrent: menuCurrent, choose: (target, value, event) => {
+    if (value === 'trash') void prepareDelete(target.videoUrl, target.trigger, event.metaKey === true);
     else void mutate(target.videoUrl, value, target.trigger);
   } });
   const restoreActionFocus = origin => {
@@ -95,7 +95,7 @@
     const footerActions = node('div', '', footer, 'footer-actions');
     const trash = node('button', '', footerActions, 'card-trash'); trash.type = 'button'; trash.title = 'Delete from Reader';
     icon(trash, 'M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7');
-    trash.addEventListener('click', () => void prepareDelete(item.videoUrl, trash));
+    trash.addEventListener('click', event => void prepareDelete(item.videoUrl, trash, event.metaKey === true));
     const target = () => {
       const current = items.find(row => row.videoUrl === item.videoUrl);
       return current && { videoUrl: current.videoUrl, id: current.readerId, location: current.location, title: current.title, trigger: move };
@@ -132,10 +132,11 @@
       row.refresh.disabled = pending.size > 0 || refreshing || Boolean(deletion) || !item.readerId || item.status === 'deleted' || !loaded;
       row.move.setAttribute('aria-label', `Saved location for ${item.title || 'video'}`);
       row.refresh.setAttribute('aria-label', `Refresh ${item.title || 'video'} from Reader`); row.refresh.title = 'Refresh this card from Reader';
-      row.card.setAttribute('aria-busy', String(pending.has(item.videoUrl) || refreshing));
+      const working = pending.has(item.videoUrl) || deleting && deletion?.videoUrl === item.videoUrl;
+      row.card.setAttribute('aria-busy', String(working || refreshing));
       row.readerLink.hidden = !item.readerId; if (item.readerId) row.readerLink.href = C.readerUrl(item.readerId);
       row.readerLink.setAttribute('aria-label', `Open ${item.title || 'video'} in Reader`);
-      row.note.textContent = pending.has(item.videoUrl) ? 'Working…' : errors.get(item.videoUrl) || (!item.readerId ? 'Reader ID not retained; open the video page to link it.' : '');
+      row.note.textContent = working ? 'Working…' : errors.get(item.videoUrl) || (!item.readerId ? 'Reader ID not retained; open the video page to link it.' : '');
       row.note.dataset.error = String(errors.has(item.videoUrl)); cards.push(row.card);
     }
     if (Array.from(grid.children).map(n => n.dataset.url).join('|') !== order.join('|')) {
@@ -183,15 +184,18 @@
     if (!reply.ok) rememberError(url, messageFor(reply));
     await load(); announce(reply.ok ? `Moved to ${C.locationLabel(destination)}.` : messageFor(reply), !reply.ok); restoreActionFocus(origin);
   };
-  const prepareDelete = async (url, origin) => {
-    const item = items.find(row => row.videoUrl === url); if (!item || pending.has(url)) return;
+  const prepareDelete = async (url, origin, skipConfirmation = false) => {
+    const item = items.find(row => row.videoUrl === url);
+    if (!item?.readerId || item.status !== 'saved' || !loaded || refreshing || pending.size || deletion) return;
     const request = refreshRequest;
     pending.add(url); errors.delete(url); render();
     const reply = await send({ type: 'watch-list-prepare-delete', videoUrl: url, id: item.readerId });
     pending.delete(url); render();
-    if (request !== refreshRequest) return;
+    if (request !== refreshRequest || !items.some(row => row.videoUrl === url && row.readerId === item.readerId)) return;
     if (!reply.ok) { rememberError(url, messageFor(reply)); render(); announce(messageFor(reply), true); restoreActionFocus(origin); return; }
-    deletion = { ...reply, origin }; $('delete-title').textContent = reply.title || 'Untitled Reader video';
+    deletion = { ...reply, origin, skipConfirmation };
+    if (skipConfirmation) { void deleteDocument(); render(); return; }
+    $('delete-title').textContent = reply.title || 'Untitled Reader video';
     $('delete-identity').textContent = `${reply.videoUrl} · Reader ID: ${reply.id}`;
     $('delete-status').textContent = ''; $('delete-status').dataset.error = 'false'; $('confirm-delete').disabled = false; $('cancel-delete').disabled = false;
     $('deletion').showModal(); $('cancel-delete').focus(); render();
@@ -203,15 +207,19 @@
   };
   $('cancel-delete').addEventListener('click', closeDelete);
   $('deletion').addEventListener('cancel', event => { event.preventDefault(); closeDelete(); });
-  $('confirm-delete').addEventListener('click', async () => {
+  const deleteDocument = async () => {
     if (!deletion || deleting) return;
     const captured = deletion; deleting = true; $('delete-status').textContent = 'Checking Reader before deleting…';
     $('confirm-delete').disabled = $('cancel-delete').disabled = true;
     const result = await send({ type: 'watch-list-delete', token: captured.token, confirmed: true });
     deleting = false;
     if (result.ok) { closeDelete(); announce('Deleted from Reader.'); }
-    else { $('delete-status').textContent = messageFor(result); $('delete-status').dataset.error = 'true'; $('cancel-delete').disabled = false; $('cancel-delete').focus(); }
-  });
+    else if (captured.skipConfirmation) {
+      rememberError(captured.videoUrl, messageFor(result));
+      closeDelete(); render(); announce(messageFor(result), true);
+    } else { $('delete-status').textContent = messageFor(result); $('delete-status').dataset.error = 'true'; $('cancel-delete').disabled = false; $('cancel-delete').focus(); }
+  };
+  $('confirm-delete').addEventListener('click', () => void deleteDocument());
   $('refresh').addEventListener('click', async () => {
     if (!loaded) { await load(); return; }
     const request = ++refreshRequest, captured = [...items]; refreshing = true; render();
