@@ -82,7 +82,9 @@
     const locationRow = node('div', '', copy, 'location-row'), move = node('button', '', locationRow, 'location-trigger'); move.type = 'button';
     move.setAttribute('aria-haspopup', 'menu'); move.setAttribute('aria-expanded', 'false'); move.setAttribute('aria-controls', locationMenu.id);
     const locationActions = node('div', '', locationRow, 'location-actions destination-actions');
-    locationActions.setAttribute('role', 'group'); locationActions.setAttribute('aria-label', 'Video destinations');
+    locationActions.setAttribute('role', 'group'); locationActions.setAttribute('aria-label', 'Video actions');
+    const refresh = node('button', '', locationActions, 'card-refresh destination-action'); refresh.type = 'button';
+    icon(refresh, 'M20 7v5h-5M20 12a8 8 0 1 0-2.3 5.7');
     const readerLink = node('a', '', locationActions, 'reader-link destination-action'); readerLink.target = '_blank'; readerLink.rel = 'noopener noreferrer'; readerLink.title = 'Open in Reader';
     icon(readerLink, 'M14 3h7v7M10 14 21 3M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5');
     const actions = cardActions.attach(locationActions, item.videoUrl);
@@ -91,8 +93,6 @@
     const note = node('p', '', footerDetails, 'row-status'); note.setAttribute('role', 'status');
     const footerMeta = node('div', '', footerDetails, 'footer-meta'), date = node('time', '', footerMeta), checked = node('span', '', footerMeta);
     const footerActions = node('div', '', footer, 'footer-actions');
-    const refresh = node('button', '', footerActions, 'card-refresh'); refresh.type = 'button';
-    icon(refresh, 'M20 7v5h-5M20 12a8 8 0 1 0-2.3 5.7');
     const trash = node('button', '', footerActions, 'card-trash'); trash.type = 'button'; trash.title = 'Delete from Reader';
     icon(trash, 'M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7');
     trash.addEventListener('click', () => void prepareDelete(item.videoUrl, trash));

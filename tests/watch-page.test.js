@@ -76,6 +76,12 @@ test('destination actions sit beside Open in Reader and isolate nested-icon clic
   assert.equal(buttons.length, 4);
   const destinations = f.findClass('destination-actions')[0], reader = f.findClass('reader-link')[0];
   assert.equal(buttons[0].parentElement.parentElement, destinations); assert.equal(reader.parentElement, destinations);
+  const refresh = f.findClass('card-refresh')[0], footer = f.findClass('footer-actions')[0];
+  assert.equal(destinations.children[0], refresh); assert.equal(destinations.children[1], reader);
+  assert.deepEqual(destinations.children[2].children.map(button => button.dataset.action), ['raindrop', 'downie']);
+  assert.equal(footer.children.length, 1); assert.equal(footer.children[0], f.findClass('card-trash')[0]);
+  assert.equal(footer.children[0].title, 'Delete from Reader'); assert.match(footer.children[0].attrs['aria-label'], /Trash Design practice from Reader/);
+  assert.equal(f.findClass('card-refresh').length, f.findClass('video').length);
   assert.ok(!media.contains(buttons[0]), 'thumbnail stays unobstructed'); assert.equal(media.children.length, 1);
   assert.equal(reader.href, 'https://read.readwise.io/read/doc-0');
   assert.ok(!link.contains(buttons[0])); assert.equal(link.href, f.defaultItems[0].videoUrl);
@@ -202,6 +208,8 @@ test('IME input waits for composition end; Escape clears text and a filter chang
 
 test('card success goes to a dismissible live toast without changing grid children or focus; actionable errors persist separately', async () => {
   const f = fixture(); await f.flush(); const card = f.findClass('video')[0], origin = f.findClass('card-refresh')[0];
+  assert.equal(origin.parentElement, f.findClass('destination-actions')[0]);
+  assert.match(origin.attrs['aria-label'], /Refresh Design practice from Reader/);
   origin.focus(); origin.click(); await f.flush();
   const toast = f.ids.get('toast'), error = f.ids.get('error-toast');
   assert.equal(toast.hidden, false); assert.equal(toast.querySelector('p').textContent, 'Card updated from Reader.');
