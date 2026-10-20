@@ -32,8 +32,8 @@ function fixture({ settings = {}, deferSettings = false } = {}) {
     getElementById: id => ids.get(id), createElement: tag => new Node(tag), createElementNS: (ns, tag) => new Node(tag),
     addEventListener(type, fn) { listeners.set(type, [...listeners.get(type) || [], fn]); } };
   document.activeElement = document.body;
-  for (const id of ['videos','search','clear-search','channel-filter','search-status','filters','refresh','previous','next','page-label','empty','empty-title','empty-description','reset-view','deletion','delete-title','delete-identity','delete-status','cancel-delete','confirm-delete','announcements','toast','error-toast']) {
-    const node = new Node(id === 'search' ? 'input' : ['clear-search','channel-filter','refresh','previous','next','reset-view','cancel-delete','confirm-delete'].includes(id) ? 'button' : 'div');
+  for (const id of ['videos','search','clear-search','channel-filter','tag-filter','search-status','filters','refresh','previous','next','page-label','empty','empty-title','empty-description','reset-view','deletion','delete-title','delete-identity','delete-status','cancel-delete','confirm-delete','announcements','toast','error-toast']) {
+    const node = new Node(id === 'search' ? 'input' : ['clear-search','channel-filter','tag-filter','refresh','previous','next','reset-view','cancel-delete','confirm-delete'].includes(id) ? 'button' : 'div');
     ids.set(id, node); document.body.append(node);
   }
   for (const id of ['delete-title','delete-identity','delete-status','cancel-delete','confirm-delete']) {
@@ -345,4 +345,61 @@ test('Cmd-click never deletes when prepare fails or its page/credentials become 
     release(mode === 'failed' ? { ok: false, code: 'unauthorized' } : { ok: true, token: 'fixture-ticket', videoUrl: f.defaultItems[0].videoUrl, id: 'doc-0' });
     await f.flush(); assert.equal(f.messages.filter(m => m.type === 'watch-list-delete').length, 0); assert.notEqual(f.ids.get('deletion').open, true);
   }
+});
+
+test('inline Reader tags are inert safe text, beside the channel, with no empty symbol or extra fetch', async () => {
+  const f = fixture(); f.defaultItems[0].tags = [' Deep work ', 'Deep work', '<img src=x onerror=alert(1)>', '', null];
+  await f.flush();
+  const group = f.findClass('inline-tags')[0], buttons = f.findClass('tag-filter-button');
+  assert.equal(group.parentElement, f.findClass('channel-filter-button')[0].parentElement);
+  assert.equal(group.attrs['aria-label'], 'Reader tags'); assert.equal(buttons.length, 2);
+  assert.equal(buttons[0].textContent, 'Deep work'); assert.equal(buttons[1].textContent, '<img src=x onerror=alert(1)>');
+  assert.equal(buttons[1].children.length, 0); assert.equal(buttons[0].type, 'button');
+  assert.equal(f.findClass('tag-symbol').length, 1); assert.equal(f.findClass('tag-symbol')[0].children[0].attrs['aria-hidden'], 'true');
+  assert.equal(f.findClass('inline-tags')[1].hidden, true);
+  assert.equal(f.messages.length, 1); assert.equal(f.messages[0].type, 'watch-list-page');
+  f.defaultItems[0].tags = []; f.change({readerWatchChanged:{newValue:1}}); await f.run(100);
+  assert.equal(f.findClass('tag-filter-button').length, 0); assert.equal(f.findClass('tag-symbol').length, 0);
+  f.defaultItems[0].tags = ['Old tag']; f.defaultItems[0].status = 'missing'; f.change({readerWatchChanged:{newValue:2}}); await f.run(100);
+  assert.equal(f.findClass('tag-filter-button').length, 0);
+});
+
+test('exact multiword tag clicks isolate navigation, preserve other criteria, reset pagination and clear independently', async () => {
+  const f = fixture(); f.defaultItems[0].tags = ['Deep work']; await f.flush();
+  f.findClass('channel-filter-button')[0].click(); await f.flush(); f.input('attention'); await f.run(180);
+  let navigation = 0; f.findClass('video')[0].addEventListener('click', () => navigation++);
+  const button = f.findClass('tag-filter-button')[0], receipt = f.activate(button); await f.flush();
+  assert.equal(receipt.prevented, true); assert.equal(receipt.stopped, true); assert.equal(navigation, 0);
+  assert.equal(f.messages.at(-1).tag, 'Deep work'); assert.equal(f.messages.at(-1).channel, 'Maker'); assert.equal(f.messages.at(-1).query, 'attention'); assert.equal(f.messages.at(-1).cursor, null);
+  assert.equal(f.document.activeElement, f.ids.get('tag-filter')); assert.equal(button.attrs['aria-pressed'], 'true');
+  const count = f.messages.length; f.activate(button); await f.flush(); assert.equal(f.messages.length, count);
+  f.ids.get('filters').children.find(n => n.dataset.filter === 'archive').click(); await f.flush(); assert.equal(f.messages.at(-1).tag, 'Deep work');
+  f.ids.get('tag-filter').click(); await f.flush(); assert.equal(f.messages.at(-1).tag, ''); assert.equal(f.messages.at(-1).channel, 'Maker'); assert.equal(f.messages.at(-1).query, 'attention');
+  f.activate(button); await f.flush(); f.ids.get('clear-search').click(); await f.flush();
+  assert.equal(f.messages.at(-1).tag, ''); assert.equal(f.messages.at(-1).channel, ''); assert.equal(f.messages.at(-1).query, ''); assert.equal(f.messages.at(-1).filter, 'archive');
+  f.activate(button); await f.flush(); f.ids.get('reset-view').click(); await f.flush(); assert.equal(f.messages.at(-1).tag, ''); assert.equal(f.messages.at(-1).filter, 'all');
+  assert.ok(f.messages.every(m => m.type === 'watch-list-page'));
+});
+
+test('tag filtering retains settled empty/error views and rejects stale results while controls recover', async () => {
+  const f = fixture(); f.defaultItems[0].tags = ['Deep work']; await f.flush();
+  let release; f.responder = (message, normal) => message.tag ? new Promise(resolve => { release = resolve; }) : normal(message);
+  const button = f.findClass('tag-filter-button')[0]; f.activate(button); await f.flush();
+  assert.equal(button.disabled, true); assert.equal(f.ids.get('videos').attrs['aria-busy'], 'true');
+  f.ids.get('tag-filter').click(); await f.flush(); release({ok:true,items:[],hasNext:false}); await f.flush();
+  assert.equal(f.findClass('video').length, 2); assert.equal(button.disabled, false);
+  f.responder = () => ({ok:false,code:'watch_storage_error'}); f.activate(button); await f.flush();
+  assert.equal(f.findClass('video').length, 2); assert.equal(f.ids.get('error-toast').hidden, false); assert.equal(f.ids.get('tag-filter').hidden, false);
+  f.responder = (message, normal) => message.tag ? {ok:true,items:[],hasNext:false} : normal(message);
+  f.ids.get('refresh').click(); await f.flush(); assert.equal(f.ids.get('empty').hidden, false); assert.match(f.ids.get('empty-title').textContent, /No matching/);
+  f.ids.get('reset-view').click(); await f.flush(); assert.equal(f.ids.get('empty').hidden, true); assert.equal(f.findClass('video').length, 2);
+});
+
+test('many and long tags stay bounded and failed Reader refresh preserves cached tag buttons', async () => {
+  const f = fixture(); f.defaultItems[0].tags = ['x'.repeat(300), ...Array.from({length:110}, (_,i) => `Tag ${i}`)]; await f.flush();
+  const buttons = f.findClass('tag-filter-button'); assert.equal(buttons.length, 100); assert.equal(buttons[0].textContent.length, 200);
+  let release; f.responder = (message, normal) => message.type === 'watch-list-refresh' ? new Promise(resolve => { release = resolve; }) : normal(message);
+  f.findClass('card-refresh')[0].click(); await f.flush(); assert.equal(buttons[0].disabled, true);
+  release({ok:false,code:'network_error'}); await f.flush(); assert.equal(f.findClass('tag-filter-button')[0], buttons[0]); assert.equal(buttons[0].disabled, false);
+  assert.match(f.ids.get('error-toast').textContent, /Cached videos/);
 });

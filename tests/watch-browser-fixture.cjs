@@ -87,7 +87,7 @@ seeded = (async () => {
     const videoUrl = 'https://www.youtube.com/watch?v=mock_watch_' + i, id = 'mock-' + i;
     const titles = ['A quieter way to plan your week', 'What makes a small business work', 'Designing a useful daily practice', 'Learning to see the bigger picture', 'The craft behind a good decision'];
     const doc = { id, source_url: videoUrl, title: titles[i % titles.length] + ' · ' + (i + 1), author: 'Mock channel ' + (i % 4 + 1),
-      tags: i === 3 ? ['<img src=x onerror=alert(1)>'] : i % 5 === 0 ? [] : ['Creativity', 'Learning'],
+      tags: options.get('tags') === 'stress' ? ['Deep work', 'Very long multiword tag for focused learning and thoughtful practice', 'x'.repeat(200), ...Array.from({length:50}, (_,n) => 'Topic ' + n)] : i === 3 ? ['<img src=x onerror=alert(1)>'] : i % 5 === 0 ? [] : ['Creativity', 'Learning'],
       location: i % 7 === 0 ? 'archive' : i % 3 === 0 ? 'shortlist' : i % 5 === 0 ? 'new' : 'later',
       summary: i === 3 ? '<img src=x onerror=alert(1)> is inert fixture text.' : i % 11 === 0 ? '' : 'A saved idea worth returning to. This mock summary explores practical ways to make room for focused work, thoughtful decisions, and a little more curiosity.\\n\\nThe useful takeaway: start with one small change you can actually try.',
       notes: 'Private fixture note', updated_at: 'v1' };
