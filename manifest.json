@@ -29,6 +29,11 @@
   },
   "content_scripts": [
     {
+      "matches": ["https://www.youtube.com/*", "https://youtube.com/*", "https://m.youtube.com/*"],
+      "js": ["youtube-speed-keys.js"],
+      "run_at": "document_start"
+    },
+    {
       "matches": [
         "https://x.com/*",
         "https://www.x.com/*",
