@@ -8,7 +8,7 @@
     errors.delete(url); errors.set(url, text);
     while (errors.size > 100) errors.delete(errors.keys().next().value);
   };
-  let items = [], filter = 'watch', query = '', channelFilter = '', cursors = [null], hasNext = false, nextCursor = null, pageRequest = 0, refreshRequest = 0;
+  let items = [], filter = 'watch', query = '', channelFilter = '', tagFilter = '', cursors = [null], hasNext = false, nextCursor = null, pageRequest = 0, refreshRequest = 0;
   let refreshing = false, loaded = false, reloadTimer, deletion = null, deleting = false, theme = 'system';
   // Request readiness must not hide the last settled view during local search.
   let hasSettledView = false, displayedSearch = false, displayedPage = 1;
@@ -63,8 +63,9 @@
     $('next').disabled = !loaded || !hasNext || pending.size > 0 || Boolean(deletion);
     $('page-label').textContent = `Page ${displayedPage} · ${items.length} ${displayedSearch ? 'match' + (items.length === 1 ? '' : 'es') : 'video' + (items.length === 1 ? '' : 's')}`;
     $('search').disabled = pending.size > 0 || Boolean(deletion);
-    $('clear-search').disabled = $('search').disabled || !query && !channelFilter;
+    $('clear-search').disabled = $('search').disabled || !query && !channelFilter && !tagFilter;
     $('channel-filter').disabled = $('search').disabled;
+    $('tag-filter').disabled = $('search').disabled;
     for (const b of $('filters').children) { b.setAttribute('aria-pressed', String(b.dataset.filter === filter)); b.disabled = pending.size > 0 || Boolean(deletion); }
   };
   const makeRow = item => {
@@ -77,8 +78,11 @@
     link.href = item.videoUrl; link.target = '_blank'; link.rel = 'noopener noreferrer';
     const metadata = node('dl', '', copy, 'metadata');
     const field = label => { const group = node('div', '', metadata); node('dt', label, group, 'sr-only'); return node('dd', '', group); };
-    const channel = node('button', '', field('Channel'), 'channel-filter-button'); channel.type = 'button';
+    const channelLine = field('Channel and tags'); channelLine.className = 'channel-tags';
+    const channel = node('button', '', channelLine, 'channel-filter-button'); channel.type = 'button';
     channel.addEventListener('click', () => { const current = items.find(row => row.videoUrl === item.videoUrl); if (loaded && current?.author && !pending.size && !deletion) search.setChannel(current.author); });
+    const tagList = node('span', '', channelLine, 'inline-tags'); tagList.hidden = true;
+    tagList.setAttribute('role', 'group'); tagList.setAttribute('aria-label', 'Reader tags');
     const locationRow = node('div', '', copy, 'location-row'), move = node('button', '', locationRow, 'location-trigger'); move.type = 'button';
     move.setAttribute('aria-haspopup', 'menu'); move.setAttribute('aria-expanded', 'false'); move.setAttribute('aria-controls', locationMenu.id);
     const locationActions = node('div', '', locationRow, 'location-actions destination-actions');
@@ -105,7 +109,7 @@
       if (['ArrowDown', 'ArrowUp'].includes(event.key)) { event.preventDefault(); const captured = target(); if (captured) locationMenu.open(captured, event.key === 'ArrowUp' ? 'last' : 'first'); }
     });
     refresh.addEventListener('click', () => void refreshCard(item.videoUrl, refresh));
-    return { card, link, channel, date, checked, summary, move, readerLink, refresh, trash, note, thumbnailLink, thumbnail, actions };
+    return { card, link, channel, tagList, date, checked, summary, move, readerLink, refresh, trash, note, thumbnailLink, thumbnail, actions };
   };
   const render = () => {
     const order = items.map(item => item.videoUrl);
@@ -119,6 +123,29 @@
       row.channel.textContent = item.author || 'Not retained';
       row.channel.disabled = !item.author || !loaded || pending.size > 0 || Boolean(deletion);
       row.channel.setAttribute('aria-label', item.author ? `Filter by exact channel: ${item.author}` : 'Channel not retained');
+      const tags = item.status === 'saved' ? [...new Set(W.tags(item.tags).map(tag => tag.trim()))] : [];
+      const tagKey = JSON.stringify(tags);
+      if (row.tagList.dataset.key !== tagKey) {
+        row.tagList.dataset.key = tagKey; row.tagList.replaceChildren();
+        if (tags.length) {
+          const symbol = node('span', '', row.tagList, 'tag-symbol');
+          icon(symbol, 'M20 13 13 20a2 2 0 0 1-3 0L2 12V3h9l9 8a2 2 0 0 1 0 2ZM7 7h.01');
+          for (const tag of tags) {
+            const button = node('button', tag, row.tagList, 'tag-filter-button'); button.type = 'button';
+            button.setAttribute('aria-label', `Filter by exact tag: ${tag}`);
+            button.addEventListener('click', event => {
+              event.preventDefault(); event.stopPropagation();
+              const current = items.find(row => row.videoUrl === item.videoUrl);
+              if (loaded && !refreshing && !pending.size && !deletion && current?.status === 'saved' && W.tags(current.tags).some(value => value.trim() === tag)) search.setTag(tag);
+            });
+          }
+        }
+      }
+      row.tagList.hidden = !tags.length;
+      for (const button of row.tagList.children) if (button.tagName.toLowerCase() === 'button') {
+        button.disabled = !loaded || refreshing || pending.size > 0 || Boolean(deletion);
+        button.setAttribute('aria-pressed', String(W.normalize(button.textContent) === W.normalize(tagFilter)));
+      }
       const savedDate = new Date(item.savedAt), hasSavedDate = Number.isFinite(savedDate.getTime());
       row.date.textContent = hasSavedDate ? `Saved ${savedDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}` : 'Saved date unavailable';
       row.date.dateTime = hasSavedDate ? savedDate.toISOString() : ''; row.date.setAttribute('aria-label', hasSavedDate ? `Saved date: ${savedDate.toLocaleString()}` : 'Saved date unavailable');
@@ -146,18 +173,18 @@
     grid.hidden = hasSettledView && items.length === 0; $('empty').hidden = !hasSettledView || items.length > 0;
     const searching = displayedSearch;
     $('empty-title').textContent = searching ? 'No matching videos' : 'No videos in this view';
-    $('empty-description').textContent = searching ? 'Try a different search or reset the channel and location filters. Only retained titles, channel names and available cached summaries are searchable.' : 'Save a YouTube video with the extension’s Reader button, or try All saves. Retained older saves may need their Reader ID linked on the video page.';
+    $('empty-description').textContent = searching ? 'Try a different search or reset the tag, channel and location filters. Only retained titles, channel names, tags and available cached summaries are searchable.' : 'Save a YouTube video with the extension’s Reader button, or try All saves. Retained older saves may need their Reader ID linked on the video page.';
     $('reset-view').hidden = !searching && filter === 'all';
     grid.setAttribute('aria-busy', String(!loaded)); controls();
   };
   const load = async ({ clearStatus = false } = {}) => {
-    const request = ++pageRequest, result = await send({ type: 'watch-list-page', filter, query, channel: channelFilter, cursor: cursors.at(-1) });
+    const request = ++pageRequest, result = await send({ type: 'watch-list-page', filter, query, channel: channelFilter, tag: tagFilter, cursor: cursors.at(-1) });
     if (request !== pageRequest) return;
     if (!result.ok) { announce(messageFor(result), true); controls(); return; }
     items = result.items.filter(item => C.canonical(item.videoUrl) === item.videoUrl && (!item.readerId || C.validId(item.readerId)));
     hasNext = result.hasNext; nextCursor = result.nextCursor; loaded = hasSettledView = true;
-    displayedSearch = Boolean(query.trim() || channelFilter); displayedPage = cursors.length; render();
-    $('search-status').textContent = `${items.length} ${query.trim() || channelFilter ? 'matching ' : ''}video${items.length === 1 ? '' : 's'} on page ${cursors.length}${hasNext ? '. More results available.' : '.'}`;
+    displayedSearch = Boolean(query.trim() || channelFilter || tagFilter); displayedPage = cursors.length; render();
+    $('search-status').textContent = `${items.length} ${query.trim() || channelFilter || tagFilter ? 'matching ' : ''}video${items.length === 1 ? '' : 's'} on page ${cursors.length}${hasNext ? '. More results available.' : '.'}`;
     if (clearStatus && !refreshing && pending.size === 0 && !deletion) announce('');
   };
   const reloadLocal = () => { clearTimeout(reloadTimer); reloadTimer = setTimeout(() => { if (!refreshing && !pending.size && !deletion) void load(); }, 100); };
@@ -240,8 +267,8 @@
     const button = node('button', label, $('filters')); button.type = 'button'; button.dataset.filter = value;
     button.addEventListener('click', () => { filter = value; cursors = [null]; changePage(); });
   }
-  const search = globalThis.MVSWatchSearch.create({ input: $('search'), clear: $('clear-search'), chip: $('channel-filter'), onChange: criteria => {
-    query = criteria.query; channelFilter = criteria.channel; cursors = [null]; invalidateView();
+  const search = globalThis.MVSWatchSearch.create({ input: $('search'), clear: $('clear-search'), chip: $('channel-filter'), tagChip: $('tag-filter'), onChange: criteria => {
+    query = criteria.query; channelFilter = criteria.channel; tagFilter = criteria.tag; cursors = [null]; invalidateView();
     const request = pageRequest;
     return () => { if (request === pageRequest) void load({ clearStatus: true }); };
   } });

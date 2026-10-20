@@ -28,13 +28,15 @@
   const cursor = row => [row.savedAt, row.videoUrl];
   const validCursor = value => value == null || Array.isArray(value) && value.length === 2 && Number.isFinite(value[0]) && value[0] > 0 && C.canonical(value[1]) === value[1];
   const normalize = value => typeof value === 'string' ? value.normalize('NFKC').toLowerCase().trim().replace(/\s+/g, ' ') : '';
-  const searchCriteria = (query = '', channel = '') => {
-    if (typeof query !== 'string' || query.length > 300 || typeof channel !== 'string' || channel.length > 300) return null;
-    return { terms: [...new Set(normalize(query).split(' ').filter(Boolean))], channel: normalize(channel) };
+  const searchCriteria = (query = '', channel = '', tag = '') => {
+    if (typeof query !== 'string' || query.length > 300 || typeof channel !== 'string' || channel.length > 300 || typeof tag !== 'string' || tag.length > 200) return null;
+    return { terms: [...new Set(normalize(query).split(' ').filter(Boolean))], channel: normalize(channel), tag: normalize(tag) };
   };
   const matches = (item, criteria, summaryTerms = []) => {
     if (criteria.channel && normalize(item.author) !== criteria.channel) return false;
-    const metadata = normalize(`${item.title || ''} ${item.author || ''}`);
+    const retainedTags = item.status === 'saved' ? tags(item.tags) : [];
+    if (criteria.tag && !retainedTags.some(tag => normalize(tag) === criteria.tag)) return false;
+    const metadata = normalize(`${item.title || ''} ${item.author || ''} ${retainedTags.join(' ')}`);
     return criteria.terms.every(term => metadata.includes(term) || summaryTerms.includes(term));
   };
   const api = { PAGE_SIZE, CACHE_SIZE, SUMMARY_LIMIT, filters, text, tags, decorate, seeds, indexFor, cursor, validCursor, normalize, searchCriteria, matches };

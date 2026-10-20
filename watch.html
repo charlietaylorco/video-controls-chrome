@@ -6,8 +6,8 @@
     <header class="page-header">
       <h1>Recent saves</h1><nav class="page-actions" aria-label="Recent saves navigation"><button id="refresh" class="text-action" type="button">Refresh this page</button><a class="yt-lists-link" href="feed.html">YT Lists</a></nav>
     </header>
-    <section class="toolbar" aria-label="Recent saves controls"><div id="filters" class="filters" role="group" aria-label="Saved video views"></div><div class="search-field"><label class="sr-only" for="search">Search recent saves</label><input id="search" type="search" maxlength="300" placeholder="Search titles, channels, summaries…" autocomplete="off"><button id="clear-search" type="button" aria-label="Clear search and channel filter" disabled>Clear</button></div></section>
-    <div class="search-meta"><button id="channel-filter" type="button" hidden></button></div>
+    <section class="toolbar" aria-label="Recent saves controls"><div id="filters" class="filters" role="group" aria-label="Saved video views"></div><div class="search-field"><label class="sr-only" for="search">Search recent saves</label><input id="search" type="search" maxlength="300" placeholder="Search titles, channels, tags, summaries…" autocomplete="off"><button id="clear-search" type="button" aria-label="Clear search, channel and tag filters" disabled>Clear</button></div></section>
+    <div class="search-meta"><button id="tag-filter" type="button" hidden></button><button id="channel-filter" type="button" hidden></button></div>
     <p id="search-status" class="sr-only" role="status" aria-live="polite">Loading your saved videos…</p>
     <section id="videos" class="videos" aria-label="Saved videos" aria-busy="true"></section>
     <section id="empty" class="empty" hidden><h2 id="empty-title">No videos in this view</h2><p id="empty-description">Save a YouTube video with the extension’s Reader button, or try All saves. Retained older saves may need their Reader ID linked on the video page.</p><button id="reset-view" type="button" hidden>Reset search and filters</button></section>

@@ -34,7 +34,7 @@
           pages.delete(key); pages.set(key, sequence);
           const isCurrent = () => pages.get(key) === sequence;
           try {
-            const result = await store.page({ filter: message.filter, cursor: message.cursor, query: message.query, channel: message.channel, isCurrent });
+            const result = await store.page({ filter: message.filter, cursor: message.cursor, query: message.query, channel: message.channel, tag: message.tag, isCurrent });
             return result.stale || !isCurrent() ? { ok: false, code: 'stale_search' } : { ok: true, ...result };
           } finally { if (isCurrent()) pages.delete(key); }
         }

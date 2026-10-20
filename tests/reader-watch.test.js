@@ -449,3 +449,37 @@ test('a queued hover read cannot consume the strict deletion verification slot',
   assert.equal((await deletion).ok, true); assert.equal((await hover).rateLimitSource, 'local');
   assert.deepEqual(methods(a), ['GET', 'GET', 'DELETE', 'GET']);
 });
+
+test('exact tag filtering streams retained history, intersects query/channel/location and paginates without Reader calls', async () => {
+  const a = app();
+  for (let i=0;i<29;i++) {
+    const videoUrl = `https://www.youtube.com/watch?v=tags_${i}`, id = `tags-${i}`; a.advance(1);
+    await a.record(videoUrl,id,{title:'Quiet craft',author:'Maker'});
+    await a.store.verify(videoUrl,{id,videoUrl,title:'Quiet craft',author:'Maker',location:i===0?'archive':'later',tags:i<27?['Deep work','Café research']:['Deep workplace'],summary:''});
+  }
+  let cursor = null, found = [];
+  do { const page = await a.call('watch-list-page',{tag:'  DEEP   WORK ',query:'craft',channel:'Maker',cursor}); assert.equal(page.ok,true); found.push(...page.items.map(row=>row.videoUrl)); cursor = page.nextCursor; } while(cursor);
+  assert.equal(found.length,26); assert.equal(new Set(found).size,26);
+  assert.equal((await a.call('watch-list-page',{tag:'Deep work',filter:'archive'})).items.length,1);
+  assert.equal((await a.call('watch-list-page',{tag:'work'})).items.length,0);
+  assert.equal((await a.call('watch-list-page',{tag:'Cafe\u0301 research',query:'deep work'})).items.length,12);
+  assert.equal((await a.call('watch-list-page',{tag:'Deep work',channel:'Other'})).items.length,0);
+  assert.equal((await a.call('watch-list-page',{query:'deep workplace'})).items.length,2);
+  for (const tag of [{},['Deep work'],'x'.repeat(201)]) assert.equal((await a.call('watch-list-page',{tag})).code,'invalid_request');
+  assert.equal(a.requests.length,0);
+});
+
+test('unavailable/failing tag reads preserve same-document tags, explicit empty clears, and missing/replacement never match stale tags', async () => {
+  let fail = false; const a = app({responder:()=>fail?new Error('offline'):null}); await a.record();
+  assert.equal((await a.call('watch-list-page',{tag:'Learning'})).items.length,0);
+  await a.call('watch-list-refresh',{videoUrl:A}); delete a.documents.get('doc-a').tags;
+  await a.call('watch-list-refresh',{videoUrl:A}); assert.deepEqual(Array.from((await a.store.get(A)).tags),['Learning']);
+  fail = true; assert.equal((await a.call('watch-list-refresh',{videoUrl:A})).ok,false);
+  assert.equal((await a.call('watch-list-page',{tag:'Learning'})).items.length,1);
+  await a.store.mark(A,'doc-a','missing'); assert.equal((await a.call('watch-list-page',{tag:'Learning',filter:'all'})).items.length,0);
+  fail = false; await a.call('watch-list-refresh',{videoUrl:A}); assert.equal((await a.store.get(A)).tags,null);
+  a.documents.get('doc-a').tags = {learning:{name:'Learning'}}; await a.call('watch-list-refresh',{videoUrl:A});
+  a.documents.get('doc-a').tags = {}; await a.call('watch-list-refresh',{videoUrl:A}); assert.deepEqual(Array.from((await a.store.get(A)).tags),[]);
+  await a.store.verify(A,{id:'doc-a',videoUrl:A,tags:['Learning'],location:'later'});
+  await a.record(A,'replacement'); assert.equal((await a.call('watch-list-page',{tag:'Learning',filter:'all'})).items.length,0);
+});
