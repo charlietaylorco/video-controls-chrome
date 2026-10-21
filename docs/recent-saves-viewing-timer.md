@@ -31,7 +31,7 @@ node --test tests/watch-timer.browser.cjs tests/watch-toast.browser.cjs
 
 `PLAYWRIGHT_MODULE`, `PLAYWRIGHT_CHROMIUM_EXECUTABLE` and `NODE_PATH` may point to existing runtimes. Fixture screenshots go under `output/playwright/viewing-timer/`. Reader panel/editor code is untouched; the previously documented unrelated Reader browser fixture failures are outside this change.
 
-PR-branch checks: **290 unit tests** and **6 focused browser tests** (timer + existing toast checks) pass. Syntax and diff checks pass.
+PR-branch checks: **290 unit tests** and **6 focused browser tests** (timer + existing toast checks) pass. The isolated combined preview retaining #16/#23/#24/#25 passes **330 unit tests** and **9 focused browser tests** (timer + duration + toast). Syntax and diff checks pass.
 
 ![Viewing timer picker, synthetic page](recent-saves-timer-picker-mock.png)
 ![Running timer in narrow dark layout](recent-saves-timer-dark-mock.png)
