@@ -505,3 +505,23 @@ recentSavesPositionInput.addEventListener("change", () => {
     showStatus(chrome.runtime.lastError ? "Could not save shortcut position" : "Recent saves shortcut position saved");
   });
 });
+
+// The configured default is separate from each timer session's chosen duration.
+const watchTimerDefaultInput = document.getElementById('watch-timer-default-minutes');
+let watchTimerDefaultMinutes = 15;
+chrome.storage.local.get(['watchTimerDefaultMinutes'], values => {
+  const value = values.watchTimerDefaultMinutes;
+  watchTimerDefaultMinutes = Number.isInteger(value) && value >= 1 && value <= 180 ? value : 15;
+  watchTimerDefaultInput.value = String(watchTimerDefaultMinutes);
+});
+watchTimerDefaultInput.addEventListener('change', () => {
+  const value = watchTimerDefaultInput.valueAsNumber;
+  if (!Number.isInteger(value) || value < 1 || value > 180) {
+    watchTimerDefaultInput.value = String(watchTimerDefaultMinutes); showStatus('Choose 1–180 whole minutes'); return;
+  }
+  chrome.storage.local.set({ watchTimerDefaultMinutes: value }, () => {
+    if (!chrome.runtime.lastError) watchTimerDefaultMinutes = value;
+    else watchTimerDefaultInput.value = String(watchTimerDefaultMinutes);
+    showStatus(chrome.runtime.lastError ? 'Could not save timer default' : 'Viewing timer default saved');
+  });
+});
