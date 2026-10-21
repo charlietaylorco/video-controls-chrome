@@ -698,6 +698,10 @@
             <button class="save-button" id="save-token" type="button">Save</button>
           </div>
         </div>
+        <div class="setting-row">
+          <div class="setting-copy"><label for="watch-timer-default-minutes">Viewing timer default (minutes)</label><span class="setting-hint">1–180 minutes. Applies to new timers in Recent saves. One-off durations do not change this default.</span></div>
+          <input class="time-input" id="watch-timer-default-minutes" type="number" min="1" max="180" step="1" value="15" inputmode="numeric" aria-label="Default viewing timer minutes">
+        </div>
         <label class="toggle-item" for="show-recent-saves-launcher">
           <span><span class="setting-title">Recent saves floating shortcut</span>
           <span class="setting-hint">Open Recent saves from a small floating button on YouTube. Separate from the Reader panel; hidden in fullscreen.</span></span>

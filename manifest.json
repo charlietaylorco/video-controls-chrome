@@ -59,6 +59,9 @@
         "https://music.youtube.com/*"
       ],
       "js": [
+        "watch-timer-core.js",
+        "watch-timer-client.js",
+        "watch-timer-reminder.js",
         "reader-core.js",
         "reader-launcher.js",
         "reader-editor.js",

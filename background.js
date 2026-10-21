@@ -1,4 +1,4 @@
-importScripts("x-video-download.js", "reader-core.js", "reader-watch-core.js", "reader-watch-store.js", "reader-service.js", "reader-watch-service.js");
+importScripts("x-video-download.js", "reader-core.js", "reader-watch-core.js", "reader-watch-store.js", "reader-service.js", "reader-watch-service.js", "watch-timer-core.js", "watch-timer-service.js");
 
 let readerPanelService, readerWatchStore, readerWatchService, watchRevision = 0, watchAuthRevision = 0;
 chrome.storage?.onChanged?.addListener((changes, area) => {
@@ -20,6 +20,10 @@ const DOWNIE_SENT_URLS_KEY = "downieSentUrls";
 const MAX_DOWNIE_SENT_URLS = 2000;
 const FEED_URL = chrome.runtime.getURL("feed.html");
 const WATCH_URL = chrome.runtime.getURL("watch.html");
+let viewingTimerService;
+const getViewingTimerService = () => viewingTimerService ||= MVSWatchTimerService.create({ storage: chrome.storage.local, alarms: chrome.alarms });
+chrome.alarms?.onAlarm?.addListener(alarm => { if (alarm.name === 'watch-viewing-timer') void getViewingTimerService().handle({ action: 'get' }); });
+if (chrome.alarms && globalThis.MVSWatchTimerService) void getViewingTimerService().handle({ action: 'get' });
 const openingRecentSaves = new Map();
 const openRecentSaves = (sourceTab) => {
   const privateContext = Boolean(sourceTab?.incognito);
@@ -526,6 +530,14 @@ const pickTargetUrl = (message, sender) => {
 };
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === 'viewing-timer') {
+    const active = sender.id === chrome.runtime.id && (sender.frameId === undefined || sender.frameId === 0) &&
+      (!sender.documentLifecycle || sender.documentLifecycle === 'active');
+    const controls = sender.url === WATCH_URL;
+    const reminder = Boolean(MVSReaderCore.youtubeOrigin(sender.url)) && ['get', 'expire', 'dismiss'].includes(message.action);
+    if (!active || (!controls && !reminder)) { sendResponse({ ok: false, code: 'invalid_sender' }); return undefined; }
+    getViewingTimerService().handle(message).then(sendResponse); return true;
+  }
   const recentCardAction = message?.type === "watch-card-action";
   if (recentCardAction) {
     const target = MVSReaderCore.canonical(message.pageUrl);

@@ -256,3 +256,11 @@ test('Recent saves shortcut options default on/bottom-left, persist four corners
   assert.equal(app.data.showReaderPanel,true); assert.equal(app.data.readerToken,'fixture-token');
   assert.equal(harness('options.js',{recentSavesLauncherPosition:'invalid'}).input('recent-saves-launcher-position').value,'bottom-left');
 });
+
+test('viewing timer default initializes to 15 and persists separately from session state', () => {
+  const app=harness('options.js');assert.equal(app.input('watch-timer-default-minutes').value,'15');
+  app.input('watch-timer-default-minutes').value='25';app.input('watch-timer-default-minutes').events.change();
+  assert.equal(app.data.watchTimerDefaultMinutes,25);assert.equal(app.data.watchViewingTimer,undefined);
+  const reopened=harness('options.js',app.data);assert.equal(reopened.input('watch-timer-default-minutes').value,'25');
+  for(const value of ['0','181','1.5','']){reopened.input('watch-timer-default-minutes').value=value;reopened.input('watch-timer-default-minutes').events.change();assert.equal(reopened.data.watchTimerDefaultMinutes,25);assert.equal(reopened.input('watch-timer-default-minutes').value,'25');}
+});
