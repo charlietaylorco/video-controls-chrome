@@ -9,6 +9,7 @@ Minimal Chrome extension that injects a compact hover-only speed controller into
 - `-` decreases playback speed by the configured overlay step for that specific video
 - `1x`, `2x`, `3x` jump that video to preset speeds
 - `+` increases playback speed by the configured overlay step for that specific video
+- On YouTube `/watch` pages, `Shift+,` / `Shift+.` decrease/increase speed by `0.25x`, including beyond `2x`, within the extension's `0.01x`–`16x` limits. These keys adjust the current watch player even in fullscreen; typing in search, comments, or note fields keeps its normal behavior. The overlay's configurable step stays separate.
 - The picture-in-picture button toggles PiP for that specific video when the site allows it
 - The speed readout shows the current saved speed for that video
 - The Downie icon opens the current video or page in Downie when possible
