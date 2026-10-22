@@ -31,6 +31,9 @@
     const source = response.rateLimitSource === 'local' ? 'Extension' : response.rateLimitSource === 'reader' ? 'Reader' : 'Request';
     return `${source} rate limit reached. Try again after ${new Date(response.retryAt || now + 60000).toLocaleTimeString()}.`;
   };
+  const summaryMessage = state => state?.summaryState === 'pending' || state?.status === 'pending'
+    ? 'Reader is preparing your summary. It will appear here automatically when ready.'
+    : 'Summary is not ready yet. Automatic checks have finished. Refresh later to check Reader.';
   const cleanDocument = (doc, videoUrl) => {
     if (!doc || !validId(doc.id) || doc.is_deleted || doc.parent_id || canonical(doc.source_url) !== videoUrl) return null;
     const tags = Array.isArray(doc.tags) ? doc.tags : Object.entries(doc.tags || {}).map(([key, tag]) =>
@@ -65,7 +68,7 @@
     if (!state.dirty) state.value = state.base = '';
     return true;
   };
-  const api = { youtubeOrigin, pageKey, canonical, validId, readerUrl, locations, locationLabel, rateLimitMessage, cleanDocument, draft, edit, receive, saved, removed };
+  const api = { youtubeOrigin, pageKey, canonical, validId, readerUrl, locations, locationLabel, rateLimitMessage, summaryMessage, cleanDocument, draft, edit, receive, saved, removed };
   globalThis.MVSReaderCore = api;
   if (typeof module !== 'undefined') module.exports = api;
 })();

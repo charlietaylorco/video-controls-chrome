@@ -18,8 +18,9 @@
       const row = await target(message), key = row.videoUrl + ':' + row.readerId;
       if (refreshing.has(key)) return refreshing.get(key);
       const work = (async () => {
-        const result = await reader.handle({ type: 'reader-watch-get', pageUrl: row.videoUrl, id: row.readerId }, context);
+        const result = await reader.handle({ type: 'reader-watch-get', pageUrl: row.videoUrl, id: row.readerId, fresh: true }, context);
         if (!result.ok) return { ok: false, code: result.code, retryAt: result.retryAt, rateLimitSource: result.rateLimitSource };
+        if (!result.document && result.summaryState === 'pending') return { ok: true, summaryState: 'pending' };
         const current = await store.get(row.videoUrl);
         if (current?.readerId !== row.readerId) throw error('document_changed');
         if (!await store.verify(row.videoUrl, result.document)) throw error('document_changed');
@@ -35,6 +36,11 @@
           const isCurrent = () => pages.get(key) === sequence;
           try {
             const result = await store.page({ filter: message.filter, cursor: message.cursor, query: message.query, channel: message.channel, tag: message.tag, isCurrent });
+            const jobs = await reader.summaryStates?.() || {};
+            for (const item of result.items || []) {
+              const job = jobs[item.videoUrl];
+              if (job && (!job.id || job.id === item.readerId) && item.status === 'saved') item.summaryJob = job;
+            }
             return result.stale || !isCurrent() ? { ok: false, code: 'stale_search' } : { ok: true, ...result };
           } finally { if (isCurrent()) pages.delete(key); }
         }

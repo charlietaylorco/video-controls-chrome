@@ -483,3 +483,23 @@ test('unavailable/failing tag reads preserve same-document tags, explicit empty 
   await a.store.verify(A,{id:'doc-a',videoUrl:A,tags:['Learning'],location:'later'});
   await a.record(A,'replacement'); assert.equal((await a.call('watch-list-page',{tag:'Learning',filter:'all'})).items.length,0);
 });
+
+test('durable summary schedule fills actual IndexedDB/Watch bridge cache without a manual refresh; missing early identity retains save', async () => {
+  let absent = true;
+  const a = app({ responder: (url, init, docs) => absent ? { results: [] } : { results: [docs.get('doc-a')] } });
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../reader-summary-service.js'), 'utf8'), a.context);
+  const summary = a.context.MVSReaderSummaryService.create({ storage: a.context.chrome.storage.local, reader: a.reader, now: () => testClock });
+  let testClock = 100000;
+  await a.reader.remember(A, 'doc-a'); await a.record(); await summary.recordSave(A, 'doc-a');
+  const bridge = a.context.MVSReaderWatchService.create({ store: a.store, reader: summary });
+  let page = await bridge.handle({ type: 'watch-list-page', filter: 'all' }, scope);
+  assert.equal(page.items[0].summaryJob.status, 'pending'); assert.equal(a.requests.length, 0);
+  const pending = await bridge.handle({ type: 'watch-list-refresh', videoUrl: A, id: 'doc-a' }, scope);
+  assert.equal(pending.summaryState, 'pending'); assert.equal(a.requests.length, 0);
+  await new Promise(setImmediate); testClock += 15000; a.advance(15000); await summary.resume();
+  assert.equal(a.data.readerDocuments[A].id, 'doc-a'); assert.equal((await a.store.get(A)).status, 'saved'); assert.equal(a.requests.length, 1);
+  absent = false; testClock += 15000; a.advance(15000); await summary.resume();
+  page = await bridge.handle({ type: 'watch-list-page', filter: 'all' }, scope);
+  assert.equal(page.items[0].summary, 'Reader summary'); assert.equal(page.items[0].summaryJob.status, 'ready'); assert.equal(a.requests.length, 2);
+  assert.ok(a.notifications.length >= 2); assert.ok(!JSON.stringify(page).includes('Private saved note'));
+});

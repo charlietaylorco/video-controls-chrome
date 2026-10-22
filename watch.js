@@ -151,7 +151,7 @@
       row.date.dateTime = hasSavedDate ? savedDate.toISOString() : ''; row.date.setAttribute('aria-label', hasSavedDate ? `Saved date: ${savedDate.toLocaleString()}` : 'Saved date unavailable');
       row.checked.textContent = item.checkedAt ? `Checked ${new Date(item.checkedAt).toLocaleString()}` : 'Not checked';
       row.move.textContent = item.status === 'missing' ? 'Not found in Reader' : item.checkedAt ? C.locationLabel(item.location) : 'Not checked';
-      const text = item.summary == null ? 'Summary not fetched. Refresh this card to check Reader.' : item.summary || 'Summary not available yet. Reader may still be processing it. Refresh this card to check again.';
+      const text = item.summary || (item.summaryJob?.code ? messageFor(item.summaryJob) : item.summaryJob && item.summaryJob.status !== 'ready' ? C.summaryMessage(item.summaryJob) : null) || (item.summary == null ? 'Summary not fetched. Refresh this card to check Reader.' : item.summary || 'Summary not available yet. Reader may still be processing it. Refresh this card to check again.');
       row.summary.textContent = text + (item.summaryTruncated ? '\n\nCached excerpt. Open Reader for the full summary.' : '');
       row.summary.dataset.empty = String(!item.summary);
       row.move.disabled = pending.size > 0 || refreshing || Boolean(deletion) || !item.readerId || item.status !== 'saved' || !loaded;
@@ -281,7 +281,7 @@
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
     if (changes.readerPanelTheme) { theme = ['system', 'dark', 'light'].includes(changes.readerPanelTheme.newValue) ? changes.readerPanelTheme.newValue : 'system'; applyTheme(); }
-    if (changes.readerWatchChanged || changes.readerDocuments || changes.readerDocumentUpdates || changes.readerDeletedVideos) reloadLocal();
+    if (changes.readerSummaryJobs || changes.readerWatchChanged || changes.readerDocuments || changes.readerDocumentUpdates || changes.readerDeletedVideos) reloadLocal();
     if (changes.readerToken) {
       locationMenu.close(); refreshRequest++; refreshing = false;
       if (deletion && !deleting) closeDelete();

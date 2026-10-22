@@ -403,3 +403,12 @@ test('many and long tags stay bounded and failed Reader refresh preserves cached
   release({ok:false,code:'network_error'}); await f.flush(); assert.equal(f.findClass('tag-filter-button')[0], buttons[0]); assert.equal(buttons[0].disabled, false);
   assert.match(f.ids.get('error-toast').textContent, /Cached videos/);
 });
+
+test('Recent saves renders pending and reloads the local summary on readiness without a Reader refresh action', async () => {
+  const f = fixture(); for (const item of f.defaultItems) { item.summary = null; item.summaryJob = { status: 'pending' }; }
+  await f.flush(); assert.match(f.findClass('summary-text')[0].textContent, /preparing.*automatically/);
+  f.defaultItems[0].summary = 'Arrived automatically'; f.defaultItems[0].summaryJob = { status: 'ready' };
+  f.change({ readerSummaryJobs: { newValue: {} } }); await f.run(100);
+  assert.equal(f.findClass('summary-text')[0].textContent, 'Arrived automatically');
+  assert.equal(f.messages.filter(message => message.type === 'watch-list-refresh').length, 0);
+});

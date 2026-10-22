@@ -672,3 +672,22 @@ test('watch-page Ctrl/Alt/Shift Trash clicks preserve the cancellable confirmati
     assert.equal(f.messages.filter(m => m.type === 'reader-panel-delete').length, 0);
   }
 });
+
+test('pending panel and temporary hover auto-update when the new summary arrives', async () => {
+  for (const surface of ['open', 'hover']) {
+    const f = fixture(); f.responder = () => ({ ok: true, document: null, summaryState: 'pending' });
+    await f[surface](); assert.match(f.byClass(surface === 'open' ? 'status' : 'peek-summary').textContent, /preparing.*automatically/);
+    f.responder = (message, normal) => normal();
+    f.change({ readerSummaryJobs: { oldValue: { [A]: { status: 'pending' } }, newValue: { [A]: { id: 'doc-a', status: 'ready' } } } }); await tick();
+    assert.equal(f.byClass(surface === 'open' ? 'summary' : 'peek-summary').textContent, 'Summary A');
+    assert.equal(f.messages.length, 2);
+  }
+});
+test('automatic summary refresh preserves an unsaved panel note and does not submit it', async () => {
+  const f = fixture(); f.docs.get('doc-a').summary = ''; await f.open(); f.button('Note').click(); f.edit('Keep this draft');
+  f.docs.get('doc-a').summary = 'Generated later';
+  f.change({ readerSummaryJobs: { oldValue: { [A]: { status: 'pending' } }, newValue: { [A]: { id: 'doc-a', status: 'ready' } } } }); await tick();
+  assert.equal(f.value, 'Keep this draft'); assert.equal(f.byClass('summary').textContent, 'Generated later');
+  assert.equal(f.byId('reader-note-tab').attrs['aria-selected'], 'true');
+  assert.equal(f.messages.filter(m => m.type === 'reader-panel-save-note').length, 0);
+});
