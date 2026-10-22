@@ -4,16 +4,29 @@
 <body>
   <main class="watch-app">
     <header class="page-header">
-      <h1>Recent saves</h1><nav class="page-actions" aria-label="Recent saves navigation"><button id="refresh" class="text-action" type="button">Refresh this page</button><a class="yt-lists-link" href="feed.html">YT Lists</a></nav>
+      <div class="watch-heading"><h1>Recent saves</h1><div id="viewing-timer-wrap" class="viewing-timer-wrap">
+        <button id="viewing-timer" class="viewing-timer-trigger" type="button" aria-label="Viewing timer: 15 minutes. Open timer controls" aria-haspopup="dialog" aria-expanded="false" aria-controls="timer-popover">15:00</button>
+        <section id="timer-popover" class="timer-popover" role="dialog" aria-modal="false" aria-labelledby="timer-heading" hidden>
+          <header><span id="timer-heading">Viewing timer</span><button id="timer-close" type="button" aria-label="Close timer">×</button></header>
+          <div class="timer-screen"><fieldset id="timer-picker" class="timer-picker" aria-label="Choose timer duration"><legend class="sr-only">Duration in minutes</legend>
+            <button id="timer-less" type="button" aria-label="Decrease duration by one minute">14</button>
+            <div class="timer-value"><label class="sr-only" for="timer-minutes">Timer minutes</label><input id="timer-minutes" type="number" min="1" max="180" step="1" value="15" inputmode="numeric"><span>minutes</span></div>
+            <button id="timer-more" type="button" aria-label="Increase duration by one minute">16</button>
+          </fieldset><div id="timer-countdown" class="timer-countdown" aria-live="off" hidden>15:00</div></div>
+          <p id="timer-note" class="timer-note">This session only · Default 15 min</p>
+          <div class="timer-actions"><button id="timer-primary" type="button" disabled>Start</button><button id="timer-reset" type="button" disabled>Reset</button></div>
+          <a class="timer-options" href="options.html#watch-timer-default-minutes">Default duration in Options</a>
+        </section><span id="timer-status" class="sr-only" role="status" aria-live="polite"></span>
+      </div></div><nav class="page-actions" aria-label="Recent saves navigation"><button id="refresh" class="text-action" type="button">Refresh this page</button><a class="yt-lists-link" href="feed.html">YT Lists</a></nav>
     </header>
-    <section class="toolbar" aria-label="Recent saves controls"><div id="filters" class="filters" role="group" aria-label="Saved video views"></div><div class="search-field"><label class="sr-only" for="search">Search recent saves</label><input id="search" type="search" maxlength="300" placeholder="Search titles, channels, summaries…" autocomplete="off"><button id="clear-search" type="button" aria-label="Clear search and channel filter" disabled>Clear</button></div></section>
-    <div class="search-meta"><button id="channel-filter" type="button" hidden></button></div>
+    <section class="toolbar" aria-label="Recent saves controls"><div id="filters" class="filters" role="group" aria-label="Saved video views"></div><div class="search-field"><label class="sr-only" for="search">Search recent saves</label><input id="search" type="search" maxlength="300" placeholder="Search titles, channels, tags, summaries…" autocomplete="off"><button id="clear-search" type="button" aria-label="Clear search, channel and tag filters" disabled>Clear</button></div></section>
+    <div class="search-meta"><button id="tag-filter" type="button" hidden></button><button id="channel-filter" type="button" hidden></button></div>
     <p id="search-status" class="sr-only" role="status" aria-live="polite">Loading your saved videos…</p>
     <section id="videos" class="videos" aria-label="Saved videos" aria-busy="true"></section>
     <section id="empty" class="empty" hidden><h2 id="empty-title">No videos in this view</h2><p id="empty-description">Save a YouTube video with the extension’s Reader button, or try All saves. Retained older saves may need their Reader ID linked on the video page.</p><button id="reset-view" type="button" hidden>Reset search and filters</button></section>
     <nav class="pagination" aria-label="Recent saves pages"><button id="previous" type="button" disabled>Previous</button><span id="page-label">Page 1</span><button id="next" type="button" disabled>Next</button></nav>
   </main>
-  <aside class="feedback" aria-label="Notifications"><div id="error-toast" class="toast error-toast" hidden><p></p><button type="button" aria-label="Dismiss error">×</button></div><div id="toast" class="toast" hidden><p></p><button type="button" aria-label="Dismiss notification">×</button></div></aside><p id="announcements" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
+  <aside class="feedback" aria-label="Notifications"><div id="error-toast" class="toast error-toast" hidden><p></p><button type="button" aria-label="Dismiss error"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m3 3 10 10M13 3 3 13"/></svg></button></div><div id="toast" class="toast" hidden><p></p><button type="button" aria-label="Dismiss notification"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m3 3 10 10M13 3 3 13"/></svg></button></div></aside><p id="announcements" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
   <dialog id="deletion" aria-labelledby="delete-heading" aria-describedby="delete-effects"><form method="dialog"><p class="eyebrow">Reader document</p><h2 id="delete-heading">Delete from Reader?</h2><p id="delete-title" class="delete-title"></p><p id="delete-identity" class="identity"></p><p id="delete-effects">This deletes the Reader document, including its highlights and notes. The extension cannot undo it. Unsaved note drafts in other tabs stay there; copy them before reloading or closing those tabs.</p><p id="delete-status" class="dialog-status" role="status" aria-live="polite"></p><div class="dialog-actions"><button id="cancel-delete" type="button" autofocus>Cancel</button><button id="confirm-delete" class="destructive" type="button">Delete document</button></div></form></dialog>
-  <script src="reader-core.js"></script><script src="reader-watch-core.js"></script><script src="watch-location-menu.js"></script><script src="watch-feedback.js"></script><script src="watch-search.js"></script><script src="watch-thumbnail.js"></script><script src="watch.js"></script>
+  <script src="watch-timer-core.js"></script><script src="watch-timer-client.js"></script><script src="watch-timer.js"></script><script src="reader-core.js"></script><script src="reader-watch-core.js"></script><script src="watch-location-menu.js"></script><script src="watch-feedback.js"></script><script src="watch-search.js"></script><script src="watch-thumbnail.js"></script><script src="watch-card-actions.js"></script><script src="watch.js"></script>
 </body></html>

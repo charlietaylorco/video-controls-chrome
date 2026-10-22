@@ -21,6 +21,10 @@ Once Note is opened, retain the same frame through later renders/tab changes/clo
 
 ## Verification and remaining gap
 
+Merge validation on 2026-10-22: updated against current main, resolved overlapping test additions, and passed all 37 native Chromium Reader panel checks plus 50 focused editor/panel unit checks. Native typing, selection, keyboard isolation, IME, navigation, remounting, draft retention and closed-shadow interactions pass. The deferred-frame check observes no sandbox console messages before or after its first Note activation. These offline fixtures use synthetic data; they still do not identify the source of the original warning in the user's live browser.
+
+Two outdated browser fixtures were corrected: the inert-HTML check now opens Note before reading its lazy editor, and the late-save check returns the successfully saved note on the next mocked read instead of accidentally simulating an external conflicting edit. Production note-save/conflict behavior is unchanged. The original investigation below records the evidence available when this mitigation was first proposed.
+
 - `npm test`: **249 passing tests**. New panel regression proves zero attached frames through collapsed/Summary/refresh/theme renders, one frame on first Note activation without a Reader read, and stable frame/draft/focus through later edit/tab/close/reopen renders.
 - Four focused tests exercise the actual editor module: exact script-blocking sandbox and no document access on creation; cached pre-mount value/theme; literal hostile note text; same-document mount/equal-value updates preserving selection nodes; document replacement restoring draft/theme; native editing-key defaults and IME/Escape/blur callback behavior.
 - These DOM fixtures do **not** emulate Chromium's sandbox enforcement or prove native keyboard propagation/console behavior. Existing optional real-browser keyboard/selection/IME tests remain, and the browser fixture now collects sandbox console messages and includes a deferred-frame scenario. That optional suite was not run.

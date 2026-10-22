@@ -88,7 +88,7 @@
       const at = now(), summary = W.text(doc.summary, W.SUMMARY_LIMIT);
       return update(videoUrl, previous => !previous || previous.status === 'deleted' || previous.readerId && previous.readerId !== doc.id && previous.status !== 'missing' ? null : {
         ...previous, readerId: doc.id, title: W.text(doc.title, 500) || previous.title, author: W.text(doc.author, 300) || previous.author,
-        tags: W.tags(doc.tags), location: W.text(doc.location, 100), status: 'saved', checkedAt: at,
+        tags: Array.isArray(doc.tags) ? W.tags(doc.tags) : previous.readerId === doc.id && previous.status === 'saved' ? previous.tags : null, location: W.text(doc.location, 100), status: 'saved', checkedAt: at,
       }, { videoUrl, id: doc.id, summary, truncated: typeof doc.summary === 'string' && doc.summary.length > summary.length, checkedAt: at });
     };
     const mark = (videoUrl, id, status) => update(videoUrl, previous => previous?.readerId === id && !(previous.status === 'deleted' && status === 'missing')
@@ -98,8 +98,8 @@
         const request = tx.objectStore('items').get(videoUrl); request.onsuccess = () => done(request.result || null);
       });
     };
-    const page = async ({ filter = 'watch', cursor = null, query = '', channel = '', isCurrent = () => true } = {}) => {
-      const definition = W.indexFor(filter), criteria = W.searchCriteria(query, channel);
+    const page = async ({ filter = 'watch', cursor = null, query = '', channel = '', tag = '', isCurrent = () => true } = {}) => {
+      const definition = W.indexFor(filter), criteria = W.searchCriteria(query, channel, tag);
       if (!definition || !W.validCursor(cursor) || !criteria) throw Object.assign(fail(), { code: 'invalid_request' });
       await ready();
       return transaction(['items', 'summaries'], 'readonly', (tx, done) => {

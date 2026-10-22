@@ -10,11 +10,15 @@ const bootstrap = `
 const options = new URL(location.href).searchParams;
 const mode = options.get('mode') || 'normal';
 const listeners = [], storageListeners = [], documents = new Map();
-const data = { readerToken: 'fixture-token-not-real', readerPanelTheme: options.get('theme') || 'system', readerSavedUrls: {}, readerDocuments: {} };
+const data = { readerToken: 'fixture-token-not-real', raindropToken: options.get('raindrop') === 'missing' ? '' : 'fixture-raindrop-token-not-real', readerPanelTheme: options.get('theme') || 'system', readerSavedUrls: {}, readerDocuments: {} };
 if (options.get('rate') === 'local') data.readerPanelBudget = { list: Array(18).fill(Date.now()) };
 let calls = 0, fixtureClock = Date.now() - 3600000, added = 0;
 const report = text => { const row = document.createElement('li'); row.textContent = text; document.getElementById('fixture-log').append(row); };
 window.fetch = async (url, init = {}) => {
+  if (url === 'https://api.raindrop.io/rest/v1/raindrop') {
+    report('Mock Raindrop save: ' + JSON.parse(init.body).link);
+    return { ok: !document.getElementById('fixture-fail').checked, status: document.getElementById('fixture-fail').checked ? 401 : 200, json: async () => ({ result: true }) };
+  }
   if (!url.startsWith('https://readwise.io/api/v3/')) throw Error('Fixture blocks network');
   calls++; document.getElementById('fixture-count').textContent = 'Mock Reader requests: ' + calls;
   report((init.method || 'GET') + ' ' + url.replace('https://readwise.io/api/v3/', ''));
@@ -49,7 +53,11 @@ window.chrome = { runtime: { id: 'extension', lastError: null, getURL: file => '
   set(values, cb) { const changes = Object.fromEntries(Object.entries(values).map(([key, value]) => [key, { oldValue: structuredClone(data[key]), newValue: structuredClone(value) }]));
     Object.assign(data, structuredClone(values)); queueMicrotask(() => storageListeners.forEach(fn => fn(changes, 'local'))); cb?.(); }
 }, onChanged: { addListener(fn) { storageListeners.push(fn); } } },
-tabs: { get(id, cb) { cb({ id, url: 'chrome-extension://extension/watch.html' }); }, create() { report('Fixture blocked external tab navigation'); } },
+tabs: { get(id, cb) { cb({ id, url: 'chrome-extension://extension/watch.html' }); }, create(options, cb) {
+  report('Mock protocol handoff; no app opened: ' + options.url);
+  chrome.runtime.lastError = document.getElementById('fixture-fail').checked ? { message: 'Mock handoff rejected' } : null;
+  cb?.(chrome.runtime.lastError ? undefined : { id: 8 }); chrome.runtime.lastError = null;
+} },
 action: { onClicked: { addListener() {} } } };
 window.importScripts = () => {};
 const imageSource = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
@@ -79,7 +87,7 @@ seeded = (async () => {
     const videoUrl = 'https://www.youtube.com/watch?v=mock_watch_' + i, id = 'mock-' + i;
     const titles = ['A quieter way to plan your week', 'What makes a small business work', 'Designing a useful daily practice', 'Learning to see the bigger picture', 'The craft behind a good decision'];
     const doc = { id, source_url: videoUrl, title: titles[i % titles.length] + ' · ' + (i + 1), author: 'Mock channel ' + (i % 4 + 1),
-      tags: i === 3 ? ['<img src=x onerror=alert(1)>'] : i % 5 === 0 ? [] : ['Creativity', 'Learning'],
+      tags: options.get('tags') === 'stress' ? ['Deep work', 'Very long multiword tag for focused learning and thoughtful practice', 'x'.repeat(200), ...Array.from({length:50}, (_,n) => 'Topic ' + n)] : i === 3 ? ['<img src=x onerror=alert(1)>'] : i % 5 === 0 ? [] : ['Creativity', 'Learning'],
       location: i % 7 === 0 ? 'archive' : i % 3 === 0 ? 'shortlist' : i % 5 === 0 ? 'new' : 'later',
       summary: i === 3 ? '<img src=x onerror=alert(1)> is inert fixture text.' : i % 11 === 0 ? '' : 'A saved idea worth returning to. This mock summary explores practical ways to make room for focused work, thoughtful decisions, and a little more curiosity.\\n\\nThe useful takeaway: start with one small change you can actually try.',
       notes: 'Private fixture note', updated_at: 'v1' };
@@ -100,9 +108,9 @@ document.addEventListener('click', event => { if (event.target.closest('a')) { e
 let html = fs.readFileSync(path.join(root, 'watch.html'), 'utf8').replace(/<script[^>]*src="[^"]+"[^>]*><\/script>/g, '');
 html = html.replace('<head>', '<head><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\' \'unsafe-inline\'; style-src \'self\' \'unsafe-inline\'; img-src data:; connect-src \'none\'">');
 const tools = '<aside style="font:11px system-ui;padding:10px 20px;background:#e5e8df;color:#25301d"><strong>Mock data only · isolated native browser check</strong> · <span id="fixture-count">Mock Reader requests: 0</span> <button id="fixture-add" type="button">Add a mock save</button> <button id="fixture-auth" type="button">Change mock connection</button> <label><input type="checkbox" id="fixture-slow"> Slow responses</label> <label><input type="checkbox" id="fixture-fail"> Reject Reader requests</label> <label><input type="checkbox" id="fixture-search-slow"> Slow local searches</label><details><summary>Mock trace</summary><ol id="fixture-log"></ol></details></aside>';
-html = html.replace('<body>', '<body>' + tools).replace('</body>', '<script>' + bootstrap + '</script><script src="watch-location-menu.js"></script><script src="watch-feedback.js"></script><script src="watch-search.js"></script><script src="watch-thumbnail.js"></script><script src="watch.js"></script></body>');
+html = html.replace('<body>', '<body>' + tools).replace('</body>', '<script>' + bootstrap + '</script><script src="watch-location-menu.js"></script><script src="watch-feedback.js"></script><script src="watch-search.js"></script><script src="watch-thumbnail.js"></script><script src="watch-card-actions.js"></script><script src="watch.js"></script></body>');
 fs.writeFileSync(path.join(destination, 'index.html'), html);
-for (const file of ['watch.css', 'watch-location-menu.js', 'watch-feedback.js', 'watch-search.js', 'watch-thumbnail.js', 'watch.js']) fs.copyFileSync(path.join(root, file), path.join(destination, file));
+for (const file of ['watch.css', 'watch-location-menu.js', 'watch-feedback.js', 'watch-search.js', 'watch-thumbnail.js', 'watch-card-actions.js', 'watch.js']) fs.copyFileSync(path.join(root, file), path.join(destination, file));
 console.log(destination);
 
 fs.copyFileSync(path.join(root, 'reader-launcher.js'), path.join(destination, 'reader-launcher.js'));

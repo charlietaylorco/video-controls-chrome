@@ -98,9 +98,9 @@ function fixture({ saved = true, width = 1100, height = 700, nativeEvents = fals
       let reply; validators.forEach(fn => fn(message, sender, result => { reply = result; })); return reply;
     },
     async hover() { button.hover = true; button.fire('pointerenter'); run(300); await tick(); },
-    userClick(node) {
+    userClick(node, modifiers = {}) {
       dispatch(node, 'pointermove'); dispatch(node, 'pointerdown'); dispatch(node, 'mousedown');
-      focusNode(node); dispatch(node, 'pointerup'); dispatch(node, 'mouseup'); dispatch(node, 'click');
+      focusNode(node); dispatch(node, 'pointerup'); dispatch(node, 'mouseup'); dispatch(node, 'click', modifiers);
     },
     keyboardActivate(node) { focusNode(node); dispatch(node, 'keydown', { key: 'Enter' }); dispatch(node, 'click'); },
   };
@@ -474,4 +474,40 @@ test('actual overlay idle hide preserves keyboard focus and an active Reader pre
   context.hide(); assert.equal(context.panel.dataset.visible, 'true');
   context.shadowRoot.activeElement = null; preview = true; context.hide(); assert.equal(context.panel.dataset.visible, 'true');
   preview = false; context.hide(); assert.equal(context.panel.dataset.visible, 'false');
+});
+
+test('saved-card Cmd-click skips confirmation, holds focus through pending preflight, and verifies one exact mock DELETE', async () => {
+  const f = fixture({ nativeEvents: true }); let present = true, reads = 0, release;
+  const raw = () => ({ id: 'doc-beta', source_url: B, title: 'Fixture video', summary: 'Fixture summary', notes: 'Saved note', updated_at: 'v1' });
+  const worker = connectWorker(f, (url, init) => {
+    if (init.method === 'DELETE') { present = false; return { status: 204 }; }
+    if (++reads === 2) return new Promise(resolve => { release = () => resolve({ results: [raw()] }); });
+    return { results: present ? [raw()] : [] };
+  });
+  await f.hover(); f.userClick(f.findButton('Delete from Reader'), { metaKey: true }); await tick();
+  assert.equal(f.byClass('confirmation').hidden, true); assert.equal(f.findButton('Delete from Reader').disabled, true);
+  f.findButton('Delete from Reader').fire('click', { metaKey: true }); f.findButton('Delete document').fire('click');
+  f.run(180); assert.equal(f.host.hidden, false); assert.equal(f.messages.filter(m => m.type === 'reader-card-delete').length, 1);
+  release(); await tick();
+  assert.equal(worker.requests.filter(r => r.method === 'DELETE').length, 1);
+  assert.equal(worker.requests.find(r => r.method === 'DELETE').url, 'https://readwise.io/api/v3/delete/doc-beta/');
+  assert.equal(f.deleted, 1); assert.match(f.byClass('summary').textContent, /^Deleted from Reader/);
+});
+
+test('saved-card Cmd-click failures retain visible errors without retrying or marking deletion', async () => {
+  for (const code of ['unauthorized', 'delete_uncertain', 'delete_conflict']) {
+    const f = fixture(); await f.hover();
+    f.responder = (message, normal) => message.type === 'reader-card-delete' ? { ok: false, code } : normal();
+    f.findButton('Delete from Reader').fire('click', { metaKey: true }); await tick();
+    assert.equal(f.byClass('confirmation').hidden, true); assert.equal(f.deleted, 0); assert.equal(f.findButton('Delete from Reader').disabled, true);
+    assert.equal(f.messages.filter(m => m.type === 'reader-card-delete').length, 1); assert.ok(f.byClass('summary').textContent);
+  }
+});
+
+test('saved-card Ctrl/Alt/Shift alone preserve confirmation and cancelling never deletes', async () => {
+  for (const modifiers of [{ ctrlKey: true }, { altKey: true }, { shiftKey: true }]) {
+    const f = fixture(); await f.hover(); f.findButton('Delete from Reader').fire('click', modifiers);
+    assert.equal(f.byClass('confirmation').hidden, false); f.findButton('Cancel').click(); await tick();
+    assert.equal(f.byClass('confirmation').hidden, true); assert.equal(f.messages.filter(m => m.type === 'reader-card-delete').length, 0);
+  }
 });

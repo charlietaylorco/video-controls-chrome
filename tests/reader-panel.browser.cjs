@@ -12,7 +12,7 @@ const B = 'https://www.youtube.com/watch?v=beta';
 const root = path.resolve(__dirname, '..');
 before(async () => { browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined }); });
 after(async () => { await browser?.close(); });
-async function fixture({ enabled = true, width = 1100, height = 1100, theme = 'system', colorScheme = 'light' } = {}) {
+async function fixture({ enabled = true, width = 1100, height = 1100, theme = 'system', colorScheme = 'light', closedRoot = false } = {}) {
   const context = await browser.newContext({ viewport: { width, height }, colorScheme });
   // Block every real network request, including Reader and YouTube.
   await context.route('**/*', route => route.fulfill({ contentType: 'text/html', body: `<!doctype html><meta charset="utf-8">
@@ -22,10 +22,15 @@ async function fixture({ enabled = true, width = 1100, height = 1100, theme = 's
   page.setDefaultTimeout(5000);
   const errors = [], sandboxMessages = []; page.on('pageerror', e => errors.push(e.message));
   page.on('console', message => { if (message.type() === 'error' && message.text().includes('Blocked script execution')) sandboxMessages.push({ text: message.text(), location: message.location() }); });
-  await page.addInitScript(({ enabled, theme }) => {
-    // Expose only this test's closed roots to automation; production remains closed.
+  await page.addInitScript(({ enabled, theme, closedRoot }) => {
+    // Most existing locator checks expose the root. Boundary regressions retain
+    // its reference privately in this fixture without changing its closed mode.
     const attach = Element.prototype.attachShadow;
-    Element.prototype.attachShadow = function(init) { return attach.call(this, { ...init, mode: 'open' }); };
+    Element.prototype.attachShadow = function(init) {
+      const root = attach.call(this, closedRoot ? init : { ...init, mode: 'open' });
+      if (this.id === 'mvs-reader-panel') window.mock.panelRoot = root;
+      return root;
+    };
     const changes = [];
     const data = { showReaderPanel: enabled, showReader: true, readerPanelTheme: theme };
     window.mock = { messages: [], callbacks: [], defer: false, notes: 'A useful observation to revisit.',
@@ -67,7 +72,7 @@ async function fixture({ enabled = true, width = 1100, height = 1100, theme = 's
         set(values, cb) { mock.change(values); cb?.(); },
       } },
     };
-  }, { enabled, theme });
+  }, { enabled, theme, closedRoot });
   await page.goto(A);
   for (const file of ['reader-core.js', 'reader-editor.js', 'reader-peek.js', 'reader-panel.js']) await page.addScriptTag({ path: path.join(root, file) });
   const panel = page.locator('#mvs-reader-panel');
@@ -82,6 +87,57 @@ async function fixture({ enabled = true, width = 1100, height = 1100, theme = 's
   const trash = async () => { await panel.locator('.location').click(); await panel.getByRole('menuitem', { name: 'Delete from Reader', exact: true }).click(); };
   return { page, panel, editor, open, trash, navigate, errors, sandboxMessages, close: () => context.close() };
 }
+
+// Coordinates come from the retained closed root; activation uses actual browser
+// input rather than dispatchEvent/.click(), preserving capture and retargeting.
+async function closedClick(f, selector) {
+  const box = await f.page.evaluate(selector => {
+    const rect = mock.panelRoot.querySelector(selector).getBoundingClientRect();
+    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+  }, selector);
+  await f.page.mouse.click(box.x, box.y);
+}
+
+test('closed production shadow: pointer Trash reaches named confirmation, Cancel and confirmed request in all themes', async () => {
+  for (const [theme, colorScheme, width] of [['light', 'dark', 1100], ['dark', 'light', 320], ['system', 'dark', 1100]]) {
+    const f = await fixture({ closedRoot: true, theme, colorScheme, width });
+    assert.equal(await f.panel.evaluate(el => el.shadowRoot), null);
+    await closedClick(f, '.toggle'); await closedClick(f, '.location');
+    const styles = await f.page.evaluate(() => {
+      const el = mock.panelRoot.querySelector('.location-menu'), r = el.getBoundingClientRect(), style = getComputedStyle(el);
+      return { bg: style.backgroundColor, fg: style.color, left: r.left, right: r.right, width: r.width,
+        checked: el.querySelector('[aria-checked="true"]').textContent,
+        separator: el.querySelector('[role="separator"]') !== null };
+    });
+    assert.ok(styles.left >= 0 && styles.right <= width); assert.equal(styles.width, 148);
+    assert.ok(contrast(styles.bg, styles.fg) >= 4.5); assert.equal(styles.checked, 'Later'); assert.equal(styles.separator, true);
+    await closedClick(f, '.location-menu .destructive');
+    assert.equal(await f.page.evaluate(() => mock.panelRoot.querySelector('.delete-confirm').hidden), false);
+    assert.equal(await f.page.evaluate(() => mock.panelRoot.activeElement.textContent), 'Cancel');
+    assert.match(await f.page.evaluate(() => mock.panelRoot.querySelector('.delete-identity').textContent), /alpha.*doc-a/);
+    await f.page.keyboard.press('Enter'); // Safe default cancels; no deletion.
+    assert.equal(await f.page.evaluate(() => mock.messages.filter(m => m.type === 'reader-panel-delete').length), 0);
+    await closedClick(f, '.location'); await closedClick(f, '.location-menu .destructive');
+    await closedClick(f, '.delete-actions .destructive');
+    const sent = await f.page.evaluate(() => mock.messages.filter(m => m.type === 'reader-panel-delete'));
+    assert.equal(sent.length, 1); assert.equal(sent[0].id, 'doc-a'); assert.equal(sent[0].pageUrl, A); assert.equal(sent[0].confirmed, true);
+    assert.deepEqual(f.errors, []); await f.close();
+  }
+});
+
+test('closed production shadow: keyboard Trash preserves visible rejection and stale navigation prevents a request', async () => {
+  const f = await fixture({ closedRoot: true }); await closedClick(f, '.toggle'); await closedClick(f, '.location');
+  await f.page.keyboard.press('End'); await f.page.keyboard.press('Enter');
+  await f.page.evaluate(() => { mock.deleteError = 'unauthorized'; });
+  await f.page.keyboard.press('Tab'); await f.page.keyboard.press('Space');
+  assert.match(await f.page.evaluate(() => mock.panelRoot.querySelector('.status').textContent), /Reader rejected the token/);
+  assert.equal(await f.page.evaluate(() => mock.deleted.length), 0);
+  await closedClick(f, '.location'); await closedClick(f, '.location-menu .destructive');
+  await f.page.evaluate(url => history.pushState({}, '', url), B);
+  await closedClick(f, '.delete-actions .destructive');
+  assert.equal(await f.page.evaluate(() => mock.messages.filter(m => m.type === 'reader-panel-delete').length), 1);
+  assert.deepEqual(f.errors, []); await f.close();
+});
 
 test('launcher is opt-in, collapsed, and opens without creating a Reader document', async () => {
   const f = await fixture({ enabled: false });
@@ -151,6 +207,9 @@ test('late save stays on its captured video and preserves edits made while savin
   assert.equal(await f.editor.inputValue(), 'A useful observation to revisit.');
   const saves = await f.page.evaluate(() => mock.messages.filter(m => m.type === 'reader-panel-save-note'));
   assert.equal(saves.length, 1); assert.equal(saves[0].pageUrl, A); assert.equal(saves[0].id, 'doc-a'); assert.equal(saves[0].notes, 'Sent A');
+  // The next read of A must reflect the successful save, rather than simulate
+  // an external edit by returning the fixture's original note again.
+  await f.page.evaluate(() => { mock.notes = 'Sent A'; });
   await f.navigate(A); await f.open('note');
   assert.equal(await f.editor.inputValue(), 'Newer A draft');
   assert.match(await f.panel.locator('.footer').innerText(), /Unsaved draft/);
@@ -195,9 +254,10 @@ test('remote HTML stays inert text and never becomes a script, image or link', a
   await f.page.evaluate(value => { mock.summary = value; mock.notes = value; mock.tags = [value]; }, malicious);
   await f.open();
   assert.equal(await f.panel.locator('.summary').innerText(), malicious);
-  assert.equal(await f.editor.inputValue(), malicious);
   await f.panel.locator('.tag-toggle').click();
   assert.equal(await f.panel.locator('.tag').innerText(), malicious);
+  await f.open('note');
+  assert.equal(await f.editor.inputValue(), malicious);
   assert.equal(await f.panel.locator('img, script').count(), 0);
   assert.equal(await f.page.evaluate(() => window.pwned), undefined);
   assert.deepEqual(f.errors, []); await f.close();
@@ -774,8 +834,7 @@ test('persistent errors/conflicts and late replies keep fixed note geometry and 
   assert.deepEqual(f.errors, []); await f.close();
 });
 
-
-test('Summary-only renders defer the sandboxed editor context; opening Note retains script blocking and stable editing', async () => {
+test('Summary-only renders defer the sandboxed editor context; opening Note retains script blocking and stable editing', async t => {
   const f=await fixture();assert.equal(await f.panel.locator('iframe').count(),0);await f.open();
   await f.panel.getByRole('button',{name:'Refresh',exact:true}).click();assert.equal(await f.panel.locator('iframe').count(),0);
   assert.deepEqual(f.sandboxMessages,[]);
@@ -785,5 +844,23 @@ test('Summary-only renders defer the sandboxed editor context; opening Note reta
   assert.equal(await f.editor.evaluate(el=>el.selectionEnd-el.selectionStart),(await f.editor.inputValue()).length);
   await f.panel.getByRole('tab',{name:'Summary',exact:true}).click();await f.open('note');
   assert.equal(await f.editor.inputValue(),'A native note draft');assert.equal(await f.panel.locator('iframe').count(),1);
+  t.diagnostic(`Sandbox console messages after Note activation: ${f.sandboxMessages.length}`);
   assert.deepEqual(f.errors,[]);await f.close();
+});
+
+test('closed production shadow: native Cmd-click skips confirmation, locks pending deletion and preserves errors', async () => {
+  for (const deleteError of [null, 'unauthorized']) {
+    const f = await fixture({ closedRoot: true });
+    await closedClick(f, '.toggle'); await closedClick(f, '.location');
+    await f.page.evaluate(error => { mock.defer = true; mock.deleteError = error; }, deleteError);
+    await f.page.keyboard.down('Meta');
+    try { await closedClick(f, '.location-menu .destructive'); }
+    finally { await f.page.keyboard.up('Meta'); }
+    assert.equal(await f.page.evaluate(() => mock.panelRoot.querySelector('.delete-confirm').hidden), true);
+    assert.equal(await f.page.evaluate(() => mock.panelRoot.querySelector('.location').disabled), true);
+    assert.equal(await f.page.evaluate(() => mock.messages.filter(m => m.type === 'reader-panel-delete').length), 1);
+    await f.page.evaluate(() => mock.release());
+    assert.match(await f.page.evaluate(() => mock.panelRoot.querySelector('.status').textContent), deleteError ? /rejected the token/ : /Deleted from Reader/);
+    assert.deepEqual(f.errors, []); await f.close();
+  }
 });

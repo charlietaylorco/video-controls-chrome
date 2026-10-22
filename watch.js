@@ -8,7 +8,7 @@
     errors.delete(url); errors.set(url, text);
     while (errors.size > 100) errors.delete(errors.keys().next().value);
   };
-  let items = [], filter = 'watch', query = '', channelFilter = '', cursors = [null], hasNext = false, nextCursor = null, pageRequest = 0, refreshRequest = 0;
+  let items = [], filter = 'watch', query = '', channelFilter = '', tagFilter = '', cursors = [null], hasNext = false, nextCursor = null, pageRequest = 0, refreshRequest = 0;
   let refreshing = false, loaded = false, reloadTimer, deletion = null, deleting = false, theme = 'system';
   // Request readiness must not hide the last settled view during local search.
   let hasSettledView = false, displayedSearch = false, displayedPage = 1;
@@ -23,8 +23,8 @@
   const messageFor = result => ({ missing_token: 'Add your Reader token in Options, then refresh.', unauthorized: 'Reader rejected the token. Check Options.',
     unlinked: 'Reader ID not retained. Open the video page to link it; this list does not scan Reader history.',
     not_found: 'The matched Reader document is no longer available.', document_changed: 'The document changed. Refresh and review it before trying again.',
-    delete_conflict: 'Reader changed since confirmation. Close this dialog and review a fresh confirmation.',
-    invalid_confirmation: 'Confirmation expired or was already used. Close and choose Trash again.',
+    delete_conflict: 'Reader changed since it was checked. Review the current document before choosing Trash again.',
+    invalid_confirmation: 'Deletion approval expired or was already used. Choose Trash again to check the current document.',
     delete_target_missing: 'The matched document was not found; no DELETE was sent. Refresh before trying again.',
     delete_not_confirmed: 'Reader did not confirm deletion. Refresh to check its current state.',
     delete_still_present: 'Reader accepted DELETE but still returns the document. Refresh to verify its state.',
@@ -39,14 +39,15 @@
     request_uncertain: 'The request could not be confirmed. Refresh before trying again.', runtime_error: 'The extension is unavailable. Reload the extension and reopen Recent saves.'
   })[result.code] || (result.code === 'rate_limited' ? C.rateLimitMessage(result) : 'Reader could not complete this request. Try Refresh.');
   const announce = (text, error = false) => feedback.show(text, error);
+  const cardActions = globalThis.MVSWatchCardActions.create({ send, announce });
   const node = (tag, text, parent, className) => { const n = document.createElement(tag); if (text) n.textContent = text; if (className) n.className = className; parent?.append(n); return n; };
   const icon = (parent, commands) => {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('d', commands); svg.append(path); parent.append(svg);
   };
   const menuCurrent = target => loaded && !refreshing && !pending.size && !deletion && items.some(item => item.videoUrl === target.videoUrl && item.readerId === target.id && item.location === target.location && item.status === 'saved');
-  const locationMenu = globalThis.MVSWatchLocationMenu.create({ isCurrent: menuCurrent, choose: (target, value) => {
-    if (value === 'trash') void prepareDelete(target.videoUrl, target.trigger);
+  const locationMenu = globalThis.MVSWatchLocationMenu.create({ isCurrent: menuCurrent, choose: (target, value, event) => {
+    if (value === 'trash') void prepareDelete(target.videoUrl, target.trigger, event.metaKey === true);
     else void mutate(target.videoUrl, value, target.trigger);
   } });
   const restoreActionFocus = origin => {
@@ -62,8 +63,9 @@
     $('next').disabled = !loaded || !hasNext || pending.size > 0 || Boolean(deletion);
     $('page-label').textContent = `Page ${displayedPage} · ${items.length} ${displayedSearch ? 'match' + (items.length === 1 ? '' : 'es') : 'video' + (items.length === 1 ? '' : 's')}`;
     $('search').disabled = pending.size > 0 || Boolean(deletion);
-    $('clear-search').disabled = $('search').disabled || !query && !channelFilter;
+    $('clear-search').disabled = $('search').disabled || !query && !channelFilter && !tagFilter;
     $('channel-filter').disabled = $('search').disabled;
+    $('tag-filter').disabled = $('search').disabled;
     for (const b of $('filters').children) { b.setAttribute('aria-pressed', String(b.dataset.filter === filter)); b.disabled = pending.size > 0 || Boolean(deletion); }
   };
   const makeRow = item => {
@@ -76,23 +78,28 @@
     link.href = item.videoUrl; link.target = '_blank'; link.rel = 'noopener noreferrer';
     const metadata = node('dl', '', copy, 'metadata');
     const field = label => { const group = node('div', '', metadata); node('dt', label, group, 'sr-only'); return node('dd', '', group); };
-    const channel = node('button', '', field('Channel'), 'channel-filter-button'); channel.type = 'button';
+    const channelLine = field('Channel and tags'); channelLine.className = 'channel-tags';
+    const channel = node('button', '', channelLine, 'channel-filter-button'); channel.type = 'button';
     channel.addEventListener('click', () => { const current = items.find(row => row.videoUrl === item.videoUrl); if (loaded && current?.author && !pending.size && !deletion) search.setChannel(current.author); });
+    const tagList = node('span', '', channelLine, 'inline-tags'); tagList.hidden = true;
+    tagList.setAttribute('role', 'group'); tagList.setAttribute('aria-label', 'Reader tags');
     const locationRow = node('div', '', copy, 'location-row'), move = node('button', '', locationRow, 'location-trigger'); move.type = 'button';
     move.setAttribute('aria-haspopup', 'menu'); move.setAttribute('aria-expanded', 'false'); move.setAttribute('aria-controls', locationMenu.id);
-    const locationActions = node('div', '', locationRow, 'location-actions');
-    const readerLink = node('a', '', locationActions, 'reader-link'); readerLink.target = '_blank'; readerLink.rel = 'noopener noreferrer'; readerLink.title = 'Open in Reader';
+    const locationActions = node('div', '', locationRow, 'location-actions destination-actions');
+    locationActions.setAttribute('role', 'group'); locationActions.setAttribute('aria-label', 'Video actions');
+    const refresh = node('button', '', locationActions, 'card-refresh destination-action'); refresh.type = 'button';
+    icon(refresh, 'M20 7v5h-5M20 12a8 8 0 1 0-2.3 5.7');
+    const readerLink = node('a', '', locationActions, 'reader-link destination-action'); readerLink.target = '_blank'; readerLink.rel = 'noopener noreferrer'; readerLink.title = 'Open in Reader';
     icon(readerLink, 'M14 3h7v7M10 14 21 3M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5');
+    const actions = cardActions.attach(locationActions, item.videoUrl);
     const summary = node('p', '', copy, 'summary-text');
     const footer = node('div', '', copy, 'card-footer'), footerDetails = node('div', '', footer, 'footer-details');
     const note = node('p', '', footerDetails, 'row-status'); note.setAttribute('role', 'status');
     const footerMeta = node('div', '', footerDetails, 'footer-meta'), date = node('time', '', footerMeta), checked = node('span', '', footerMeta);
     const footerActions = node('div', '', footer, 'footer-actions');
-    const refresh = node('button', '', footerActions, 'card-refresh'); refresh.type = 'button';
-    icon(refresh, 'M20 7v5h-5M20 12a8 8 0 1 0-2.3 5.7');
     const trash = node('button', '', footerActions, 'card-trash'); trash.type = 'button'; trash.title = 'Delete from Reader';
     icon(trash, 'M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7');
-    trash.addEventListener('click', () => void prepareDelete(item.videoUrl, trash));
+    trash.addEventListener('click', event => void prepareDelete(item.videoUrl, trash, event.metaKey === true));
     const target = () => {
       const current = items.find(row => row.videoUrl === item.videoUrl);
       return current && { videoUrl: current.videoUrl, id: current.readerId, location: current.location, title: current.title, trigger: move };
@@ -102,19 +109,43 @@
       if (['ArrowDown', 'ArrowUp'].includes(event.key)) { event.preventDefault(); const captured = target(); if (captured) locationMenu.open(captured, event.key === 'ArrowUp' ? 'last' : 'first'); }
     });
     refresh.addEventListener('click', () => void refreshCard(item.videoUrl, refresh));
-    return { card, link, channel, date, checked, summary, move, readerLink, refresh, trash, note, thumbnailLink, thumbnail };
+    return { card, link, channel, tagList, date, checked, summary, move, readerLink, refresh, trash, note, thumbnailLink, thumbnail, actions };
   };
   const render = () => {
     const order = items.map(item => item.videoUrl);
-    for (const url of rows.keys()) if (!order.includes(url)) { rows.get(url).thumbnail.destroy(); rows.delete(url); }
+    for (const url of rows.keys()) if (!order.includes(url)) { rows.get(url).thumbnail.destroy(); rows.get(url).actions.destroy(); rows.delete(url); }
     const cards = [];
     for (const item of items) {
       let row = rows.get(item.videoUrl); if (!row) { row = makeRow(item); rows.set(item.videoUrl, row); }
+      row.actions.update(item.title, loaded && !refreshing && !deletion && !pending.size);
       row.link.textContent = item.title || `YouTube video · ${new URL(item.videoUrl).searchParams.get('v')}`;
       row.thumbnailLink.setAttribute('aria-label', `Watch ${item.title || 'video'} on YouTube`); row.thumbnailLink.title = 'Open on YouTube';
       row.channel.textContent = item.author || 'Not retained';
       row.channel.disabled = !item.author || !loaded || pending.size > 0 || Boolean(deletion);
       row.channel.setAttribute('aria-label', item.author ? `Filter by exact channel: ${item.author}` : 'Channel not retained');
+      const tags = item.status === 'saved' ? [...new Set(W.tags(item.tags).map(tag => tag.trim()))] : [];
+      const tagKey = JSON.stringify(tags);
+      if (row.tagList.dataset.key !== tagKey) {
+        row.tagList.dataset.key = tagKey; row.tagList.replaceChildren();
+        if (tags.length) {
+          const symbol = node('span', '', row.tagList, 'tag-symbol');
+          icon(symbol, 'M20 13 13 20a2 2 0 0 1-3 0L2 12V3h9l9 8a2 2 0 0 1 0 2ZM7 7h.01');
+          for (const tag of tags) {
+            const button = node('button', tag, row.tagList, 'tag-filter-button'); button.type = 'button';
+            button.setAttribute('aria-label', `Filter by exact tag: ${tag}`);
+            button.addEventListener('click', event => {
+              event.preventDefault(); event.stopPropagation();
+              const current = items.find(row => row.videoUrl === item.videoUrl);
+              if (loaded && !refreshing && !pending.size && !deletion && current?.status === 'saved' && W.tags(current.tags).some(value => value.trim() === tag)) search.setTag(tag);
+            });
+          }
+        }
+      }
+      row.tagList.hidden = !tags.length;
+      for (const button of row.tagList.children) if (button.tagName.toLowerCase() === 'button') {
+        button.disabled = !loaded || refreshing || pending.size > 0 || Boolean(deletion);
+        button.setAttribute('aria-pressed', String(W.normalize(button.textContent) === W.normalize(tagFilter)));
+      }
       const savedDate = new Date(item.savedAt), hasSavedDate = Number.isFinite(savedDate.getTime());
       row.date.textContent = hasSavedDate ? `Saved ${savedDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}` : 'Saved date unavailable';
       row.date.dateTime = hasSavedDate ? savedDate.toISOString() : ''; row.date.setAttribute('aria-label', hasSavedDate ? `Saved date: ${savedDate.toLocaleString()}` : 'Saved date unavailable');
@@ -128,10 +159,11 @@
       row.refresh.disabled = pending.size > 0 || refreshing || Boolean(deletion) || !item.readerId || item.status === 'deleted' || !loaded;
       row.move.setAttribute('aria-label', `Saved location for ${item.title || 'video'}`);
       row.refresh.setAttribute('aria-label', `Refresh ${item.title || 'video'} from Reader`); row.refresh.title = 'Refresh this card from Reader';
-      row.card.setAttribute('aria-busy', String(pending.has(item.videoUrl) || refreshing));
+      const working = pending.has(item.videoUrl) || deleting && deletion?.videoUrl === item.videoUrl;
+      row.card.setAttribute('aria-busy', String(working || refreshing));
       row.readerLink.hidden = !item.readerId; if (item.readerId) row.readerLink.href = C.readerUrl(item.readerId);
       row.readerLink.setAttribute('aria-label', `Open ${item.title || 'video'} in Reader`);
-      row.note.textContent = pending.has(item.videoUrl) ? 'Working…' : errors.get(item.videoUrl) || (!item.readerId ? 'Reader ID not retained; open the video page to link it.' : '');
+      row.note.textContent = working ? 'Working…' : errors.get(item.videoUrl) || (!item.readerId ? 'Reader ID not retained; open the video page to link it.' : '');
       row.note.dataset.error = String(errors.has(item.videoUrl)); cards.push(row.card);
     }
     if (Array.from(grid.children).map(n => n.dataset.url).join('|') !== order.join('|')) {
@@ -141,18 +173,18 @@
     grid.hidden = hasSettledView && items.length === 0; $('empty').hidden = !hasSettledView || items.length > 0;
     const searching = displayedSearch;
     $('empty-title').textContent = searching ? 'No matching videos' : 'No videos in this view';
-    $('empty-description').textContent = searching ? 'Try a different search or reset the channel and location filters. Only retained titles, channel names and available cached summaries are searchable.' : 'Save a YouTube video with the extension’s Reader button, or try All saves. Retained older saves may need their Reader ID linked on the video page.';
+    $('empty-description').textContent = searching ? 'Try a different search or reset the tag, channel and location filters. Only retained titles, channel names, tags and available cached summaries are searchable.' : 'Save a YouTube video with the extension’s Reader button, or try All saves. Retained older saves may need their Reader ID linked on the video page.';
     $('reset-view').hidden = !searching && filter === 'all';
     grid.setAttribute('aria-busy', String(!loaded)); controls();
   };
   const load = async ({ clearStatus = false } = {}) => {
-    const request = ++pageRequest, result = await send({ type: 'watch-list-page', filter, query, channel: channelFilter, cursor: cursors.at(-1) });
+    const request = ++pageRequest, result = await send({ type: 'watch-list-page', filter, query, channel: channelFilter, tag: tagFilter, cursor: cursors.at(-1) });
     if (request !== pageRequest) return;
     if (!result.ok) { announce(messageFor(result), true); controls(); return; }
     items = result.items.filter(item => C.canonical(item.videoUrl) === item.videoUrl && (!item.readerId || C.validId(item.readerId)));
     hasNext = result.hasNext; nextCursor = result.nextCursor; loaded = hasSettledView = true;
-    displayedSearch = Boolean(query.trim() || channelFilter); displayedPage = cursors.length; render();
-    $('search-status').textContent = `${items.length} ${query.trim() || channelFilter ? 'matching ' : ''}video${items.length === 1 ? '' : 's'} on page ${cursors.length}${hasNext ? '. More results available.' : '.'}`;
+    displayedSearch = Boolean(query.trim() || channelFilter || tagFilter); displayedPage = cursors.length; render();
+    $('search-status').textContent = `${items.length} ${query.trim() || channelFilter || tagFilter ? 'matching ' : ''}video${items.length === 1 ? '' : 's'} on page ${cursors.length}${hasNext ? '. More results available.' : '.'}`;
     if (clearStatus && !refreshing && pending.size === 0 && !deletion) announce('');
   };
   const reloadLocal = () => { clearTimeout(reloadTimer); reloadTimer = setTimeout(() => { if (!refreshing && !pending.size && !deletion) void load(); }, 100); };
@@ -179,15 +211,18 @@
     if (!reply.ok) rememberError(url, messageFor(reply));
     await load(); announce(reply.ok ? `Moved to ${C.locationLabel(destination)}.` : messageFor(reply), !reply.ok); restoreActionFocus(origin);
   };
-  const prepareDelete = async (url, origin) => {
-    const item = items.find(row => row.videoUrl === url); if (!item || pending.has(url)) return;
+  const prepareDelete = async (url, origin, skipConfirmation = false) => {
+    const item = items.find(row => row.videoUrl === url);
+    if (!item?.readerId || item.status !== 'saved' || !loaded || refreshing || pending.size || deletion) return;
     const request = refreshRequest;
     pending.add(url); errors.delete(url); render();
     const reply = await send({ type: 'watch-list-prepare-delete', videoUrl: url, id: item.readerId });
     pending.delete(url); render();
-    if (request !== refreshRequest) return;
+    if (request !== refreshRequest || !items.some(row => row.videoUrl === url && row.readerId === item.readerId)) return;
     if (!reply.ok) { rememberError(url, messageFor(reply)); render(); announce(messageFor(reply), true); restoreActionFocus(origin); return; }
-    deletion = { ...reply, origin }; $('delete-title').textContent = reply.title || 'Untitled Reader video';
+    deletion = { ...reply, origin, skipConfirmation };
+    if (skipConfirmation) { void deleteDocument(); render(); return; }
+    $('delete-title').textContent = reply.title || 'Untitled Reader video';
     $('delete-identity').textContent = `${reply.videoUrl} · Reader ID: ${reply.id}`;
     $('delete-status').textContent = ''; $('delete-status').dataset.error = 'false'; $('confirm-delete').disabled = false; $('cancel-delete').disabled = false;
     $('deletion').showModal(); $('cancel-delete').focus(); render();
@@ -199,15 +234,19 @@
   };
   $('cancel-delete').addEventListener('click', closeDelete);
   $('deletion').addEventListener('cancel', event => { event.preventDefault(); closeDelete(); });
-  $('confirm-delete').addEventListener('click', async () => {
+  const deleteDocument = async () => {
     if (!deletion || deleting) return;
     const captured = deletion; deleting = true; $('delete-status').textContent = 'Checking Reader before deleting…';
     $('confirm-delete').disabled = $('cancel-delete').disabled = true;
     const result = await send({ type: 'watch-list-delete', token: captured.token, confirmed: true });
     deleting = false;
     if (result.ok) { closeDelete(); announce('Deleted from Reader.'); }
-    else { $('delete-status').textContent = messageFor(result); $('delete-status').dataset.error = 'true'; $('cancel-delete').disabled = false; $('cancel-delete').focus(); }
-  });
+    else if (captured.skipConfirmation) {
+      rememberError(captured.videoUrl, messageFor(result));
+      closeDelete(); render(); announce(messageFor(result), true);
+    } else { $('delete-status').textContent = messageFor(result); $('delete-status').dataset.error = 'true'; $('cancel-delete').disabled = false; $('cancel-delete').focus(); }
+  };
+  $('confirm-delete').addEventListener('click', () => void deleteDocument());
   $('refresh').addEventListener('click', async () => {
     if (!loaded) { await load(); return; }
     const request = ++refreshRequest, captured = [...items]; refreshing = true; render();
@@ -228,8 +267,8 @@
     const button = node('button', label, $('filters')); button.type = 'button'; button.dataset.filter = value;
     button.addEventListener('click', () => { filter = value; cursors = [null]; changePage(); });
   }
-  const search = globalThis.MVSWatchSearch.create({ input: $('search'), clear: $('clear-search'), chip: $('channel-filter'), onChange: criteria => {
-    query = criteria.query; channelFilter = criteria.channel; cursors = [null]; invalidateView();
+  const search = globalThis.MVSWatchSearch.create({ input: $('search'), clear: $('clear-search'), chip: $('channel-filter'), tagChip: $('tag-filter'), onChange: criteria => {
+    query = criteria.query; channelFilter = criteria.channel; tagFilter = criteria.tag; cursors = [null]; invalidateView();
     const request = pageRequest;
     return () => { if (request === pageRequest) void load({ clearStatus: true }); };
   } });

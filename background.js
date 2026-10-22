@@ -1,4 +1,4 @@
-importScripts("x-video-download.js", "reader-core.js", "reader-watch-core.js", "reader-watch-store.js", "reader-service.js", "reader-watch-service.js");
+importScripts("x-video-download.js", "reader-core.js", "reader-watch-core.js", "reader-watch-store.js", "reader-service.js", "reader-watch-service.js", "watch-timer-core.js", "watch-timer-service.js");
 
 let readerPanelService, readerWatchStore, readerWatchService, watchRevision = 0, watchAuthRevision = 0;
 chrome.storage?.onChanged?.addListener((changes, area) => {
@@ -20,6 +20,10 @@ const DOWNIE_SENT_URLS_KEY = "downieSentUrls";
 const MAX_DOWNIE_SENT_URLS = 2000;
 const FEED_URL = chrome.runtime.getURL("feed.html");
 const WATCH_URL = chrome.runtime.getURL("watch.html");
+let viewingTimerService;
+const getViewingTimerService = () => viewingTimerService ||= MVSWatchTimerService.create({ storage: chrome.storage.local, alarms: chrome.alarms });
+chrome.alarms?.onAlarm?.addListener(alarm => { if (alarm.name === 'watch-viewing-timer') void getViewingTimerService().handle({ action: 'get' }); });
+if (chrome.alarms && globalThis.MVSWatchTimerService) void getViewingTimerService().handle({ action: 'get' });
 const openingRecentSaves = new Map();
 const openRecentSaves = (sourceTab) => {
   const privateContext = Boolean(sourceTab?.incognito);
@@ -526,6 +530,26 @@ const pickTargetUrl = (message, sender) => {
 };
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === 'viewing-timer') {
+    const active = sender.id === chrome.runtime.id && (sender.frameId === undefined || sender.frameId === 0) &&
+      (!sender.documentLifecycle || sender.documentLifecycle === 'active');
+    const controls = sender.url === WATCH_URL;
+    const reminder = Boolean(MVSReaderCore.youtubeOrigin(sender.url)) && ['get', 'expire', 'dismiss'].includes(message.action);
+    if (!active || (!controls && !reminder)) { sendResponse({ ok: false, code: 'invalid_sender' }); return undefined; }
+    getViewingTimerService().handle(message).then(sendResponse); return true;
+  }
+  const recentCardAction = message?.type === "watch-card-action";
+  if (recentCardAction) {
+    const target = MVSReaderCore.canonical(message.pageUrl);
+    if (sender.id !== chrome.runtime.id || sender.url !== WATCH_URL ||
+        (sender.frameId !== undefined && sender.frameId !== 0) ||
+        (sender.documentLifecycle && sender.documentLifecycle !== "active") ||
+        !target || !["raindrop", "downie"].includes(message.action)) {
+      sendResponse({ ok: false, code: "invalid_request" }); return undefined;
+    }
+    // Reuse the established transports; the extension page never reads tokens.
+    message = { type: message.action === "raindrop" ? "save-to-raindrop" : "open-in-downie", pageUrl: target };
+  }
   if (message?.type === "open-watch-list") {
     if (sender.id !== chrome.runtime.id) { sendResponse({ ok: false, code: "invalid_sender" }); return undefined; }
     openRecentSaves(sender.tab).then(sendResponse); return true;
@@ -674,6 +698,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "open-in-downie") {
     const tabId = sender?.tab?.id;
     const targetUrl = pickTargetUrl(message, sender);
+
+    if (recentCardAction) {
+      // A protocol handoff must not replace the Recent saves grid. A successful
+      // tabs callback confirms handoff only, not app installation/download.
+      const options = { url: encodeDownieActionUrl(targetUrl), active: false };
+      if (Number.isInteger(tabId)) options.openerTabId = tabId;
+      if (Number.isInteger(sender.tab?.windowId)) options.windowId = sender.tab.windowId;
+      try {
+        chrome.tabs.create(options, async tab => {
+          if (chrome.runtime.lastError || !tab) { sendResponse({ ok: false, code: "launch_failed" }); return; }
+          try { await markDownieUrlSent(targetUrl); sendResponse({ ok: true, url: targetUrl }); }
+          catch { sendResponse({ ok: true, url: targetUrl, stateWarning: true }); }
+        });
+      } catch { sendResponse({ ok: false, code: "launch_failed" }); }
+      return true;
+    }
 
     if (!Number.isInteger(tabId) || !targetUrl) {
       sendResponse({ ok: false });

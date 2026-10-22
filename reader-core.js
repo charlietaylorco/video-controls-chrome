@@ -40,7 +40,7 @@
       summary: typeof doc.summary === 'string' ? doc.summary : '',
       notes: typeof doc.notes === 'string' ? doc.notes : '',
       location: typeof doc.location === 'string' ? doc.location : '',
-      tags: tags.filter(tag => typeof tag === 'string').slice(0, 100),
+      tags: doc.tags && typeof doc.tags === 'object' ? tags.filter(tag => typeof tag === 'string').slice(0, 100) : null,
       updatedAt: typeof doc.updated_at === 'string' ? doc.updated_at : '' };
   };
   const draft = () => ({ doc: null, value: '', base: '', dirty: false, conflict: null, busy: false, request: 0 });
