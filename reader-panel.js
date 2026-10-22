@@ -250,7 +250,6 @@
       onInput(value) { const s = current(); if (s) { clearFeedback(s); C.edit(s, value); render(); } },
       onEscape() { if (current()?.deleteConfirm) cancelDeletion(); else dismiss(true); }
     });
-    editor.append(note.frame);
     const conflict = element('div', '', noteView, { class: 'conflict' });
     element('p', 'Reader has a different note. Your draft is preserved in the editor.', conflict);
     const remote = element('div', '', conflict, { class: 'remote' });
@@ -319,7 +318,7 @@
     save.addEventListener('click', () => void saveNote());
     useRemote.addEventListener('click', () => resolveConflict(false));
     keepDraft.addEventListener('click', () => resolveConflict(true));
-    view = { header, content, toggle, dot, body, close, refresh, link, trash, settings, watchList, more, moreMenu, location: locationButton, locationLabel, locationMenu, locationItems, status, next, details, summary, tags, tagToggle, tagName, tagCount, tagTotal, summaryTab, noteTab, noteDot, summaryView, noteView, note, conflict, remote, save, dirty,
+    view = { header, content, toggle, dot, body, close, refresh, link, trash, settings, watchList, more, moreMenu, location: locationButton, locationLabel, locationMenu, locationItems, status, next, details, summary, tags, tagToggle, tagName, tagCount, tagTotal, summaryTab, noteTab, noteDot, summaryView, noteView, editor, note, conflict, remote, save, dirty,
       deletion, deleteTitle, deleteIdentity, deleteDraft, cancelDelete, confirmDelete };
     // Only listeners inside the closed root can inspect its internal targets.
     // A document listener sees the host instead; hiding the menu there on
@@ -355,6 +354,13 @@
     view.noteView.hidden = s?.tab !== 'note';
     if (!s) return;
     const confirming = Boolean(s.deleteConfirm);
+    // A detached iframe has no browsing context to initialize or inject into.
+    // Summary/closed-panel renders do not need the script-free note frame.
+    // Once opened, retain the same frame to preserve native focus/selection.
+    if (open && s.tab === 'note' && !confirming) {
+      if (view.note.frame.parentElement !== view.editor) view.editor.append(view.note.frame);
+      view.note.mount();
+    }
     if (menu && (menu.url !== activeUrl || menu.id !== s.doc?.id || confirming)) closeMenu();
     view.location.disabled = s.busy || !s.doc || confirming || Boolean(s.locationUncertain);
     view.more.disabled = confirming;
@@ -590,7 +596,7 @@
     if (!enabled || !supported || document.fullscreenElement) { dismiss(); host?.remove(); return; }
     if (!host) createView();
     if (host.parentElement !== document.documentElement) document.documentElement.append(host);
-    view.note.mount(); applyTheme();
+    applyTheme();
     render();
     if (changed && open && readIfOpen && !current()?.busy) void load();
   };

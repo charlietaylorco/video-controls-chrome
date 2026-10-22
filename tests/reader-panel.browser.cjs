@@ -20,7 +20,8 @@ async function fixture({ enabled = true, width = 1100, height = 1100, theme = 's
     <button id="outside" type="button">Outside control</button><main><p class="fixture">Mock YouTube layout · Reader fixtures only</p><video muted></video><ytd-watch-metadata><div id="above-the-fold"><h1>How attention shapes the way we learn</h1><p>Example channel &nbsp; · &nbsp; Like &nbsp; Share &nbsp; Save</p></div></ytd-watch-metadata></main>` }));
   const page = await context.newPage();
   page.setDefaultTimeout(5000);
-  const errors = []; page.on('pageerror', e => errors.push(e.message));
+  const errors = [], sandboxMessages = []; page.on('pageerror', e => errors.push(e.message));
+  page.on('console', message => { if (message.type() === 'error' && message.text().includes('Blocked script execution')) sandboxMessages.push({ text: message.text(), location: message.location() }); });
   await page.addInitScript(({ enabled, theme, closedRoot }) => {
     // Most existing locator checks expose the root. Boundary regressions retain
     // its reference privately in this fixture without changing its closed mode.
@@ -84,7 +85,7 @@ async function fixture({ enabled = true, width = 1100, height = 1100, theme = 's
     await page.evaluate(url => { history.pushState({}, '', url); document.dispatchEvent(new Event('yt-navigate-finish')); }, url);
   };
   const trash = async () => { await panel.locator('.location').click(); await panel.getByRole('menuitem', { name: 'Delete from Reader', exact: true }).click(); };
-  return { page, panel, editor, open, trash, navigate, errors, close: () => context.close() };
+  return { page, panel, editor, open, trash, navigate, errors, sandboxMessages, close: () => context.close() };
 }
 
 // Coordinates come from the retained closed root; activation uses actual browser
@@ -206,6 +207,9 @@ test('late save stays on its captured video and preserves edits made while savin
   assert.equal(await f.editor.inputValue(), 'A useful observation to revisit.');
   const saves = await f.page.evaluate(() => mock.messages.filter(m => m.type === 'reader-panel-save-note'));
   assert.equal(saves.length, 1); assert.equal(saves[0].pageUrl, A); assert.equal(saves[0].id, 'doc-a'); assert.equal(saves[0].notes, 'Sent A');
+  // The next read of A must reflect the successful save, rather than simulate
+  // an external edit by returning the fixture's original note again.
+  await f.page.evaluate(() => { mock.notes = 'Sent A'; });
   await f.navigate(A); await f.open('note');
   assert.equal(await f.editor.inputValue(), 'Newer A draft');
   assert.match(await f.panel.locator('.footer').innerText(), /Unsaved draft/);
@@ -250,9 +254,10 @@ test('remote HTML stays inert text and never becomes a script, image or link', a
   await f.page.evaluate(value => { mock.summary = value; mock.notes = value; mock.tags = [value]; }, malicious);
   await f.open();
   assert.equal(await f.panel.locator('.summary').innerText(), malicious);
-  assert.equal(await f.editor.inputValue(), malicious);
   await f.panel.locator('.tag-toggle').click();
   assert.equal(await f.panel.locator('.tag').innerText(), malicious);
+  await f.open('note');
+  assert.equal(await f.editor.inputValue(), malicious);
   assert.equal(await f.panel.locator('img, script').count(), 0);
   assert.equal(await f.page.evaluate(() => window.pwned), undefined);
   assert.deepEqual(f.errors, []); await f.close();
@@ -827,6 +832,20 @@ test('persistent errors/conflicts and late replies keep fixed note geometry and 
   await f.navigate(B); await f.page.clock.runFor(160); await f.open('note');
   assert.notEqual(await f.panel.locator('.footer [role="status"]').innerText(), 'Saved');
   assert.deepEqual(f.errors, []); await f.close();
+});
+
+test('Summary-only renders defer the sandboxed editor context; opening Note retains script blocking and stable editing', async t => {
+  const f=await fixture();assert.equal(await f.panel.locator('iframe').count(),0);await f.open();
+  await f.panel.getByRole('button',{name:'Refresh',exact:true}).click();assert.equal(await f.panel.locator('iframe').count(),0);
+  assert.deepEqual(f.sandboxMessages,[]);
+  await f.open('note');assert.equal(await f.panel.locator('iframe').count(),1);
+  assert.equal(await f.panel.locator('iframe').getAttribute('sandbox'),'allow-same-origin');
+  await f.editor.fill('A native note draft');await f.editor.press('ControlOrMeta+a');
+  assert.equal(await f.editor.evaluate(el=>el.selectionEnd-el.selectionStart),(await f.editor.inputValue()).length);
+  await f.panel.getByRole('tab',{name:'Summary',exact:true}).click();await f.open('note');
+  assert.equal(await f.editor.inputValue(),'A native note draft');assert.equal(await f.panel.locator('iframe').count(),1);
+  t.diagnostic(`Sandbox console messages after Note activation: ${f.sandboxMessages.length}`);
+  assert.deepEqual(f.errors,[]);await f.close();
 });
 
 test('closed production shadow: native Cmd-click skips confirmation, locks pending deletion and preserves errors', async () => {

@@ -624,6 +624,20 @@ test('panel and temporary summary peek display local versus upstream rate source
   }
 });
 
+test('collapsed and Summary-only renders never attach a note iframe; first Note activation mounts one stable editor', async () => {
+  const f = fixture(), container = f.byClass('editor');
+  assert.equal(container.children.length, 0);
+  await f.open(); assert.equal(container.children.length, 0);
+  f.button('Refresh').click(); await tick(); assert.equal(container.children.length, 0);
+  f.change({ readerPanelTheme: {newValue:'dark'} }); assert.equal(container.children.length, 0);
+  const reads = f.messages.length; f.byId('reader-note-tab').click(); const frame = container.children[0]; assert.equal(f.messages.length, reads);
+  assert.ok(frame); assert.equal(container.children.length, 1); frame.focus();
+  f.edit('Retain this local draft'); assert.equal(container.children[0], frame); assert.equal(f.active, frame);
+  f.byId('reader-summary-tab').click(); assert.equal(container.children[0], frame);
+  f.byId('reader-note-tab').click(); assert.equal(container.children[0], frame); assert.equal(f.value, 'Retain this local draft');
+  f.button('Close Reader').click(); await f.open(); assert.equal(container.children[0], frame); assert.equal(f.value, 'Retain this local draft');
+});
+
 test('Cmd-click Trash skips the prompt and uses the exact mocked Reader deletion route while keeping drafts', async () => {
   const f = fixture({ transport: true }); await f.open(); f.edit('Keep Cmd-click draft');
   f.trash({ metaKey: true }); await tick();
