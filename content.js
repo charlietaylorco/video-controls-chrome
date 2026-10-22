@@ -2989,6 +2989,8 @@
         pageUrl,
         title,
         author,
+        ...(globalThis.MVSReaderDuration?.capture({ source: getVideoCardContainer(source) || source, videoUrl: pageUrl,
+          card: Boolean(getVideoCardContainer(source)) }) || {}),
         openExisting: shouldOpenExisting
       });
 

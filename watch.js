@@ -73,6 +73,7 @@
     const mediaBox = node('div', '', card, 'video-media'), thumbnailLink = node('a', '', mediaBox, 'thumbnail-link');
     thumbnailLink.href = item.videoUrl; thumbnailLink.target = '_blank'; thumbnailLink.rel = 'noopener noreferrer';
     const image = node('img', '', thumbnailLink, 'thumbnail');
+    const duration = node('span', '', thumbnailLink, 'duration-badge'); duration.hidden = true;
     const thumbnail = globalThis.MVSWatchThumbnail.attach(image, item.videoUrl, { onUnavailable: () => { thumbnailLink.dataset.thumbnailUnavailable = 'true'; } });
     const copy = node('div', '', card, 'video-copy'), heading = node('h2', '', copy), link = node('a', '', heading);
     link.href = item.videoUrl; link.target = '_blank'; link.rel = 'noopener noreferrer';
@@ -95,7 +96,7 @@
     const summary = node('p', '', copy, 'summary-text');
     const footer = node('div', '', copy, 'card-footer'), footerDetails = node('div', '', footer, 'footer-details');
     const note = node('p', '', footerDetails, 'row-status'); note.setAttribute('role', 'status');
-    const footerMeta = node('div', '', footerDetails, 'footer-meta'), date = node('time', '', footerMeta), checked = node('span', '', footerMeta);
+    const footerMeta = node('div', '', footerDetails, 'footer-meta'), date = node('time', '', footerMeta);
     const footerActions = node('div', '', footer, 'footer-actions');
     const trash = node('button', '', footerActions, 'card-trash'); trash.type = 'button'; trash.title = 'Delete from Reader';
     icon(trash, 'M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7');
@@ -109,7 +110,7 @@
       if (['ArrowDown', 'ArrowUp'].includes(event.key)) { event.preventDefault(); const captured = target(); if (captured) locationMenu.open(captured, event.key === 'ArrowUp' ? 'last' : 'first'); }
     });
     refresh.addEventListener('click', () => void refreshCard(item.videoUrl, refresh));
-    return { card, link, channel, tagList, date, checked, summary, move, readerLink, refresh, trash, note, thumbnailLink, thumbnail, actions };
+    return { card, link, channel, tagList, date, duration, summary, move, readerLink, refresh, trash, note, thumbnailLink, thumbnail, actions };
   };
   const render = () => {
     const order = items.map(item => item.videoUrl);
@@ -149,7 +150,10 @@
       const savedDate = new Date(item.savedAt), hasSavedDate = Number.isFinite(savedDate.getTime());
       row.date.textContent = hasSavedDate ? `Saved ${savedDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}` : 'Saved date unavailable';
       row.date.dateTime = hasSavedDate ? savedDate.toISOString() : ''; row.date.setAttribute('aria-label', hasSavedDate ? `Saved date: ${savedDate.toLocaleString()}` : 'Saved date unavailable');
-      row.checked.textContent = item.checkedAt ? `Checked ${new Date(item.checkedAt).toLocaleString()}` : 'Not checked';
+      row.duration.textContent = item.durationIsLive ? '' : C.formatVideoDuration(item.durationSeconds);
+      row.duration.hidden = !row.duration.textContent;
+      row.duration.setAttribute('aria-label', row.duration.textContent ? `Video duration: ${row.duration.textContent}` : '');
+      if (row.duration.textContent) row.thumbnailLink.setAttribute('aria-label', `Watch ${item.title || 'video'} on YouTube, duration ${row.duration.textContent}`);
       row.move.textContent = item.status === 'missing' ? 'Not found in Reader' : item.checkedAt ? C.locationLabel(item.location) : 'Not checked';
       const text = item.summary || (item.summaryJob?.code ? messageFor(item.summaryJob) : item.summaryJob && item.summaryJob.status !== 'ready' ? C.summaryMessage(item.summaryJob) : null) || (item.summary == null ? 'Summary not fetched. Refresh this card to check Reader.' : item.summary || 'Summary not available yet. Reader may still be processing it. Refresh this card to check again.');
       row.summary.textContent = text + (item.summaryTruncated ? '\n\nCached excerpt. Open Reader for the full summary.' : '');
@@ -281,7 +285,7 @@
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
     if (changes.readerPanelTheme) { theme = ['system', 'dark', 'light'].includes(changes.readerPanelTheme.newValue) ? changes.readerPanelTheme.newValue : 'system'; applyTheme(); }
-    if (changes.readerSummaryJobs || changes.readerWatchChanged || changes.readerDocuments || changes.readerDocumentUpdates || changes.readerDeletedVideos) reloadLocal();
+    if (changes.ytListsDurationCache || changes.ytListsFeedCache || changes.readerSummaryJobs || changes.readerWatchChanged || changes.readerDocuments || changes.readerDocumentUpdates || changes.readerDeletedVideos) reloadLocal();
     if (changes.readerToken) {
       locationMenu.close(); refreshRequest++; refreshing = false;
       if (deletion && !deleting) closeDelete();

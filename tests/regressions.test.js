@@ -265,14 +265,14 @@ test('duration lookups share in-flight work and encode untrusted IDs', async () 
   const release = [];
   const pending = new Map();
   const { ensureDuration } = loadFeedHelpers([
-    'fetchDurationFromWatch', 'processDurationQueue', 'ensureDuration',
+    'parseWatchDuration', 'fetchDurationFromWatch', 'processDurationQueue', 'ensureDuration',
   ], {
-    durationPending: pending, durationCache: new Map(), durationQueue: [],
+    durationPending: pending, durationCache: new Map(), durationLiveCache: new Map(), durationQueue: [],
     durationActive: 0, DURATION_CONCURRENCY: 4, scheduleDurationCachePersist() {},
     fetch: async (url, options) => {
       requests.push({ url, options });
       await new Promise((resolve) => release.push(resolve));
-      return { ok: true, text: async () => '"lengthSeconds":"120"' };
+      return { ok: true, text: async () => 'var ytInitialPlayerResponse = ' + JSON.stringify({ videoDetails: { videoId: 'abc&other=1', isLiveContent: false, lengthSeconds: '120' } }) + ';' };
     },
   });
   const first = ensureDuration('abc&other=1');
@@ -292,15 +292,71 @@ test('duration lookups share in-flight work and encode untrusted IDs', async () 
 test('failed duration lookups release worker slots', async () => {
   let requests = 0;
   const { ensureDuration } = loadFeedHelpers([
-    'fetchDurationFromWatch', 'processDurationQueue', 'ensureDuration',
+    'parseWatchDuration', 'fetchDurationFromWatch', 'processDurationQueue', 'ensureDuration',
   ], {
-    durationPending: new Map(), durationCache: new Map(), durationQueue: [],
+    durationPending: new Map(), durationCache: new Map(), durationLiveCache: new Map(), durationQueue: [],
     durationActive: 0, DURATION_CONCURRENCY: 4, scheduleDurationCachePersist() {},
     fetch: async () => { requests++; throw new Error('timed out'); },
   });
   const results = await Promise.all(Array.from({ length: 10 }, (_, i) => ensureDuration(`id${i}`)));
   assert.equal(requests, 10);
   assert.ok(results.every((value) => value === null));
+});
+
+test('YT Lists duration parsing requires matching, explicitly non-live player metadata', () => {
+  const { parseWatchDuration } = loadFeedHelpers(['parseWatchDuration']);
+  const html = details => 'var ytInitialPlayerResponse = ' + JSON.stringify({ videoDetails: details }) + ';';
+  const ordinary = { videoId: 'alpha', isLiveContent: false, lengthSeconds: '120', title: 'A } and an escaped " quote' };
+  assert.equal(parseWatchDuration(html(ordinary), 'alpha').seconds, 120);
+  for (const flags of [{ isLiveContent: true }, { isLive: true }, { isUpcoming: true }]) {
+    const info = parseWatchDuration(html({ ...ordinary, ...flags, lengthSeconds: '7200' }), 'alpha');
+    assert.equal(info.isLive, true); assert.equal(info.seconds, null);
+  }
+  for (const details of [{ ...ordinary, isLiveContent: undefined }, { ...ordinary, videoId: 'other' },
+    { ...ordinary, lengthSeconds: true }, { ...ordinary, lengthSeconds: 'invalid' }, { ...ordinary, lengthSeconds: 0 }]) {
+    assert.equal(parseWatchDuration(html(details), 'alpha'), null);
+  }
+  assert.equal(parseWatchDuration('"lengthSeconds":"7200","approxDurationMs":"7200000"', 'alpha'), null);
+});
+
+test('YT Lists live lookups retain live status and never forward DVR or unknown runtimes to Reader', async () => {
+  for (const live of [true, false, undefined]) {
+    const sent = [], durationCache = new Map(), durationLiveCache = new Map();
+    const helpers = loadFeedHelpers(['parseWatchDuration', 'fetchDurationFromWatch', 'processDurationQueue', 'ensureDuration', 'applyCachedDuration', 'saveToReadwise'], {
+      durationCache, durationLiveCache, durationPending: new Map(), durationQueue: [], durationActive: 0, DURATION_CONCURRENCY: 4,
+      scheduleDurationCachePersist() {}, normalizeVideoUrl: value => value,
+      sendRuntimeMessage: async message => { sent.push(message); return { response: { ok: false, code: 'missing_token' } }; },
+      fetch: async () => ({ ok: true, text: async () => 'var ytInitialPlayerResponse = ' + JSON.stringify({ videoDetails: {
+        videoId: 'alpha', isLiveContent: live, lengthSeconds: '7200'
+      } }) + ';' }),
+    });
+    const seconds = await helpers.ensureDuration('alpha');
+    const item = { videoId: 'alpha', link: 'https://www.youtube.com/watch?v=alpha', durationSeconds: seconds };
+    helpers.applyCachedDuration(item); await helpers.saveToReadwise(item);
+    assert.equal(item.isLive, live); assert.equal(sent[0].durationIsLive, live === true);
+    assert.equal(sent[0].durationSeconds, live === false ? 7200 : undefined);
+    await helpers.saveToReadwise({ ...item, isLive: undefined, durationSeconds: 7200 });
+    assert.equal(sent[1].durationSeconds, undefined);
+  }
+});
+
+test('YT Lists duration cache persists live evidence and treats legacy numeric entries as unverified', async () => {
+  let persist, payload;
+  const durationCache = new Map([['normal', 65], ['live', null], ['legacy', 7200]]), durationLiveCache = new Map([['normal', false], ['live', true]]);
+  const { scheduleDurationCachePersist } = loadFeedHelpers(['scheduleDurationCachePersist'], {
+    durationCache, durationLiveCache, durationPersistTimer: null, CACHE_PERSIST_DELAY: 1, DURATION_CACHE_KEY: 'duration',
+    window: { setTimeout: fn => { persist = fn; return 1; } }, setStorage: (_key, value) => { payload = value; }
+  });
+  scheduleDurationCachePersist(); persist();
+  assert.equal(payload.normal.isLive, false); assert.equal(payload.live.isLive, true); assert.equal(payload.legacy, 7200);
+  const helpers = loadFeedHelpers(['loadDurationCacheFromStorage', 'applyCachedDuration'], {
+    durationCache: new Map(), durationLiveCache: new Map(), DURATION_CACHE_KEY: 'duration', getStorage: async () => payload
+  });
+  await helpers.loadDurationCacheFromStorage();
+  const ordinary = helpers.applyCachedDuration({ videoId: 'normal', durationSeconds: 7200 }), live = helpers.applyCachedDuration({ videoId: 'live', durationSeconds: 7200 });
+  assert.equal(ordinary.durationSeconds, 65); assert.equal(ordinary.isLive, false);
+  assert.equal(live.durationSeconds, null); assert.equal(live.isLive, true);
+  assert.equal(helpers.applyCachedDuration({ videoId: 'legacy' }).isLive, undefined);
 });
 
 test('closing a channel panel detaches its outside click listener', () => {

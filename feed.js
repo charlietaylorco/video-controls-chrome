@@ -67,6 +67,7 @@ const state = {
 
 const resolvedIdCache = new Map();
 const durationCache = new Map();
+const durationLiveCache = new Map();
 let durationPersistTimer = null;
 let feedPersistTimer = null;
 let archivePersistTimer = null;
@@ -252,8 +253,16 @@ function setStorage(key, value) {
 async function loadDurationCacheFromStorage() {
   const stored = await getStorage(DURATION_CACHE_KEY, {});
   if (!stored || typeof stored !== 'object') return;
-  Object.entries(stored).forEach(([videoId, seconds]) => {
-    const parsed = Number.parseInt(seconds, 10);
+  Object.entries(stored).forEach(([videoId, value]) => {
+    const knownLive = typeof value?.isLive === 'boolean';
+    if (knownLive) {
+      if (value.isLive || Number.isFinite(value.seconds) && value.seconds > 0) {
+        durationLiveCache.set(videoId, value.isLive);
+        durationCache.set(videoId, value.isLive ? null : value.seconds);
+      }
+      return;
+    }
+    const parsed = Number.parseInt(value, 10);
     if (Number.isFinite(parsed)) {
       durationCache.set(videoId, parsed);
     }
@@ -268,7 +277,9 @@ function scheduleDurationCachePersist() {
     durationPersistTimer = null;
     const payload = {};
     durationCache.forEach((seconds, videoId) => {
-      if (Number.isFinite(seconds)) {
+      if (durationLiveCache.has(videoId)) {
+        payload[videoId] = { seconds, isLive: durationLiveCache.get(videoId) };
+      } else if (Number.isFinite(seconds)) {
         payload[videoId] = seconds;
       }
     });
@@ -503,7 +514,14 @@ function hydrateFeedItems(items) {
 }
 
 function applyCachedDuration(item) {
-  if (!item || item.durationSeconds) return item;
+  if (!item) return item;
+  if (durationLiveCache.has(item.videoId)) {
+    item.isLive = durationLiveCache.get(item.videoId);
+    item.durationSeconds = item.isLive ? null : durationCache.get(item.videoId) ?? null;
+    return item;
+  }
+  if (item.isLive === true) { item.durationSeconds = null; return item; }
+  if (item.durationSeconds) return item;
   if (!item.videoId || !durationCache.has(item.videoId)) return item;
   const cached = durationCache.get(item.videoId);
   if (Number.isFinite(cached)) {
@@ -681,17 +699,43 @@ function updateDurationBadge(element, seconds) {
   element.style.display = 'block';
 }
 
+function parseWatchDuration(text, videoId) {
+  const marker = text.match(/(?:\bytInitialPlayerResponse|window\["ytInitialPlayerResponse"\])\s*=\s*\{/);
+  if (!marker) return null;
+  const start = marker.index + marker[0].length - 1;
+  let depth = 0, quoted = false, escaped = false;
+  for (let end = start; end < text.length; end++) {
+    const char = text[end];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === '"') quoted = false;
+    } else if (char === '"') quoted = true;
+    else if (char === '{') depth++;
+    else if (char === '}' && --depth === 0) {
+      try {
+        const player = JSON.parse(text.slice(start, end + 1)), details = player.videoDetails;
+        if (details?.videoId !== videoId || typeof details.isLiveContent !== 'boolean') return null;
+        const isLive = details.isLiveContent || details.isLive === true || details.isUpcoming === true ||
+          player.microformat?.playerMicroformatRenderer?.liveBroadcastDetails?.isLiveNow === true;
+        if (isLive) return { seconds: null, isLive: true };
+        if (typeof details.lengthSeconds !== 'number' && (typeof details.lengthSeconds !== 'string' || !/^\d+$/.test(details.lengthSeconds))) return null;
+        const seconds = Number(details.lengthSeconds);
+        return Number.isFinite(seconds) && seconds > 0 && Number.isSafeInteger(Math.round(seconds))
+          ? { seconds: Math.max(1, Math.round(seconds)), isLive: false } : null;
+      } catch { return null; }
+    }
+  }
+  return null;
+}
+
 async function fetchDurationFromWatch(videoId) {
   if (!videoId) return null;
   try {
     const response = await fetch(`https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`, { credentials: 'include', signal: AbortSignal.timeout(15000), redirect: 'error' });
     if (!response.ok) return null;
     const text = await response.text();
-    const match = text.match(/\"lengthSeconds\":\"(\d+)\"/);
-    if (match) return Number.parseInt(match[1], 10);
-    const altMatch = text.match(/\"approxDurationMs\":\"(\d+)\"/);
-    if (altMatch) return Math.round(Number.parseInt(altMatch[1], 10) / 1000);
-    return null;
+    return parseWatchDuration(text, videoId);
   } catch (error) {
     return null;
   }
@@ -702,9 +746,11 @@ function processDurationQueue() {
     const { videoId, resolve } = durationQueue.shift();
     durationActive += 1;
     fetchDurationFromWatch(videoId)
-      .then((seconds) => {
+      .then((info) => {
+        const seconds = info?.seconds ?? null;
+        if (info) durationLiveCache.set(videoId, info.isLive);
         durationCache.set(videoId, seconds);
-        if (Number.isFinite(seconds)) {
+        if (info) {
           scheduleDurationCachePersist();
         }
         resolve(seconds);
@@ -1803,11 +1849,11 @@ async function fetchChannelFeed(channel) {
     const durationSeconds = durationRaw || durationFallback
       ? Number.parseInt(durationRaw || durationFallback, 10)
       : null;
-    if (Number.isFinite(durationSeconds) && videoId) {
+    if (Number.isFinite(durationSeconds) && videoId && !durationLiveCache.has(videoId)) {
       durationCache.set(videoId, durationSeconds);
       scheduleDurationCachePersist();
     }
-    const cachedDuration = !Number.isFinite(durationSeconds) && videoId && durationCache.has(videoId)
+    const cachedDuration = (!Number.isFinite(durationSeconds) || durationLiveCache.has(videoId)) && videoId && durationCache.has(videoId)
       ? durationCache.get(videoId)
       : durationSeconds;
     const normalizedDuration = Number.isFinite(cachedDuration) ? cachedDuration : null;
@@ -1825,6 +1871,7 @@ async function fetchChannelFeed(channel) {
       channelTitle,
       channelAvatar: channel.avatarUrl || '',
       durationSeconds: normalizedDuration,
+      isLive: durationLiveCache.get(videoId),
       isShort,
     };
   });
@@ -2062,6 +2109,9 @@ async function saveToReadwise(item) {
     pageUrl: normalizeVideoUrl(item.link),
     title: item.title || undefined,
     author: item.channelTitle || undefined,
+    durationVideoUrl: item.link,
+    durationSeconds: item.isLive === false ? item.durationSeconds : undefined,
+    durationIsLive: item.isLive === true,
   });
 
   if (error) {
@@ -2282,9 +2332,9 @@ function buildVideoCard(item) {
 
   if (!item.durationSeconds && item.videoId) {
     ensureDuration(item.videoId).then((seconds) => {
-      if (!seconds) return;
       item.durationSeconds = seconds;
-      updateDurationBadge(duration, seconds);
+      applyCachedDuration(item);
+      updateDurationBadge(duration, item.durationSeconds);
     });
   }
   thumbLink.appendChild(thumb);

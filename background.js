@@ -788,6 +788,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         title: message?.title || undefined,
         author: message?.author || undefined
       });
+      // Capture stays bound to the clicked target, even if metadata enrichment
+      // finishes after the user navigates or a YouTube card is recycled.
+      if (MVSReaderCore.canonical(message.durationVideoUrl) === MVSReaderCore.canonical(targetUrl)) {
+        metadata.durationVideoUrl = MVSReaderCore.canonical(targetUrl);
+        metadata.durationSeconds = MVSReaderCore.durationSeconds(message.durationSeconds);
+        metadata.durationIsLive = message.durationIsLive === true;
+      }
 
       const response = await fetch(READER_SAVE_URL, {
         method: "POST",

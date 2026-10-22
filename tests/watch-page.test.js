@@ -404,6 +404,17 @@ test('many and long tags stay bounded and failed Reader refresh preserves cached
   assert.match(f.ids.get('error-toast').textContent, /Cached videos/);
 });
 
+test('thumbnail duration badges format known lengths, hide unknown/live values and keep Saved without visible Checked', async () => {
+  const f = fixture(); f.defaultItems[0].durationSeconds=3661; f.defaultItems[1].durationSeconds=null; await f.flush();
+  const badges = f.findClass('duration-badge'); assert.equal(badges[0].textContent,'1:01:01'); assert.equal(badges[0].hidden,false); assert.equal(badges[1].hidden,true);
+  assert.ok(f.findClass('footer-meta').every(node=>/^Saved /.test(node.textContent)&&!node.textContent.includes('Checked')));
+  assert.equal(f.defaultItems[0].checkedAt,1000);
+  f.defaultItems[0].durationIsLive=true; f.defaultItems[1].durationSeconds=65;
+  f.change({ytListsDurationCache:{newValue:{}}}); await f.run(100);
+  assert.equal(badges[0].hidden,true); assert.equal(badges[1].textContent,'1:05'); assert.equal(badges[1].hidden,false);
+  assert.equal(f.messages.filter(message=>message.type==='watch-list-refresh').length,0);
+});
+
 test('Recent saves renders pending and reloads the local summary on readiness without a Reader refresh action', async () => {
   const f = fixture(); for (const item of f.defaultItems) { item.summary = null; item.summaryJob = { status: 'pending' }; }
   await f.flush(); assert.match(f.findClass('summary-text')[0].textContent, /preparing.*automatically/);
