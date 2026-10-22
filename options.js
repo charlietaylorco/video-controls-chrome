@@ -55,11 +55,13 @@ const clampValue = (value, min, max) => {
 };
 
 const showStatus = (message) => {
-  status.textContent = message;
+  const storageError = chrome.runtime.lastError;
+  status.textContent = storageError ? "Could not save changes. Please try again." : message;
+  status.dataset.error = String(Boolean(storageError) || /^(Could not|Choose)\b/.test(message));
   window.clearTimeout(showStatus.timeoutId);
   showStatus.timeoutId = window.setTimeout(() => {
     status.textContent = "";
-  }, 1400);
+  }, 2600);
 };
 
 const syncInput = (input, value) => {
@@ -177,26 +179,34 @@ const getCurrentNumericSettingValue = (settingName) => {
 const updateHoverBandSummary = () => {
   const centerWidth = getCurrentNumericSettingValue("hoverCenterWidthPercent");
   const centerSpeed = getCurrentNumericSettingValue("hoverCenterSpeed");
-  const middleWidth = getCurrentNumericSettingValue("hoverMiddleWidthPercent");
+  // Match the video overlay: each side stops at the edge, even if the configured
+  // widths add up to more than 100%. A zero speed leaves its space at saved speed.
+  const middleWidth = Math.min(getCurrentNumericSettingValue("hoverMiddleWidthPercent"), (100 - centerWidth) / 2);
   const middleSpeed = getCurrentNumericSettingValue("hoverMiddleSpeed");
-  const outerWidth = getCurrentNumericSettingValue("hoverOuterWidthPercent");
+  const outerWidth = Math.min(getCurrentNumericSettingValue("hoverOuterWidthPercent"), (100 - centerWidth) / 2 - middleWidth);
   const outerSpeed = getCurrentNumericSettingValue("hoverOuterSpeed");
   const segments = [];
 
+  window.MVSOptionsUI?.updateHoverPreview({
+    center: { width: centerWidth, speed: centerSpeed },
+    middle: { width: middleWidth, speed: middleSpeed },
+    outer: { width: outerWidth, speed: outerSpeed }
+  });
+
   if (centerWidth > 0 && centerSpeed > 0) {
-    segments.push(`center ${formatDisplayValue(centerWidth)}% @ ${formatDisplayValue(centerSpeed)}x`);
+    segments.push(`Centre ${formatDisplayValue(centerWidth)}% at ${formatDisplayValue(centerSpeed)}×`);
   }
 
   if (middleWidth > 0 && middleSpeed > 0) {
-    segments.push(`next ${formatDisplayValue(middleWidth)}% per side @ ${formatDisplayValue(middleSpeed)}x`);
+    segments.push(`middle ${formatDisplayValue(middleWidth)}% per side at ${formatDisplayValue(middleSpeed)}×`);
   }
 
   if (outerWidth > 0 && outerSpeed > 0) {
-    segments.push(`next ${formatDisplayValue(outerWidth)}% per side @ ${formatDisplayValue(outerSpeed)}x`);
+    segments.push(`outer ${formatDisplayValue(outerWidth)}% per side at ${formatDisplayValue(outerSpeed)}×`);
   }
 
   hoverBandSummary.textContent = segments.length > 0
-    ? `${segments.join(" | ")} | outside bands uses the saved speed`
+    ? `${segments.join(" · ")}. Elsewhere, your saved speed applies.`
     : "Hover preview disabled. Everywhere uses the saved speed.";
 };
 
@@ -423,16 +433,22 @@ const renderIconOrder = (focusAction, focusDelta) => {
   list.replaceChildren();
   iconOrder.forEach((action, index) => {
     const row = document.createElement("div");
-    row.className = "setting-row";
+    row.className = "setting-row icon-order-row";
     const label = document.createElement("span");
     label.className = "setting-title";
-    label.textContent = `${index + 1}. ${iconLabels[action]}`;
+    const position = document.createElement("span");
+    position.className = "order-number";
+    position.textContent = String(index + 1).padStart(2, "0");
+    const name = document.createElement("span");
+    name.textContent = iconLabels[action];
+    label.append(position, name);
     const controls = document.createElement("div");
+    controls.className = "order-controls";
     [-1, 1].forEach((delta) => {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "save-button";
-      button.textContent = delta === -1 ? "← Move left" : "Move right →";
+      button.textContent = delta === -1 ? "←" : "→";
       button.setAttribute("aria-label", `Move ${iconLabels[action]} ${delta === -1 ? "left" : "right"}`);
       button.disabled = index + delta < 0 || index + delta >= iconOrder.length;
       button.addEventListener("click", () => {
@@ -486,7 +502,7 @@ chrome.storage.local.get(["readerPanelTheme"], ({ readerPanelTheme }) => {
 });
 readerPanelThemeInput.addEventListener("change", () => {
   chrome.storage.local.set({ readerPanelTheme: normalizeReaderPanelTheme(readerPanelThemeInput.value) }, () => {
-    showStatus(chrome.runtime.lastError ? "Could not save Reader theme" : "Reader theme saved");
+    showStatus(chrome.runtime.lastError ? "Could not save appearance" : "Appearance saved");
   });
 });
 
@@ -503,5 +519,25 @@ recentSavesLauncherInput.addEventListener("change", () => {
 recentSavesPositionInput.addEventListener("change", () => {
   chrome.storage.local.set({ recentSavesLauncherPosition: normalizeRecentSavesPosition(recentSavesPositionInput.value) }, () => {
     showStatus(chrome.runtime.lastError ? "Could not save shortcut position" : "Recent saves shortcut position saved");
+  });
+});
+
+// The configured default is separate from each timer session's chosen duration.
+const watchTimerDefaultInput = document.getElementById('watch-timer-default-minutes');
+let watchTimerDefaultMinutes = 15;
+chrome.storage.local.get(['watchTimerDefaultMinutes'], values => {
+  const value = values.watchTimerDefaultMinutes;
+  watchTimerDefaultMinutes = Number.isInteger(value) && value >= 1 && value <= 180 ? value : 15;
+  watchTimerDefaultInput.value = String(watchTimerDefaultMinutes);
+});
+watchTimerDefaultInput.addEventListener('change', () => {
+  const value = watchTimerDefaultInput.valueAsNumber;
+  if (!Number.isInteger(value) || value < 1 || value > 180) {
+    watchTimerDefaultInput.value = String(watchTimerDefaultMinutes); showStatus('Choose 1–180 whole minutes'); return;
+  }
+  chrome.storage.local.set({ watchTimerDefaultMinutes: value }, () => {
+    if (!chrome.runtime.lastError) watchTimerDefaultMinutes = value;
+    else watchTimerDefaultInput.value = String(watchTimerDefaultMinutes);
+    showStatus(chrome.runtime.lastError ? 'Could not save timer default' : 'Viewing timer default saved');
   });
 });
