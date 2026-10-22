@@ -495,22 +495,37 @@ test('saved durations persist with source association and survive Reader verific
   assert.equal((await a.store.get(A)).durationSeconds, null); assert.equal((await a.store.page({filter:'all'})).items[0].durationSeconds, null);
 });
 test('old records use existing YT Lists caches only for matching IDs without network or history migration/rewrite', async () => {
-  const a = app({stored:{ readerSavedUrls: {[A]:1,[B]:2}, ytListsDurationCache: {alpha:65, beta:Infinity}, ytListsFeedCache:{channel:{items:[
-    {videoId:'alpha',link:B,durationSeconds:999}, {videoId:'beta',link:B,durationSeconds:3661}
+  const a = app({stored:{ readerSavedUrls: {[A]:1,[B]:2}, ytListsDurationCache: {alpha:{seconds:65,isLive:false}, beta:Infinity}, ytListsFeedCache:{channel:{items:[
+    {videoId:'alpha',link:B,durationSeconds:999,isLive:false}, {videoId:'beta',link:B,durationSeconds:3661,isLive:false}
   ]}} }});
   const page = await a.store.page({filter:'all'});
   assert.equal(page.items.find(item=>item.videoUrl===A).durationSeconds,65); assert.equal(page.items.find(item=>item.videoUrl===B).durationSeconds,3661);
   assert.equal((await a.store.get(A)).durationSeconds,undefined); assert.equal(a.requests.length,0);
-  a.data.ytListsDurationCache.alpha = -1; a.data.ytListsFeedCache.channel.items = [{videoId:'alpha',link:B,durationSeconds:999}];
+  a.data.ytListsDurationCache.alpha = -1; a.data.ytListsFeedCache.channel.items = [{videoId:'alpha',link:B,durationSeconds:999,isLive:false}];
   assert.equal((await a.store.page({filter:'all'})).items.find(item=>item.videoUrl===A).durationSeconds,null);
   await a.record(B); assert.equal((await a.store.get(B)).durationSeconds,null);
 });
 test('cache reuse on a new save remains local, and a captured live state suppresses cached DVR lengths', async () => {
-  const a = app({stored:{ytListsDurationCache:{alpha:65}}}); await a.record(); assert.equal((await a.store.get(A)).durationSeconds,65);
+  const a = app({stored:{ytListsDurationCache:{alpha:{seconds:65,isLive:false}}}}); await a.record(); assert.equal((await a.store.get(A)).durationSeconds,65);
   await a.record(A,'doc-a',{durationVideoUrl:A,durationIsLive:true}); assert.equal((await a.store.get(A)).durationSeconds,null);
   await a.record(A,'doc-a',{}); assert.equal((await a.store.get(A)).durationIsLive,true);
   await a.record(A,'doc-a',{durationVideoUrl:A,durationSeconds:90}); assert.equal((await a.store.get(A)).durationSeconds,90); assert.equal((await a.store.get(A)).durationIsLive,false);
   assert.equal(a.requests.length,0);
+});
+
+test('legacy and live YT Lists caches cannot become fixed runtime badges on old or newly saved records', async () => {
+  const a = app({ stored: { readerSavedUrls: { [A]: 1 }, ytListsDurationCache: { alpha: 7200 },
+    ytListsFeedCache: { channel: { items: [{ videoId: 'alpha', link: A, durationSeconds: 7200 }] } } } });
+  assert.equal((await a.store.page({ filter: 'all' })).items[0].durationSeconds, null);
+  await a.record(); assert.equal((await a.store.get(A)).durationSeconds, null);
+  a.data.ytListsDurationCache.alpha = { seconds: 7200, isLive: true };
+  a.data.ytListsFeedCache.channel.items[0].isLive = false;
+  assert.equal((await a.store.page({ filter: 'all' })).items[0].durationSeconds, null);
+  a.data.ytListsDurationCache.alpha = { seconds: 65, isLive: false };
+  a.data.ytListsFeedCache.channel.items[0].isLive = true;
+  assert.equal((await a.store.page({ filter: 'all' })).items[0].durationSeconds, null);
+  a.data.ytListsFeedCache.channel.items = [];
+  assert.equal((await a.store.page({ filter: 'all' })).items[0].durationSeconds, 65); assert.equal(a.requests.length, 0);
 });
 test('background save retains only duration metadata explicitly tied to its captured target URL', async () => {
   for (const durationVideoUrl of [A, B]) {

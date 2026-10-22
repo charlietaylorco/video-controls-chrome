@@ -8,11 +8,16 @@
   const cachedDuration = (videoUrl, { ytListsDurationCache = {}, ytListsFeedCache = {} } = {}) => {
     const url = C.canonical(videoUrl);
     if (!url) return null;
-    const id = new URL(url).searchParams.get('v'), direct = C.durationSeconds(ytListsDurationCache?.[id]);
-    if (direct) return direct;
+    const id = new URL(url).searchParams.get('v'), direct = ytListsDurationCache?.[id], matches = [];
     for (const feed of Object.values(ytListsFeedCache || {})) for (const item of Array.isArray(feed?.items) ? feed.items : []) {
-      if (item.videoId !== id || item.link && C.canonical(item.link) !== url || item.isLive === true) continue;
-      const seconds = C.durationSeconds(item.durationSeconds);
+      if (item.videoId === id && (!item.link || C.canonical(item.link) === url)) matches.push(item);
+    }
+    if (direct?.isLive === true || matches.some(item => item.isLive === true)) return null;
+    // Legacy numeric caches have no live-status evidence and may contain DVR lengths.
+    const verified = direct?.isLive === false ? C.durationSeconds(direct.seconds) : null;
+    if (verified) return verified;
+    for (const item of matches) {
+      const seconds = item.isLive === false ? C.durationSeconds(item.durationSeconds) : null;
       if (seconds) return seconds;
     }
     return null;

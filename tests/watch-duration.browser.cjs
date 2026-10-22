@@ -65,7 +65,7 @@ test('unknown/live badges stay blank, cached old entries enrich locally, and upd
     await store.recordSave(url,'mock-25',{durationVideoUrl:url,durationIsLive:true});
     await store.recordSave(url,'mock-25',{durationVideoUrl:url,durationSeconds:90});
     await store.recordSave('https://www.youtube.com/watch?v=unknown_old','old-id',{title:'Unknown old save'});
-    chrome.storage.local.set({ytListsDurationCache:{unknown_old:125}});
+    chrome.storage.local.set({ytListsDurationCache:{unknown_old:{seconds:125,isLive:false}}});
   });
   await page.waitForFunction(()=>[...document.querySelectorAll('.duration-badge')].some(node=>node.textContent==='2:05'));
   assert.equal(await page.locator('#fixture-count').textContent(),'Mock Reader requests: 0');

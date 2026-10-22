@@ -12,7 +12,11 @@ A small bottom-right thumbnail badge shows known runtime as `m:ss` / `h:mm:ss`. 
 - New history records use a captured duration or an existing matching YT Lists duration/feed cache. Known durations survive Reader refreshes. A newly observed live state suppresses old cached DVR lengths until a later positive capture establishes a normal runtime.
 - Existing IndexedDB rows need no schema rewrite. Each bounded Recent saves page can read through the existing local YT Lists caches for missing lengths, with exact ID/URL validation. Updating those caches refreshes the visible local view. There are no new YouTube/Reader fetches, background backfill, permission changes or full-history migrations. Old items with no known local duration remain blank.
 
+Merge review tightened YT Lists duration provenance: existing watch-page lookups parse the matching player's JSON and require explicit live-status metadata before accepting a fixed runtime. Live/upcoming entries retain `isLive: true` and no runtime. Verified cache entries now include `{ seconds, isLive }`; legacy numeric entries remain available to YT Lists but cannot produce Recent saves badges without non-live evidence. Reader save messages omit unknown/live runtimes, and cache fallback rejects live or unverified records. This adds no requests or permissions.
+
 ## Validation
+
+Final combined merge validation on 2026-10-22: **339 unit tests and 51 native Chromium browser checks pass (390 total)** with the options redesign, deferred Reader editor, summary recovery/cancellation fixes, speed keys, timer and duration provenance changes together. The duration review adds coverage for live/upcoming/unknown player metadata, exact player identity, cache persistence and legacy-cache rejection. The Reader browser fixture failures described below were corrected in #16; all 37 Reader browser checks now pass.
 
 `npm test`: 290 passing tests on the PR branch. Tests cover numeric validation/formatting, native metadata and SPA identity, card recycling/multiple IDs, preview clips, ads/live/unknown states, save payload association, persisted duration/freshness preservation, old records/cache enrichment and inert unknown badges.
 

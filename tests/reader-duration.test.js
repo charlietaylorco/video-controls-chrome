@@ -50,8 +50,7 @@ test('live/DVR, ads, unavailable metadata and disconnected/recycled targets do n
   f.video.duration = 80; f.video.readyState = 0; assert.equal(f.capture().durationSeconds, undefined);
   f.video.readyState = 4; f.video.isConnected = false; assert.equal(f.capture().durationSeconds, undefined);
 });
-test('content and YT Lists send the captured source URL with duration, without changing Reader API fields', () => {
-  const content = fs.readFileSync(require.resolve('../content.js'), 'utf8'), feed = fs.readFileSync(require.resolve('../feed.js'),'utf8');
+test('content sends the captured source URL with duration, without changing Reader API fields', () => {
+  const content = fs.readFileSync(require.resolve('../content.js'), 'utf8');
   assert.match(content, /MVSReaderDuration\?\.capture\(\{ source: getVideoCardContainer\(source\) \|\| source, videoUrl: pageUrl/);
-  assert.match(feed, /durationVideoUrl: item.link,\s+durationSeconds: item.durationSeconds/);
 });
