@@ -3,459 +3,36 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Minimal Video Speed Settings</title>
-    <style>
-      :root {
-        color-scheme: dark;
-        --bg: #111214;
-        --surface: #191b1f;
-        --surface-hover: #22252b;
-        --border: #30343b;
-        --text: #f2f3f5;
-        --muted: #9ba1aa;
-        --accent: #9cc5ff;
-        --focus: rgba(156, 197, 255, 0.28);
-      }
-
-      * {
-        box-sizing: border-box;
-      }
-
-      body {
-        margin: 0;
-        min-height: 100vh;
-        background: var(--bg);
-        color: var(--text);
-        font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      }
-
-      button,
-      input {
-        font: inherit;
-      }
-
-      button,
-      input[type="checkbox"] {
-        cursor: pointer;
-      }
-
-      main {
-        width: min(760px, calc(100% - 40px));
-        margin: 0 auto;
-        padding: 32px 0 40px;
-      }
-
-      .page-header {
-        margin-bottom: 22px;
-      }
-
-      h1 {
-        margin: 0;
-        font-size: clamp(1.65rem, 4vw, 2.1rem);
-        font-weight: 650;
-        letter-spacing: -0.04em;
-      }
-
-      .page-intro {
-        margin: 6px 0 0;
-        color: var(--muted);
-        font-size: 0.9rem;
-        line-height: 1.45;
-      }
-
-      .settings-section {
-        padding: 20px 0;
-      }
-
-      .settings-section + .settings-section {
-        border-top: 1px solid var(--border);
-      }
-
-      .section-heading {
-        margin-bottom: 12px;
-      }
-
-      .section-heading h2 {
-        margin: 0;
-        font-size: 0.76rem;
-        font-weight: 700;
-        letter-spacing: 0.09em;
-        text-transform: uppercase;
-      }
-
-      .section-heading p,
-      .setting-hint,
-      .band-hint,
-      .hint {
-        color: var(--muted);
-        font-size: 0.78rem;
-        line-height: 1.42;
-      }
-
-      .section-heading p {
-        margin: 4px 0 0;
-      }
-
-      .settings-rows {
-        display: grid;
-        gap: 10px;
-      }
-
-      .setting-row {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
-        align-items: center;
-        gap: 20px;
-        min-height: 42px;
-      }
-
-      .setting-copy label,
-      .setting-title,
-      .band-field label {
-        display: block;
-        color: var(--text);
-        font-size: 0.88rem;
-        font-weight: 600;
-      }
-
-      .setting-hint,
-      .band-hint {
-        display: block;
-        margin-top: 2px;
-      }
-
-      .stepper-control {
-        display: grid;
-        grid-template-columns: 36px 76px 28px 36px;
-        align-items: stretch;
-        height: 36px;
-        overflow: hidden;
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        background: var(--surface);
-      }
-
-      .stepper-control:focus-within,
-      .time-input:focus,
-      .token-input:focus {
-        border-color: var(--accent);
-        box-shadow: 0 0 0 3px var(--focus);
-      }
-
-      .stepper {
-        border: 0;
-        background: transparent;
-        color: var(--muted);
-        font-size: 1rem;
-        line-height: 1;
-      }
-
-      .stepper:first-child {
-        border-right: 1px solid var(--border);
-      }
-
-      .stepper:last-child {
-        border-left: 1px solid var(--border);
-      }
-
-      .stepper:hover {
-        background: var(--surface-hover);
-        color: var(--text);
-      }
-
-      .stepper:focus-visible,
-      .save-button:focus-visible,
-      .toggle-input:focus-visible {
-        outline: 2px solid var(--accent);
-        outline-offset: -2px;
-      }
-
-      .value-wrap {
-        display: flex;
-        min-width: 0;
-      }
-
-      .value-wrap input {
-        width: 100%;
-        min-width: 0;
-        padding: 0 6px;
-        border: 0;
-        outline: 0;
-        background: transparent;
-        color: var(--text);
-        font-size: 0.84rem;
-        text-align: right;
-      }
-
-      input[type="number"]::-webkit-inner-spin-button,
-      input[type="number"]::-webkit-outer-spin-button {
-        margin: 0;
-        -webkit-appearance: none;
-      }
-
-      .suffix {
-        display: grid;
-        place-items: center start;
-        color: var(--muted);
-        font-size: 0.76rem;
-      }
-
-      .hover-band-summary {
-        margin: 0 0 14px;
-        color: var(--muted);
-        font-size: 0.78rem;
-        line-height: 1.4;
-      }
-
-      .hover-band-summary-title {
-        color: var(--text);
-        font-weight: 600;
-      }
-
-      .hover-band-summary-value {
-        display: inline;
-        margin: 0 0 0 4px;
-      }
-
-      .hover-band-list {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-      }
-
-      .hover-band {
-        min-width: 0;
-        padding: 0 14px;
-      }
-
-      .hover-band:first-child {
-        padding-left: 0;
-      }
-
-      .hover-band:last-child {
-        padding-right: 0;
-      }
-
-      .hover-band + .hover-band {
-        border-left: 1px solid var(--border);
-      }
-
-      .hover-band-title {
-        margin: 0 0 2px;
-        font-size: 0.9rem;
-        font-weight: 650;
-      }
-
-      .hover-band-copy {
-        min-height: 2.2em;
-        margin: 0 0 10px;
-        color: var(--muted);
-        font-size: 0.7rem;
-        line-height: 1.35;
-      }
-
-      .hover-band-controls {
-        display: grid;
-        gap: 9px;
-      }
-
-      .band-field label {
-        margin-bottom: 5px;
-        color: var(--muted);
-        font-size: 0.69rem;
-        font-weight: 500;
-      }
-
-      .stepper-control.compact {
-        width: 100%;
-        grid-template-columns: 30px minmax(42px, 1fr) 24px 30px;
-        height: 32px;
-      }
-
-      .stepper-control.compact .stepper {
-        font-size: 0.88rem;
-      }
-
-      .stepper-control.compact .value-wrap input {
-        font-size: 0.78rem;
-      }
-
-      .toggle-list {
-        display: grid;
-        gap: 6px;
-      }
-
-      .toggle-item {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
-        align-items: center;
-        gap: 16px;
-        min-height: 42px;
-      }
-
-      .toggle-input {
-        position: relative;
-        width: 34px;
-        height: 20px;
-        margin: 0;
-        border: 0;
-        border-radius: 999px;
-        appearance: none;
-        background: #3b414a;
-        transition: background-color 120ms ease;
-      }
-
-      .toggle-input::before {
-        content: "";
-        position: absolute;
-        top: 3px;
-        left: 3px;
-        width: 14px;
-        height: 14px;
-        border-radius: 50%;
-        background: #d7dbe1;
-        transition: transform 120ms ease;
-      }
-
-      .toggle-input:checked {
-        background: var(--accent);
-      }
-
-      .toggle-input:checked::before {
-        background: #10223b;
-        transform: translateX(14px);
-      }
-
-      .time-input,
-      .token-input {
-        height: 36px;
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        outline: 0;
-        background: var(--surface);
-        color: var(--text);
-        font-size: 0.82rem;
-      }
-
-      .time-input {
-        width: 112px;
-        padding: 0 10px;
-      }
-
-      .time-input::-webkit-calendar-picker-indicator {
-        filter: invert(1);
-        opacity: 0.65;
-      }
-
-      .token-row {
-        display: grid;
-        grid-template-columns: minmax(180px, 320px) auto;
-        gap: 8px;
-      }
-
-      .token-input {
-        width: 100%;
-        min-width: 0;
-        padding: 0 11px;
-      }
-
-      .save-button {
-        height: 36px;
-        padding: 0 14px;
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        background: var(--surface);
-        color: var(--text);
-        font-size: 0.8rem;
-        font-weight: 600;
-      }
-
-      .save-button:hover {
-        background: var(--surface-hover);
-      }
-
-      .hint {
-        margin-top: 8px;
-      }
-
-      .hint a {
-        color: var(--accent);
-      }
-
-      .status {
-        min-height: 20px;
-        margin-top: 4px;
-        color: var(--accent);
-        font-size: 0.78rem;
-      }
-
-      @media (max-width: 640px) {
-        main {
-          width: min(100% - 28px, 760px);
-          padding-top: 24px;
-        }
-
-        .setting-row {
-          grid-template-columns: 1fr;
-          gap: 7px;
-        }
-
-        .setting-row > :last-child {
-          justify-self: start;
-        }
-
-        .hover-band-list {
-          grid-template-columns: 1fr;
-        }
-
-        .hover-band,
-        .hover-band:first-child,
-        .hover-band:last-child {
-          padding: 12px 0;
-        }
-
-        .hover-band:first-child {
-          padding-top: 0;
-        }
-
-        .hover-band + .hover-band {
-          border-top: 1px solid var(--border);
-          border-left: 0;
-        }
-
-        .hover-band-copy {
-          min-height: 0;
-        }
-
-        .hover-band-controls {
-          grid-template-columns: 1fr 1fr;
-        }
-
-        .token-row {
-          width: 100%;
-          grid-template-columns: minmax(0, 1fr) auto;
-        }
-      }
-
-      @media (max-width: 380px) {
-        .hover-band-controls {
-          grid-template-columns: 1fr;
-        }
-      }
-    </style>
+    <title>Settings · Minimal Video Speed</title>
+    <link rel="stylesheet" href="options.css">
+    <script src="options-ui.js" defer></script>
+    <script src="options.js" defer></script>
   </head>
   <body>
-    <main>
-      <header class="page-header">
-        <h1>Playback settings</h1>
-        <p class="page-intro">Video overlay, hover preview, and YouTube focus controls.</p>
-      </header>
-
-      <section class="settings-section" aria-labelledby="playback-heading">
-        <div class="section-heading">
+    <a class="skip-link" href="#settings">Skip to settings</a>
+    <header class="app-header"><div class="app-header-inner">
+      <div class="brand"><span class="brand-mark"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="m7 4 10 6-10 6Z"/></svg></span>Video controls</div>
+      <a class="recent-link" href="watch.html">Recent saves <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M5 15 15 5M6 5h9v9"/></svg></a>
+    </div></header>
+    <div class="settings-layout">
+      <aside class="sidebar">
+        <p class="nav-label">Preferences</p>
+        <nav class="section-nav" aria-label="Settings sections"><a href="#playback" aria-current="location"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="m7 4 10 6-10 6Z"/></svg><span>Playback</span></a>
+<a href="#hover-preview"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><rect x="3" y="4" width="14" height="12" rx="2"/><path d="M7 4v12M13 4v12"/></svg><span>Hover preview</span></a>
+<a href="#overlay"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><rect x="3" y="4" width="14" height="12" rx="2"/><path d="M6 7h5M6 10h2"/></svg><span>Video overlay</span></a>
+<a href="#focus"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="6"/><circle cx="10" cy="10" r="2"/></svg><span>Focus mode</span></a>
+<a href="#reader"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M5 3h10v14l-5-3-5 3Z"/></svg><span>Reader &amp; saves</span></a>
+<a href="#connections"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="m7 13 6-6M7 7l1-1a4 4 0 0 1 6 6l-1 1M13 13l-1 1a4 4 0 0 1-6-6l1-1"/></svg><span>Connections</span></a>
+</nav>
+        <p class="sidebar-note">Preferences save automatically.<br>Save API tokens separately.</p>
+      </aside>
+      <main id="settings" tabindex="-1">
+        <header class="page-header"><div><h1>Settings</h1><p class="page-intro">Set your pace. Keep your focus.</p></div><p class="autosave-note">Preferences save automatically</p></header>
+        <section class="settings-section" id="playback" aria-labelledby="playback-heading" tabindex="-1">
+<div class="section-heading">
           <h2 id="playback-heading">Playback</h2>
           <p>Adjust the overlay’s speed controls and idle behaviour.</p>
-        </div>
-        <div class="settings-rows">
+        </div><div class="settings-card "><div class="settings-rows">
           <div class="setting-row">
             <div class="setting-copy">
               <label for="adjustment-step">Speed step</label>
@@ -485,31 +62,23 @@
               <button class="stepper" data-setting="overlayIdleHideDelay" data-delta="0.25" type="button" aria-label="Increase overlay idle hide delay by 0.25 seconds">+</button>
             </div>
           </div>
-        </div>
-      </section>
-
-      <section class="settings-section" aria-labelledby="hover-heading">
-        <div class="section-heading">
+        </div></div>
+</section>
+        <section class="settings-section" id="hover-preview" aria-labelledby="hover-heading" tabindex="-1">
+<div class="section-heading">
           <h2 id="hover-heading">Hover preview</h2>
           <p>Set the width and playback speed for each horizontal video band.</p>
-        </div>
-
-        <div class="hover-band-summary" aria-live="polite">
-          <span class="hover-band-summary-title">Effective layout:</span>
-          <p class="hover-band-summary-value" id="hover-band-summary"></p>
-        </div>
-
-        <div class="hover-band-list">
+        </div><div class="settings-card "><div class="hover-visual" aria-hidden="true"><div class="hover-axis"><span>Left edge</span><span>Your video</span><span>Right edge</span></div><div class="hover-layout"><div class="preview-band" data-band="outside"><span></span></div><div class="preview-band" data-band="outer"><span></span></div><div class="preview-band" data-band="middle"><span></span></div><div class="preview-band" data-band="center"><span></span></div><div class="preview-band" data-band="middle"><span></span></div><div class="preview-band" data-band="outer"><span></span></div><div class="preview-band" data-band="outside"><span></span></div></div></div><div class="hover-band-list">
           <article class="hover-band">
-            <h3 class="hover-band-title">Center</h3>
-            <p class="hover-band-copy">Total width through the middle of the video.</p>
+            <h3 class="hover-band-title"><span class="band-dot" aria-hidden="true"></span>Centre</h3>
+            <p class="hover-band-copy">The full width of the centre band.</p>
             <div class="hover-band-controls">
               <div class="band-field">
                 <label for="hover-center-width">Width</label>
                 <div class="stepper-control compact">
                   <button class="stepper" data-setting="hoverCenterWidthPercent" data-delta="-1" type="button" aria-label="Decrease center hover width by 1 percent">−</button>
                   <div class="value-wrap">
-                    <input id="hover-center-width" type="number" min="0" max="100" step="0.01" inputmode="decimal">
+                    <input id="hover-center-width" type="number" min="0" max="100" step="0.01" inputmode="decimal" aria-label="Centre band width">
                   </div>
                   <span class="suffix">%</span>
                   <button class="stepper" data-setting="hoverCenterWidthPercent" data-delta="1" type="button" aria-label="Increase center hover width by 1 percent">+</button>
@@ -520,7 +89,7 @@
                 <div class="stepper-control compact">
                   <button class="stepper" data-setting="hoverCenterSpeed" data-delta="-0.25" type="button" aria-label="Decrease center hover speed by 0.25">−</button>
                   <div class="value-wrap">
-                    <input id="hover-center-speed" type="number" min="0" max="16" step="0.01" inputmode="decimal">
+                    <input id="hover-center-speed" type="number" min="0" max="16" step="0.01" inputmode="decimal" aria-label="Centre band speed">
                   </div>
                   <span class="suffix">×</span>
                   <button class="stepper" data-setting="hoverCenterSpeed" data-delta="0.25" type="button" aria-label="Increase center hover speed by 0.25">+</button>
@@ -530,15 +99,15 @@
           </article>
 
           <article class="hover-band">
-            <h3 class="hover-band-title">Middle</h3>
-            <p class="hover-band-copy">Added equally to both sides of the center band.</p>
+            <h3 class="hover-band-title"><span class="band-dot" aria-hidden="true"></span>Middle</h3>
+            <p class="hover-band-copy">On each side of the centre band.</p>
             <div class="hover-band-controls">
               <div class="band-field">
                 <label for="hover-middle-width">Width per side</label>
                 <div class="stepper-control compact">
                   <button class="stepper" data-setting="hoverMiddleWidthPercent" data-delta="-1" type="button" aria-label="Decrease middle hover width by 1 percent">−</button>
                   <div class="value-wrap">
-                    <input id="hover-middle-width" type="number" min="0" max="100" step="0.01" inputmode="decimal">
+                    <input id="hover-middle-width" type="number" min="0" max="100" step="0.01" inputmode="decimal" aria-label="Middle band width per side">
                   </div>
                   <span class="suffix">%</span>
                   <button class="stepper" data-setting="hoverMiddleWidthPercent" data-delta="1" type="button" aria-label="Increase middle hover width by 1 percent">+</button>
@@ -549,7 +118,7 @@
                 <div class="stepper-control compact">
                   <button class="stepper" data-setting="hoverMiddleSpeed" data-delta="-0.25" type="button" aria-label="Decrease middle hover speed by 0.25">−</button>
                   <div class="value-wrap">
-                    <input id="hover-middle-speed" type="number" min="0" max="16" step="0.01" inputmode="decimal">
+                    <input id="hover-middle-speed" type="number" min="0" max="16" step="0.01" inputmode="decimal" aria-label="Middle band speed">
                   </div>
                   <span class="suffix">×</span>
                   <button class="stepper" data-setting="hoverMiddleSpeed" data-delta="0.25" type="button" aria-label="Increase middle hover speed by 0.25">+</button>
@@ -559,15 +128,15 @@
           </article>
 
           <article class="hover-band">
-            <h3 class="hover-band-title">Outer</h3>
-            <p class="hover-band-copy">Added equally to both sides of the middle band.</p>
+            <h3 class="hover-band-title"><span class="band-dot" aria-hidden="true"></span>Outer</h3>
+            <p class="hover-band-copy">On each side of the middle band.</p>
             <div class="hover-band-controls">
               <div class="band-field">
                 <label for="hover-outer-width">Width per side</label>
                 <div class="stepper-control compact">
                   <button class="stepper" data-setting="hoverOuterWidthPercent" data-delta="-1" type="button" aria-label="Decrease outer hover width by 1 percent">−</button>
                   <div class="value-wrap">
-                    <input id="hover-outer-width" type="number" min="0" max="100" step="0.01" inputmode="decimal">
+                    <input id="hover-outer-width" type="number" min="0" max="100" step="0.01" inputmode="decimal" aria-label="Outer band width per side">
                   </div>
                   <span class="suffix">%</span>
                   <button class="stepper" data-setting="hoverOuterWidthPercent" data-delta="1" type="button" aria-label="Increase outer hover width by 1 percent">+</button>
@@ -578,7 +147,7 @@
                 <div class="stepper-control compact">
                   <button class="stepper" data-setting="hoverOuterSpeed" data-delta="-0.25" type="button" aria-label="Decrease outer hover speed by 0.25">−</button>
                   <div class="value-wrap">
-                    <input id="hover-outer-speed" type="number" min="0" max="16" step="0.01" inputmode="decimal">
+                    <input id="hover-outer-speed" type="number" min="0" max="16" step="0.01" inputmode="decimal" aria-label="Outer band speed">
                   </div>
                   <span class="suffix">×</span>
                   <button class="stepper" data-setting="hoverOuterSpeed" data-delta="0.25" type="button" aria-label="Increase outer hover speed by 0.25">+</button>
@@ -587,15 +156,13 @@
             </div>
           </article>
         </div>
-        <div class="hint">Set a width or speed to 0 to disable that band. Outside the bands, videos use their normal saved speed.</div>
-      </section>
-
-      <section class="settings-section" aria-labelledby="overlay-heading">
-        <div class="section-heading">
+        <div class="hover-band-summary"><p id="hover-band-summary" aria-live="polite" aria-atomic="true"></p></div></div>
+<p class="hint">Set a width or speed to 0 to disable that band. Outside the bands, videos use their normal saved speed.</p></section>
+        <section class="settings-section" id="overlay" aria-labelledby="overlay-heading" tabindex="-1">
+<div class="section-heading">
           <h2 id="overlay-heading">Overlay</h2>
           <p>Choose which hints and actions appear over videos.</p>
-        </div>
-        <div class="toggle-list">
+        </div><div class="settings-card "><div class="toggle-list">
           <label class="toggle-item" for="show-hover-slow-zone-hint">
             <span class="setting-copy">
               <span class="setting-title">Show hover bands</span>
@@ -617,42 +184,16 @@
             </span>
             <input class="toggle-input" id="show-reader" type="checkbox">
           </label>
-        </div>
-      </section>
-
-      <section class="settings-section" aria-labelledby="order-heading">
-        <div class="section-heading">
-          <h2 id="order-heading">Icon order</h2>
-          <p>Move actions left or right in the overlay. Changes save automatically; unavailable actions stay hidden.</p>
-        </div>
-        <div id="icon-order" class="settings-rows"></div>
-      </section>
-
-      <section class="settings-section" aria-labelledby="raindrop-heading">
-        <div class="section-heading">
-          <h2 id="raindrop-heading">Raindrop.io</h2>
-          <p>Save YouTube videos and embeds to Unsorted with the cloud button.</p>
-        </div>
         <label class="toggle-item" for="show-raindrop">
-          <span class="setting-title">Raindrop button</span>
+          <span class="setting-copy"><span class="setting-title">Raindrop button</span><span class="setting-hint">Save YouTube videos to Raindrop.io.</span></span>
           <input class="toggle-input" id="show-raindrop" type="checkbox">
-        </label>
-        <div class="setting-row">
-          <label class="setting-title" for="raindrop-token">API token</label>
-          <div class="token-row">
-            <input class="token-input" id="raindrop-token" type="password" spellcheck="false" autocomplete="off">
-            <button class="save-button" id="save-raindrop-token" type="button">Save</button>
-          </div>
-        </div>
-        <div class="hint">Create an app in <a href="https://app.raindrop.io/settings/integrations" target="_blank" rel="noreferrer">Raindrop integrations</a>, then copy its Test token here. Stored locally in this browser.</div>
-      </section>
-
-      <section class="settings-section" aria-labelledby="focus-heading">
-        <div class="section-heading">
+        </label></div><div class="subsection-heading"><h3 id="order-heading">Icon order</h3><p>Move actions left or right. Unavailable actions stay hidden in the overlay.</p></div><div id="icon-order" class="settings-rows"></div></div>
+</section>
+        <section class="settings-section" id="focus" aria-labelledby="focus-heading" tabindex="-1">
+<div class="section-heading">
           <h2 id="focus-heading">Focus mode</h2>
           <p>Control YouTube feed blocking and your daily unblock allowance.</p>
-        </div>
-        <label class="toggle-item" for="hide-feed-videos">
+        </div><div class="settings-card "><div class="settings-rows"><label class="toggle-item" for="hide-feed-videos">
           <span class="setting-copy">
             <span class="setting-title">Enable focus mode</span>
             <span class="setting-hint">Hide YouTube Home and Subscriptions feeds. Turn off to browse freely.</span>
@@ -679,36 +220,20 @@
             <span class="setting-hint">The daily YouTube feed reveal count resets at this time.</span>
           </div>
           <input class="time-input" id="feed-reveal-day-end" type="time" step="60">
-        </div>
-      </section>
-
-      <section class="settings-section" aria-labelledby="reader-heading">
-        <div class="section-heading">
-          <h2 id="reader-heading">Reader</h2>
-          <p>Connect Readwise Reader to save videos and read their summary and notes.</p>
-          <p><a href="watch.html">Open Recent saves</a> · Recent extension saves, summaries and Reader locations.</p>
-        </div>
-        <div class="setting-row">
-          <div class="setting-copy">
-            <label for="reader-token">API token</label>
-            <span class="setting-hint">Used only by the extension to save videos and access Reader.</span>
-          </div>
-          <div class="token-row">
-            <input class="token-input" id="reader-token" type="password" spellcheck="false" autocomplete="off">
-            <button class="save-button" id="save-token" type="button">Save</button>
-          </div>
-        </div>
-        <div class="setting-row">
-          <div class="setting-copy"><label for="watch-timer-default-minutes">Viewing timer default (minutes)</label><span class="setting-hint">1–180 minutes. Applies to new timers in Recent saves. One-off durations do not change this default.</span></div>
-          <input class="time-input" id="watch-timer-default-minutes" type="number" min="1" max="180" step="1" value="15" inputmode="numeric" aria-label="Default viewing timer minutes">
+        </div></div></div>
+</section>
+        <section class="settings-section" id="reader" aria-labelledby="reader-heading" tabindex="-1">
+<div class="section-heading"><h2 id="reader-heading">Reader &amp; Recent saves</h2><p>Make space for the videos you want to come back to.</p></div><div class="settings-card "><div class="settings-rows">        <div class="setting-row">
+          <div class="setting-copy"><label for="watch-timer-default-minutes">Default viewing timer</label><span class="setting-hint">1–180 whole minutes. A one-off timer won’t change this default.</span></div>
+          <div class="number-control"><input id="watch-timer-default-minutes" type="number" min="1" max="180" step="1" value="15" inputmode="numeric" aria-label="Default viewing timer minutes"><span aria-hidden="true">min</span></div>
         </div>
         <label class="toggle-item" for="show-recent-saves-launcher">
-          <span><span class="setting-title">Recent saves floating shortcut</span>
+          <span><span class="setting-title">Recent saves shortcut</span>
           <span class="setting-hint">Open Recent saves from a small floating button on YouTube. Separate from the Reader panel; hidden in fullscreen.</span></span>
           <input class="toggle-input" id="show-recent-saves-launcher" type="checkbox">
         </label>
         <div class="setting-row">
-          <div class="setting-copy"><label for="recent-saves-launcher-position">Recent saves shortcut position</label></div>
+          <div class="setting-copy"><label for="recent-saves-launcher-position">Shortcut position</label></div>
           <select id="recent-saves-launcher-position">
             <option value="top-left">Top left</option><option value="top-right">Top right</option><option value="bottom-left">Bottom left</option><option value="bottom-right">Bottom right</option>
           </select>
@@ -719,16 +244,29 @@
           <input class="toggle-input" id="show-reader-panel" type="checkbox">
         </label>
         <div class="setting-row">
-          <div class="setting-copy"><label for="reader-panel-theme">Popover theme</label></div>
-          <select id="reader-panel-theme" aria-label="Reader popover theme">
+          <div class="setting-copy"><label for="reader-panel-theme">Appearance</label><span class="setting-hint">The theme for settings, Recent saves and Reader popovers.</span></div>
+          <select id="reader-panel-theme" aria-label="Appearance for settings, Recent saves and Reader">
             <option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option>
           </select>
         </div>
-        <div class="hint">Get your token from <a href="https://readwise.io/access_token" target="_blank" rel="noreferrer">Readwise</a>.</div>
-      </section>
-
-      <div class="status" id="status" aria-live="polite"></div>
-    </main>
-    <script src="options.js"></script>
+        </div></div>
+</section>
+        <section class="settings-section" id="connections" aria-labelledby="connections-heading" tabindex="-1">
+<div class="section-heading"><h2 id="connections-heading">Connections</h2><p>Connect your services. Tokens are saved only when you choose Save token.</p></div><div class="connections"><article class="settings-card connection-card" aria-labelledby="reader-connection-heading">
+      <div class="connection-header"><span class="service-mark"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M5 3h10v14l-5-3-5 3Z"/></svg></span><div><h3 id="reader-connection-heading">Readwise Reader</h3><p>Save videos, read summaries and keep your notes.</p></div></div>
+      <label class="token-label" for="reader-token">Readwise Reader API token</label>
+      <div class="token-row"><input class="token-input" id="reader-token" type="password" spellcheck="false" autocomplete="off" placeholder="Paste your API token" aria-describedby="reader-token-hint"><button class="save-button" id="save-token" type="button">Save token</button></div>
+      <p class="hint" id="reader-token-hint">Get your token from <a href="https://readwise.io/access_token" target="_blank" rel="noreferrer">Readwise</a>. Stored locally in this browser.</p>
+    </article><article class="settings-card connection-card" aria-labelledby="raindrop-heading">
+      <div class="connection-header"><span class="service-mark"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M5 15a4 4 0 0 1-1-7 5 5 0 0 1 9-3 4 4 0 1 1 2 10Z"/></svg></span><div><h3 id="raindrop-heading">Raindrop.io</h3><p>Save YouTube videos and embeds to Unsorted.</p></div></div>
+      <label class="token-label" for="raindrop-token">Raindrop.io API token</label>
+      <div class="token-row"><input class="token-input" id="raindrop-token" type="password" spellcheck="false" autocomplete="off" placeholder="Paste your API token" aria-describedby="raindrop-token-hint"><button class="save-button" id="save-raindrop-token" type="button">Save token</button></div>
+      <p class="hint" id="raindrop-token-hint">Create an app in <a href="https://app.raindrop.io/settings/integrations" target="_blank" rel="noreferrer">Raindrop integrations</a>, then paste its Test token here. Stored locally in this browser.</p>
+    </article></div>
+</section>
+        <footer class="page-footer">Video controls · A little less distraction.</footer>
+      </main>
+    </div>
+    <div class="status" id="status" role="status" aria-live="polite" aria-atomic="true"></div>
   </body>
 </html>

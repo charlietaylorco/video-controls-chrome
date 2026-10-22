@@ -9,6 +9,37 @@ const LIMIT = 'ytListsFeedRevealDailyLimit';
 const USAGE = 'ytListsFeedRevealUsage';
 const ENABLED = 'ytListsHideFeedVideos';
 
+test('options preview clips bands at the video edge and keeps disabled band space at saved speed', () => {
+  const app = harness('options.js', {
+    hoverCenterWidthPercent: 80, hoverCenterSpeed: 1,
+    hoverMiddleWidthPercent: 40, hoverMiddleSpeed: 1.5,
+    hoverOuterWidthPercent: 20, hoverOuterSpeed: 2,
+  });
+  let preview;
+  app.context.MVSOptionsUI = { updateHoverPreview(value) { preview = value; } };
+  app.input('hover-center-speed').value = '0';
+  app.input('hover-center-speed').events.input();
+  assert.equal(preview.center.width, 80, 'disabling centre speed must not pull adjacent zones inward');
+  assert.equal(preview.center.speed, 0);
+  assert.equal(preview.middle.width, 10, 'each side clips to the remaining video width');
+  assert.equal(preview.outer.width, 0);
+  assert.match(app.input('hover-band-summary').textContent, /middle 10% per side at 1.5×/);
+  assert.doesNotMatch(app.input('hover-band-summary').textContent, /Centre|outer/);
+  app.input('hover-center-width').value = '100';
+  app.input('hover-center-width').events.input();
+  assert.equal(preview.middle.width, 0);
+  assert.equal(preview.outer.width, 0);
+  assert.equal(app.input('hover-band-summary').textContent, 'Hover preview disabled. Everywhere uses the saved speed.');
+});
+
+test('options toast never reports a successful token save when storage rejects it', () => {
+  const app = harness('options.js');
+  app.context.chrome.runtime.lastError = { message: 'Storage unavailable' };
+  app.input('save-token').events.click();
+  assert.equal(app.input('status').textContent, 'Could not save changes. Please try again.');
+  assert.equal(app.input('status').dataset.error, 'true');
+});
+
 function harness(file, saved = {}, legacy = {}) {
   const data = { ...saved };
   const nodes = new Map();
