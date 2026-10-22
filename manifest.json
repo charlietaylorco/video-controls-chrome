@@ -8,6 +8,7 @@
   },
   "permissions": [
     "storage",
+    "alarms",
     "tabs",
     "downloads"
   ],
@@ -28,6 +29,11 @@
     "open_in_tab": true
   },
   "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*", "https://youtube.com/*", "https://m.youtube.com/*"],
+      "js": ["youtube-speed-keys.js"],
+      "run_at": "document_start"
+    },
     {
       "matches": [
         "https://x.com/*",
@@ -59,6 +65,9 @@
         "https://music.youtube.com/*"
       ],
       "js": [
+        "watch-timer-core.js",
+        "watch-timer-client.js",
+        "watch-timer-reminder.js",
         "reader-core.js",
         "reader-launcher.js",
         "reader-editor.js",

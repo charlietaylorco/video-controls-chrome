@@ -414,3 +414,12 @@ test('thumbnail duration badges format known lengths, hide unknown/live values a
   assert.equal(badges[0].hidden,true); assert.equal(badges[1].textContent,'1:05'); assert.equal(badges[1].hidden,false);
   assert.equal(f.messages.filter(message=>message.type==='watch-list-refresh').length,0);
 });
+
+test('Recent saves renders pending and reloads the local summary on readiness without a Reader refresh action', async () => {
+  const f = fixture(); for (const item of f.defaultItems) { item.summary = null; item.summaryJob = { status: 'pending' }; }
+  await f.flush(); assert.match(f.findClass('summary-text')[0].textContent, /preparing.*automatically/);
+  f.defaultItems[0].summary = 'Arrived automatically'; f.defaultItems[0].summaryJob = { status: 'ready' };
+  f.change({ readerSummaryJobs: { newValue: {} } }); await f.run(100);
+  assert.equal(f.findClass('summary-text')[0].textContent, 'Arrived automatically');
+  assert.equal(f.messages.filter(message => message.type === 'watch-list-refresh').length, 0);
+});

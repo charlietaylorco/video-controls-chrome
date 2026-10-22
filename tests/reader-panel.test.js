@@ -624,6 +624,20 @@ test('panel and temporary summary peek display local versus upstream rate source
   }
 });
 
+test('collapsed and Summary-only renders never attach a note iframe; first Note activation mounts one stable editor', async () => {
+  const f = fixture(), container = f.byClass('editor');
+  assert.equal(container.children.length, 0);
+  await f.open(); assert.equal(container.children.length, 0);
+  f.button('Refresh').click(); await tick(); assert.equal(container.children.length, 0);
+  f.change({ readerPanelTheme: {newValue:'dark'} }); assert.equal(container.children.length, 0);
+  const reads = f.messages.length; f.byId('reader-note-tab').click(); const frame = container.children[0]; assert.equal(f.messages.length, reads);
+  assert.ok(frame); assert.equal(container.children.length, 1); frame.focus();
+  f.edit('Retain this local draft'); assert.equal(container.children[0], frame); assert.equal(f.active, frame);
+  f.byId('reader-summary-tab').click(); assert.equal(container.children[0], frame);
+  f.byId('reader-note-tab').click(); assert.equal(container.children[0], frame); assert.equal(f.value, 'Retain this local draft');
+  f.button('Close Reader').click(); await f.open(); assert.equal(container.children[0], frame); assert.equal(f.value, 'Retain this local draft');
+});
+
 test('Cmd-click Trash skips the prompt and uses the exact mocked Reader deletion route while keeping drafts', async () => {
   const f = fixture({ transport: true }); await f.open(); f.edit('Keep Cmd-click draft');
   f.trash({ metaKey: true }); await tick();
@@ -657,4 +671,23 @@ test('watch-page Ctrl/Alt/Shift Trash clicks preserve the cancellable confirmati
     f.button('Cancel').click(); await tick(); assert.equal(f.docs.has('doc-a'), true);
     assert.equal(f.messages.filter(m => m.type === 'reader-panel-delete').length, 0);
   }
+});
+
+test('pending panel and temporary hover auto-update when the new summary arrives', async () => {
+  for (const surface of ['open', 'hover']) {
+    const f = fixture(); f.responder = () => ({ ok: true, document: null, summaryState: 'pending' });
+    await f[surface](); assert.match(f.byClass(surface === 'open' ? 'status' : 'peek-summary').textContent, /preparing.*automatically/);
+    f.responder = (message, normal) => normal();
+    f.change({ readerSummaryJobs: { oldValue: { [A]: { status: 'pending' } }, newValue: { [A]: { id: 'doc-a', status: 'ready' } } } }); await tick();
+    assert.equal(f.byClass(surface === 'open' ? 'summary' : 'peek-summary').textContent, 'Summary A');
+    assert.equal(f.messages.length, 2);
+  }
+});
+test('automatic summary refresh preserves an unsaved panel note and does not submit it', async () => {
+  const f = fixture(); f.docs.get('doc-a').summary = ''; await f.open(); f.button('Note').click(); f.edit('Keep this draft');
+  f.docs.get('doc-a').summary = 'Generated later';
+  f.change({ readerSummaryJobs: { oldValue: { [A]: { status: 'pending' } }, newValue: { [A]: { id: 'doc-a', status: 'ready' } } } }); await tick();
+  assert.equal(f.value, 'Keep this draft'); assert.equal(f.byClass('summary').textContent, 'Generated later');
+  assert.equal(f.byId('reader-note-tab').attrs['aria-selected'], 'true');
+  assert.equal(f.messages.filter(m => m.type === 'reader-panel-save-note').length, 0);
 });

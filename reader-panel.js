@@ -250,7 +250,6 @@
       onInput(value) { const s = current(); if (s) { clearFeedback(s); C.edit(s, value); render(); } },
       onEscape() { if (current()?.deleteConfirm) cancelDeletion(); else dismiss(true); }
     });
-    editor.append(note.frame);
     const conflict = element('div', '', noteView, { class: 'conflict' });
     element('p', 'Reader has a different note. Your draft is preserved in the editor.', conflict);
     const remote = element('div', '', conflict, { class: 'remote' });
@@ -305,7 +304,7 @@
       const tab = event.key === 'Home' ? 'summary' : event.key === 'End' ? 'note' : current()?.tab === 'note' ? 'summary' : 'note';
       selectTab(tab, true);
     });
-    refresh.addEventListener('click', () => void load());
+    refresh.addEventListener('click', () => void load(false, false, true));
     trash.addEventListener('click', event => selectLocation('trash', event.metaKey === true));
     cancelDelete.addEventListener('click', cancelDeletion);
     confirmDelete.addEventListener('click', () => void deleteDocument());
@@ -319,7 +318,7 @@
     save.addEventListener('click', () => void saveNote());
     useRemote.addEventListener('click', () => resolveConflict(false));
     keepDraft.addEventListener('click', () => resolveConflict(true));
-    view = { header, content, toggle, dot, body, close, refresh, link, trash, settings, watchList, more, moreMenu, location: locationButton, locationLabel, locationMenu, locationItems, status, next, details, summary, tags, tagToggle, tagName, tagCount, tagTotal, summaryTab, noteTab, noteDot, summaryView, noteView, note, conflict, remote, save, dirty,
+    view = { header, content, toggle, dot, body, close, refresh, link, trash, settings, watchList, more, moreMenu, location: locationButton, locationLabel, locationMenu, locationItems, status, next, details, summary, tags, tagToggle, tagName, tagCount, tagTotal, summaryTab, noteTab, noteDot, summaryView, noteView, editor, note, conflict, remote, save, dirty,
       deletion, deleteTitle, deleteIdentity, deleteDraft, cancelDelete, confirmDelete };
     // Only listeners inside the closed root can inspect its internal targets.
     // A document listener sees the host instead; hiding the menu there on
@@ -355,6 +354,13 @@
     view.noteView.hidden = s?.tab !== 'note';
     if (!s) return;
     const confirming = Boolean(s.deleteConfirm);
+    // A detached iframe has no browsing context to initialize or inject into.
+    // Summary/closed-panel renders do not need the script-free note frame.
+    // Once opened, retain the same frame to preserve native focus/selection.
+    if (open && s.tab === 'note' && !confirming) {
+      if (view.note.frame.parentElement !== view.editor) view.editor.append(view.note.frame);
+      view.note.mount();
+    }
     if (menu && (menu.url !== activeUrl || menu.id !== s.doc?.id || confirming)) closeMenu();
     view.location.disabled = s.busy || !s.doc || confirming || Boolean(s.locationUncertain);
     view.more.disabled = confirming;
@@ -392,7 +398,7 @@
     if (s.doc) view.link.href = C.readerUrl(s.doc.id);
     else view.link.removeAttribute('href');
     view.details.hidden = confirming || (!s.doc && !s.dirty);
-    view.summary.textContent = s.doc?.summary || 'Summary not available yet. Reader may still be processing it, or automatic summaries may be disabled. Try Refresh later.';
+    view.summary.textContent = s.doc?.summary || (s.summaryState ? C.summaryMessage({ summaryState: s.summaryState }) : '') || 'Summary not available yet. Reader may still be processing it, or automatic summaries may be disabled. Try Refresh later.';
     const tags = s.doc?.tags || [];
     view.tagToggle.hidden = tags.length === 0;
     view.tagToggle.title = tags.length ? tags.join(', ') : 'Tags';
@@ -419,7 +425,7 @@
     placePopover();
     positionMenu();
   };
-  const load = async (nextPage = false, retried = false) => {
+  const load = async (nextPage = false, retried = false, fresh = false) => {
     if (!sameVideo()) return;
     const url = activeUrl, s = current();
     if (!s || s.busy || s.deleteConfirm) return;
@@ -428,7 +434,7 @@
     clearFeedback(s); s.statusKind = 'info'; s.action = 'read';
     s.busy = true; s.status = 'Checking Reader…'; render();
     const request = ++s.request, readingVisit = visit;
-    const response = await send({ type: 'reader-panel-get', pageUrl: url, cursor: nextPage ? s.cursor : null, visit: readingVisit });
+    const response = await send({ type: 'reader-panel-get', pageUrl: url, cursor: nextPage ? s.cursor : null, visit: readingVisit, fresh });
     sameVideo();
     if (s.request !== request) return;
     s.busy = false; s.loaded = response.code !== 'invalid_sender';
@@ -437,22 +443,28 @@
     if (response.code === 'invalid_sender' && !retried && open && url === activeUrl && visit === readingVisit) {
       s.status = 'Checking Reader…';
       s.retryTimer = setTimeout(() => {
-        if (open && visit === readingVisit && activeUrl === url && s.request === request && !s.busy) void load(nextPage, true);
+        if (open && visit === readingVisit && activeUrl === url && s.request === request && !s.busy) void load(nextPage, true, fresh);
       }, 250);
       render(); return;
     }
+    s.summaryState = response.summaryState;
     if (response.ok && response.document) {
       s.fetchedAt = Date.now(); s.locationUncertain = false;
       C.receive(s, response.document); s.cursor = null;
       s.status = s.conflict ? 'Reader changed. Review the note conflict before saving.' : '';
       s.statusKind = s.conflict ? 'warning' : 'info';
+    } else if (response.ok && response.summaryState === 'pending') {
+      s.cursor = null; s.status = C.summaryMessage(response);
     } else if (response.ok) {
       if (s.doc) C.removed(s, s.doc.id);
       s.conflict = null; s.cursor = response.nextCursor;
       s.status = s.cursor ? 'Not found in the videos checked so far. Search the next page, or save using the existing video overlay.'
         : 'No matching saved video found. Save using the existing video overlay, then Refresh. Documents outside Reader’s video category can be opened in Reader.';
     } else { s.status = messageFor(response); s.statusKind = 'error'; }
-    if (url === activeUrl) render();
+    if (url === activeUrl) {
+      render();
+      if (s.summaryRefresh && open) { s.summaryRefresh = false; void load(); }
+    }
   };
   const selectLocation = async (value, skipConfirmation = false) => {
     const selected = menu;
@@ -492,7 +504,7 @@
       s.locationUncertain = response.ok || ['location_uncertain', 'location_cache_error'].includes(response.code);
       s.status = messageFor(response.ok ? { code: 'location_uncertain' } : response); s.statusKind = 'error';
     }
-    if (url === activeUrl) render();
+    if (url === activeUrl) { render(); if (s.summaryRefresh && open) { s.summaryRefresh = false; void load(); } }
   };
   const saveNote = async () => {
     if (!sameVideo()) return;
@@ -515,7 +527,7 @@
       if (response.code === 'not_found') s.doc = null;
       s.status = messageFor(response); s.statusKind = 'error';
     }
-    if (url === activeUrl) render();
+    if (url === activeUrl) { render(); if (s.summaryRefresh && open) { s.summaryRefresh = false; void load(); } }
   };
   const requestDeletion = (skipConfirmation = false) => {
     if (!sameVideo()) return;
@@ -590,7 +602,7 @@
     if (!enabled || !supported || document.fullscreenElement) { dismiss(); host?.remove(); return; }
     if (!host) createView();
     if (host.parentElement !== document.documentElement) document.documentElement.append(host);
-    view.note.mount(); applyTheme();
+    applyTheme();
     render();
     if (changed && open && readIfOpen && !current()?.busy) void load();
   };
@@ -607,6 +619,22 @@
     if (area !== 'local') return;
     if (changes.readerPanelTheme) { theme = ['light', 'dark'].includes(changes.readerPanelTheme.newValue) ? changes.readerPanelTheme.newValue : 'system'; applyTheme(); }
     if (changes.showReaderPanel) { enabled = changes.showReaderPanel.newValue === true; schedule(); }
+    if (changes.readerSummaryJobs) {
+      peek?.summariesChanged(changes.readerSummaryJobs);
+      const { oldValue = {}, newValue = {} } = changes.readerSummaryJobs;
+      for (const [url, s] of states) {
+        const job = newValue[url];
+        if (!job || JSON.stringify(job) === JSON.stringify(oldValue[url])) continue;
+        if (s.doc && job.id && s.doc.id !== job.id) continue;
+        s.loaded = false; s.summaryState = job.status;
+        if (url !== activeUrl || !open || s.deleteConfirm) continue;
+        if (job.status === 'ready') {
+          if (s.busy) s.summaryRefresh = true; else void load();
+        } else if (!s.busy && !s.doc?.summary) {
+          s.status = job.code ? messageFor(job) : C.summaryMessage(job); s.statusKind = job.code ? 'error' : 'info'; render();
+        }
+      }
+    }
     if (changes.readerToken) {
       closeMenu(); peek?.invalidate();
       for (const s of states.values()) { clearTimeout(s.retryTimer); clearFeedback(s); s.deleteConfirm = null; s.loaded = false; s.doc = null; s.conflict = null; s.request++; s.busy = false; }

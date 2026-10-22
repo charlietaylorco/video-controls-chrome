@@ -39,6 +39,9 @@
     const hours = Math.floor(seconds / 3600), minutes = Math.floor(seconds / 60) % 60;
     return `${hours ? `${hours}:${String(minutes).padStart(2, '0')}` : Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
   };
+  const summaryMessage = state => state?.summaryState === 'pending' || state?.status === 'pending'
+    ? 'Reader is preparing your summary. It will appear here automatically when ready.'
+    : 'Summary is not ready yet. Automatic checks have finished. Refresh later to check Reader.';
   const cleanDocument = (doc, videoUrl) => {
     if (!doc || !validId(doc.id) || doc.is_deleted || doc.parent_id || canonical(doc.source_url) !== videoUrl) return null;
     const tags = Array.isArray(doc.tags) ? doc.tags : Object.entries(doc.tags || {}).map(([key, tag]) =>
@@ -73,7 +76,7 @@
     if (!state.dirty) state.value = state.base = '';
     return true;
   };
-  const api = { youtubeOrigin, pageKey, canonical, validId, readerUrl, locations, locationLabel, rateLimitMessage, durationSeconds, formatVideoDuration, cleanDocument, draft, edit, receive, saved, removed };
+  const api = { youtubeOrigin, pageKey, canonical, validId, readerUrl, locations, locationLabel, rateLimitMessage, summaryMessage, durationSeconds, formatVideoDuration, cleanDocument, draft, edit, receive, saved, removed };
   globalThis.MVSReaderCore = api;
   if (typeof module !== 'undefined') module.exports = api;
 })();

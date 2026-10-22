@@ -1,12 +1,15 @@
-importScripts("x-video-download.js", "reader-core.js", "reader-watch-core.js", "reader-watch-store.js", "reader-service.js", "reader-watch-service.js");
+importScripts("x-video-download.js", "reader-core.js", "reader-watch-core.js", "reader-watch-store.js", "reader-service.js", "reader-watch-service.js", "reader-summary-service.js", "watch-timer-core.js", "watch-timer-service.js");
 
 let readerPanelService, readerWatchStore, readerWatchService, watchRevision = 0, watchAuthRevision = 0;
 chrome.storage?.onChanged?.addListener((changes, area) => {
-  if (area === 'local' && changes.readerToken) watchAuthRevision++;
+  if (area === 'local' && changes.readerToken) { watchAuthRevision++; void readerPanelService?.invalidateAuth(); }
 });
 const getReaderWatchStore = () => readerWatchStore ||= MVSReaderWatchStore.create({ storage: chrome.storage.local,
   notify: videoUrl => new Promise(resolve => chrome.storage.local.set({ readerWatchChanged: { videoUrl, at: Date.now(), revision: ++watchRevision } }, resolve)) });
-const getReaderPanelService = () => readerPanelService ||= MVSReaderService.create({ storage: chrome.storage.local, fetch, history: getReaderWatchStore() });
+const getReaderPanelService = () => readerPanelService ||= MVSReaderSummaryService.create({ storage: chrome.storage.local, alarms: chrome.alarms,
+  reader: MVSReaderService.create({ storage: chrome.storage.local, fetch, history: getReaderWatchStore() }) });
+chrome.alarms?.onAlarm?.addListener(alarm => { if (alarm.name === 'reader-summary') void getReaderPanelService().resume(); });
+if (chrome.alarms) void getReaderPanelService().resume();
 const getReaderWatchService = () => readerWatchService ||= MVSReaderWatchService.create({ store: getReaderWatchStore(), reader: getReaderPanelService() });
 
 const DOWNIE_PREFIX = "downie://XUOpenLink?url=";
@@ -20,6 +23,10 @@ const DOWNIE_SENT_URLS_KEY = "downieSentUrls";
 const MAX_DOWNIE_SENT_URLS = 2000;
 const FEED_URL = chrome.runtime.getURL("feed.html");
 const WATCH_URL = chrome.runtime.getURL("watch.html");
+let viewingTimerService;
+const getViewingTimerService = () => viewingTimerService ||= MVSWatchTimerService.create({ storage: chrome.storage.local, alarms: chrome.alarms });
+chrome.alarms?.onAlarm?.addListener(alarm => { if (alarm.name === 'watch-viewing-timer') void getViewingTimerService().handle({ action: 'get' }); });
+if (chrome.alarms && globalThis.MVSWatchTimerService) void getViewingTimerService().handle({ action: 'get' });
 const openingRecentSaves = new Map();
 const openRecentSaves = (sourceTab) => {
   const privateContext = Boolean(sourceTab?.incognito);
@@ -526,6 +533,14 @@ const pickTargetUrl = (message, sender) => {
 };
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === 'viewing-timer') {
+    const active = sender.id === chrome.runtime.id && (sender.frameId === undefined || sender.frameId === 0) &&
+      (!sender.documentLifecycle || sender.documentLifecycle === 'active');
+    const controls = sender.url === WATCH_URL;
+    const reminder = Boolean(MVSReaderCore.youtubeOrigin(sender.url)) && ['get', 'expire', 'dismiss'].includes(message.action);
+    if (!active || (!controls && !reminder)) { sendResponse({ ok: false, code: 'invalid_sender' }); return undefined; }
+    getViewingTimerService().handle(message).then(sendResponse); return true;
+  }
   const recentCardAction = message?.type === "watch-card-action";
   if (recentCardAction) {
     const target = MVSReaderCore.canonical(message.pageUrl);
@@ -811,6 +826,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         result = null;
       }
 
+      // Publish the delay before saved flags can provoke an open surface's read.
+      let existingSummary = false;
+      try { existingSummary = Boolean(await getReaderWatchStore().cachedSummary(MVSReaderCore.canonical(targetUrl), result?.id)); } catch { /* optional cache */ }
+      try { await getReaderPanelService().recordSave(targetUrl, result?.id, { alreadyExists: response.status === 200, existingSummary }); } catch { /* optional summary refresh */ }
       // Serialize flags with panel deletion invalidation. Saving stays successful
       // if the optional document index is unavailable.
       try { await getReaderPanelService().remember(targetUrl, result?.id, () => markReaderUrlSaved(targetUrl, result?.url)); }

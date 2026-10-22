@@ -511,3 +511,17 @@ test('saved-card Ctrl/Alt/Shift alone preserve confirmation and cancelling never
     assert.equal(f.byClass('confirmation').hidden, true); assert.equal(f.messages.filter(m => m.type === 'reader-card-delete').length, 0);
   }
 });
+
+test('new-save pending hover updates in place on summary readiness without another user hover', async () => {
+  const f = fixture(); f.responder = () => ({ ok: true, document: null, summaryState: 'pending' });
+  await f.hover(); assert.match(f.byClass('summary').textContent, /preparing.*automatically/);
+  assert.equal(f.byClass('summary').className.includes('error'), false);
+  f.responder = (message, normal) => normal();
+  f.change({ readerSummaryJobs: { oldValue: { [B]: { status: 'pending' } }, newValue: { [B]: { id: 'doc-beta', status: 'ready' } } } }); await tick();
+  assert.match(f.byClass('summary').textContent, /Summary https:/); assert.equal(f.host.hidden, false); assert.equal(f.messages.length, 2);
+});
+test('summary readiness after card navigation cannot reopen or overwrite the current preview', async () => {
+  const f = fixture(); await f.hover(); f.navigate('https://www.youtube.com/feed/library');
+  f.change({ readerSummaryJobs: { newValue: { [B]: { status: 'ready' } } } }); await tick();
+  assert.equal(f.host.hidden, true); assert.equal(f.messages.length, 1);
+});

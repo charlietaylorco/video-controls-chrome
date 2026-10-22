@@ -1249,8 +1249,22 @@
     const clampedRate = clampRate(nextRate);
     getState(video).baseRate = clampedRate;
     setPlaybackRate(video, clampedRate);
-    updateUi(video);
+    if (video === activeVideo) updateUi(video);
   };
+
+  window.MVSYouTubeSpeedKeys?.setStepHandler((video, step) => {
+    // A hover preview is temporary. Keyboard changes adjust its saved rate;
+    // otherwise read the live rate so rapid repeats and native menu changes agree.
+    const rate = previewVideo === video ? getBaseRate(video) : video.playbackRate;
+    try {
+      applyRate(video, rate + step);
+    } catch (error) {
+      // Chromium rejects some rates inside the extension's bounds (notably
+      // below 0.0625x). Keep the saved rate honest and still own this keystroke.
+      getState(video).baseRate = rate;
+      if (!isHandledBrowserDomException(error)) throw error;
+    }
+  });
 
   const isPointInsideRect = (rect, clientX, clientY) =>
     clientX >= rect.left &&
