@@ -4,15 +4,16 @@ const C = require('../reader-core.js');
 const A = 'https://www.youtube.com/watch?v=alpha', B = 'https://www.youtube.com/watch?v=beta';
 const tick = () => new Promise(setImmediate);
 function fixture(retained) {
-  let clock = 100000, sequence = 0, responder;
+  let clock = 100000, sequence = 0, responder, beforeRead;
   const data = retained || { readerToken: 'fixture-token', readerDocuments: { [A]: { id: 'doc-a' }, [B]: { id: 'doc-b' } } };
   const calls = [], timers = new Map(), alarms = new Map(), updates = [];
   const storage = { get(defaults, cb) { cb(structuredClone({ ...defaults, ...data })); }, set(values, cb) { Object.assign(data, structuredClone(values)); updates.push(structuredClone(values)); cb(); } };
   const context = vm.createContext({ MVSReaderCore: C });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../reader-summary-service.js'), 'utf8'), context);
   const reader = { remember() {}, savedState() {}, async handle(message, context) {
-    calls.push(message);
+    await beforeRead?.(message);
     if (!await context.isCurrent()) return { ok: false, code: 'invalid_sender' };
+    calls.push(message);
     const result = await (responder ? responder(message) : { ok: true, document: { id: message.pageUrl === B ? 'doc-b' : 'doc-a', videoUrl: message.pageUrl, summary: 'Ready', notes: 'Private note' } });
     return await context.isCurrent() ? result : { ok: false, code: 'invalid_sender' };
   } };
@@ -22,6 +23,7 @@ function fixture(retained) {
   let service = context.MVSReaderSummaryService.create(options);
   return { calls, data, updates, timers, alarms, get service() { return service; }, get clock() { return clock; },
     set responder(fn) { responder = fn; }, async advance(ms) { clock += ms; await service.resume(); await tick(); },
+    set beforeRead(fn) { beforeRead = fn; },
     read(type = 'reader-panel-get', isCurrent = () => true, url = A) { return service.handle({ type, pageUrl: url, targetUrl: type === 'reader-card-get' ? url : undefined }, { isCurrent }); },
     async restart() { timers.clear(); service = context.MVSReaderSummaryService.create(options); await service.resume(); },
     save(url = A, id = 'doc-a', options) { return service.recordSave(url, id, options); },
@@ -117,4 +119,51 @@ test('a killed in-flight attempt is consumed durably and a long cooldown stops w
   const limited = fixture(); await limited.save(); limited.responder = () => ({ ok: false, code: 'rate_limited', retryAt: limited.clock + 600000 });
   await limited.advance(15000); assert.equal(limited.data.readerSummaryJobs[A].status, 'unavailable');
   await limited.advance(900000); assert.equal(limited.calls.length, 1);
+});
+
+test('successful explicit refresh clears terminal auth errors without restarting automatic checks', async () => {
+  for (const code of ['unauthorized', 'auth_changed']) for (const summary of ['Recovered summary', '']) {
+    const f = fixture(); await f.save();
+    if (code === 'auth_changed') { f.data.readerToken = 'replacement-token'; await f.service.invalidateAuth(); }
+    else { f.responder = () => ({ ok: false, code }); await f.advance(15000); }
+    assert.equal((await f.read()).code, code);
+    const attempts = f.data.readerSummaryJobs[A].attempts;
+    f.responder = () => ({ ok: true, document: { id: 'doc-a', videoUrl: A, summary } });
+    const fresh = await f.service.handle({ type: 'reader-panel-get', pageUrl: A, fresh: true });
+    assert.equal(fresh.ok, true);
+    const job = f.data.readerSummaryJobs[A];
+    assert.equal(job.status, summary ? 'ready' : 'unavailable'); assert.equal(job.code, null);
+    assert.equal(job.retryAt, null); assert.equal(job.rateLimitSource, null); assert.equal(job.attempts, attempts);
+    const calls = f.calls.length;
+    assert.equal((await f.read('reader-card-get')).document.summary, summary); assert.equal(f.calls.length, calls);
+    await f.restart(); assert.equal(f.calls.length, calls);
+    assert.equal((await f.read()).ok, true);
+    await f.advance(600000); assert.equal(f.calls.length, calls + 1); assert.equal(f.alarms.size, 0);
+  }
+});
+
+test('queued shared reads require a current consumer before spending an API request', async () => {
+  for (const keepSecond of [false, true]) {
+    const f = fixture(); await f.save(); await f.advance(15000); await f.restart();
+    let release, firstCurrent = true, secondCurrent = true;
+    f.beforeRead = () => new Promise(resolve => { release = resolve; });
+    const first = f.read('reader-panel-get', () => firstCurrent);
+    const second = f.read('reader-card-get', () => secondCurrent);
+    await tick(); firstCurrent = false; secondCurrent = keepSecond; release();
+    assert.equal((await first).code, 'invalid_sender');
+    assert.equal((await second).ok, keepSecond); assert.equal(f.calls.length, keepSecond ? 2 : 1);
+    f.beforeRead = null;
+    assert.equal((await f.read()).document.summary, 'Ready'); assert.equal(f.calls.length, 2);
+  }
+});
+
+test('a shared reply with no remaining current consumers cannot populate the memory cache', async () => {
+  const f = fixture(); await f.save(); await f.advance(15000); await f.restart();
+  let release, current = true;
+  f.responder = () => new Promise(resolve => { release = resolve; });
+  const work = f.read('reader-panel-get', () => current); await tick(); current = false;
+  release({ ok: true, document: { id: 'doc-a', videoUrl: A, summary: 'Stale response' } });
+  assert.equal((await work).code, 'invalid_sender');
+  f.responder = () => ({ ok: true, document: { id: 'doc-a', videoUrl: A, summary: 'Current response' } });
+  assert.equal((await f.read()).document.summary, 'Current response'); assert.equal(f.calls.length, 3);
 });

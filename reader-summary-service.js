@@ -129,25 +129,49 @@
       // Ready/terminal jobs do not start another automatic schedule. Explicit
       // reads keep the existing refresh behavior (and service rate limits).
       const key = JSON.stringify([url, job.id, data.readerToken, job.savedAt]);
-      if (!fetching.has(key)) {
-        const isCurrent = async () => {
-          const latest = await read({ [KEY]: {}, readerToken: '', readerDocuments: {}, readerDeletedVideos: {} });
-          return latest.readerToken === data.readerToken && latest[KEY][url]?.savedAt === job.savedAt && latest[KEY][url]?.id === job.id &&
-            !latest.readerDeletedVideos[url] && (!job.id || !latest.readerDocuments[url]?.id || latest.readerDocuments[url].id === job.id);
+      const consumer = { isCurrent: context.isCurrent || (() => true) };
+      let shared = fetching.get(key);
+      if (!shared) {
+        shared = { consumers: new Set([consumer]), work: null };
+        const currentJob = latest => latest.readerToken === data.readerToken && latest[KEY][url]?.savedAt === job.savedAt && latest[KEY][url]?.id === job.id &&
+          !latest.readerDeletedVideos[url] && (!job.id || !latest.readerDocuments[url]?.id || latest.readerDocuments[url].id === job.id);
+        const hasCurrentConsumer = async () => {
+          for (const attached of shared.consumers) {
+            try { if (await attached.isCurrent()) return true; } catch { /* A failed lease is no longer current. */ }
+          }
+          return false;
         };
-        const work = reader.handle(message, { isCurrent, scope: 'summary-shared-read' }).then(async reply => {
-          const current = await read({ [KEY]: {}, readerToken: '' });
-          if (current.readerToken === data.readerToken && current[KEY][url]?.savedAt === job.savedAt && current[KEY][url]?.id === job.id && !['invalid_sender', 'auth_changed'].includes(reply.code))
+        const defaults = { [KEY]: {}, readerToken: '', readerDocuments: {}, readerDeletedVideos: {} };
+        const isCurrent = async () => currentJob(await read(defaults)) && await hasCurrentConsumer();
+        // Keep every consumer's lease available to the underlying queue, so a
+        // navigated first caller cannot cancel another caller or keep stale work alive.
+        shared.work = Promise.resolve().then(() => reader.handle(message, { isCurrent, scope: 'summary-shared-read' })).then(reply => serial(async () => {
+          const latest = await read(defaults);
+          if (!currentJob(latest) || !await hasCurrentConsumer()) return { ok: false, code: 'invalid_sender' };
+          if (!['invalid_sender', 'auth_changed'].includes(reply.code))
             cache.set(url, { reply, at: now(), savedAt: job.savedAt, jobId: job.id, token: data.readerToken });
+          if (reply.ok) {
+            // A successful manual read recovers a terminal error durably. An
+            // empty summary remains terminal; it does not restart the schedule.
+            const jobs = { ...latest[KEY] }, recovered = { ...jobs[url],
+              status: reply.document?.summary?.trim() ? 'ready' : 'unavailable', code: null, retryAt: null, rateLimitSource: null };
+            if (JSON.stringify(jobs[url]) !== JSON.stringify(recovered)) { jobs[url] = recovered; await save(jobs); }
+          }
           return reply;
-        });
-        fetching.set(key, work); work.finally(() => fetching.delete(key));
+        }));
+        fetching.set(key, shared);
+        const clear = () => { if (fetching.get(key) === shared) fetching.delete(key); };
+        shared.work.then(clear, clear);
+      } else {
+        shared.consumers.add(consumer);
       }
-      const reply = await fetching.get(key);
-      if (!await (context.isCurrent?.() ?? true)) return { ok: false, code: 'invalid_sender' };
-      const latest = await read({ [KEY]: {}, readerToken: '', readerDocuments: {}, readerDeletedVideos: {} });
-      return !latest.readerDeletedVideos[url] && (!job.id || !latest.readerDocuments[url]?.id || latest.readerDocuments[url].id === job.id) && latest.readerToken === data.readerToken && latest[KEY][url]?.savedAt === job.savedAt && latest[KEY][url]?.id === job.id
-        ? reply : { ok: false, code: 'invalid_sender' };
+      try {
+        const reply = await shared.work;
+        if (!await consumer.isCurrent()) return { ok: false, code: 'invalid_sender' };
+        const latest = await read({ [KEY]: {}, readerToken: '', readerDocuments: {}, readerDeletedVideos: {} });
+        return !latest.readerDeletedVideos[url] && (!job.id || !latest.readerDocuments[url]?.id || latest.readerDocuments[url].id === job.id) && latest.readerToken === data.readerToken && latest[KEY][url]?.savedAt === job.savedAt && latest[KEY][url]?.id === job.id
+          ? reply : { ok: false, code: 'invalid_sender' };
+      } finally { shared.consumers.delete(consumer); }
     };
     return { recordSave, resume, invalidateAuth, summaryStates: async () => (await read({ [KEY]: {} }))[KEY], handle: (message, context) => handle(message, context).catch(() => ({ ok: false, code: 'storage_error' })), remember: (...args) => reader.remember(...args), savedState: (...args) => reader.savedState(...args) };
   };

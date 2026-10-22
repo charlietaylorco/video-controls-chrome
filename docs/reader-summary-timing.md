@@ -18,6 +18,8 @@ These findings come from tracing the actual production routes and synthetic tran
 
 ## Validation
 
+Merge review on 2026-10-22 added three regressions for terminal authentication recovery and shared-consumer cancellation. A successful explicit refresh now clears the persisted terminal error (remaining terminal when the summary is empty), so ordinary reads recover across worker restarts without restarting polling. Shared reads retain each caller's validity check; queued requests and cache publication require at least one current consumer. All three regressions failed before the fixes; all 156 focused Reader/summary/IndexedDB/panel checks pass afterward.
+
 `npm test`: fake clock, mock HTTP, mock Chrome messaging/storage/alarms, DOM controllers, and fake IndexedDB. New cases cover 14,999/15,000ms boundaries; repeated hover/panel/Watch requests; successful delayed summary; empty/missing documents; bounded retries; 429 cooldown; API/network/auth failures; suspension/reopen/expired jobs; concurrent saves; shared requests with a navigated first or second consumer; stale replacements; 201 versus 200/failed saves; explicit refresh; note cache invalidation; automatic hover/panel/Recent saves updates; and retained dirty notes. Existing playback, save, deletion, tags/search and shortcut regressions also run.
 
 No browser tabs or the extension were reloaded. Real Reader generation timing and live YouTube layout remain untested. To try the updated preview, first copy any unsaved Reader note drafts, reload only this extension in Arc's extensions page, then reload the YouTube/Recent saves tabs you choose to test. The code update alone does not refresh already-injected scripts.
