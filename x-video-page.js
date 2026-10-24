@@ -9,12 +9,7 @@
     : null;
   const boundedText = (value, length) => typeof value === "string" ? value.slice(0, length) : undefined;
 
-  const detailsForDownloadUrl = (props) => {
-    // The logged-out Relay player supplies a single complete MP4 separately
-    // from its HLS src. Never infer an MP4 URL from streaming fragments.
-    if (typeof props?.downloadUrl !== "string" || props.downloadUrl.length > 4096) return null;
-    const selectedMediaId = mediaId(props.downloadUrl);
-    if (!selectedMediaId) return null;
+  const metadataForPlayer = (props, selectedMediaId) => {
     for (const source of [props.src, props.content?.mediaAssetUrl]) {
       const sourceMediaId = mediaId(source);
       if (sourceMediaId && sourceMediaId !== selectedMediaId) return null;
@@ -36,7 +31,16 @@
             !url.username && !url.password && !url.port && match?.[2] === metadata.tweetId) metadata.handle = match[1];
       } catch {}
     }
-    return { variants: [{ url: props.downloadUrl, type: "video/mp4" }], metadata };
+    return metadata;
+  };
+
+  const detailsForDownloadUrl = (props) => {
+    // Some logged-out players supply one MP4 separately from the HLS src.
+    if (typeof props?.downloadUrl !== "string" || props.downloadUrl.length > 4096) return null;
+    const selectedMediaId = mediaId(props.downloadUrl);
+    if (!selectedMediaId) return null;
+    const metadata = metadataForPlayer(props, selectedMediaId);
+    return metadata && { variants: [{ url: props.downloadUrl, type: "video/mp4" }], metadata };
   };
 
   const metadataFromTweet = (tweet) => {
@@ -51,15 +55,37 @@
     };
   };
 
-  const metadataForRelayFiber = (fiber, tweetId) => {
-    if (typeof tweetId !== "string" || !/^\d{1,25}$/.test(tweetId)) return null;
-    // Relay props are fragment references. Its resolved post text is in a
-    // hook snapshot on this player's ancestor chain. Read only matching post
-    // data; never traverse the environment, store, or other timeline records.
+  function* relaySnapshots(fiber) {
+    // Read only resolved snapshots on the player's ancestor chain. Never
+    // traverse fragment owners, the environment/store, or timeline records.
     const visited = new Set();
     for (let hook = fiber.memoizedState; hook && !visited.has(hook) && visited.size < 64; hook = hook.next) {
       visited.add(hook);
-      const tweet = hook.memoizedState?.snapshot?.data;
+      yield hook.memoizedState?.snapshot?.data;
+    }
+  }
+
+  const normalizeVariants = (variants) => variants.slice(0, 32).map((variant) => ({
+    url: variant?.src || variant?.url,
+    type: variant?.type || variant?.content_type || variant?.contentType,
+    bitrate: variant?.bitrate ?? variant?.bit_rate
+  }));
+
+  const variantsForRelayFiber = (fiber, selectedMediaId) => {
+    if (!selectedMediaId) return null;
+    for (const data of relaySnapshots(fiber)) {
+      // X omits downloadUrl for some posts, but this resolved inline fragment
+      // still contains the complete rendition list, alongside its HLS URL.
+      const media = data?.__fragments?.useMediaVideoPlayerProps_media;
+      if (media?.id_str !== selectedMediaId || !Array.isArray(media.video_info?.variants)) continue;
+      return normalizeVariants(media.video_info.variants);
+    }
+    return null;
+  };
+
+  const metadataForRelayFiber = (fiber, tweetId) => {
+    if (typeof tweetId !== "string" || !/^\d{1,25}$/.test(tweetId)) return null;
+    for (const tweet of relaySnapshots(fiber)) {
       if (tweet?.rest_id !== tweetId) continue;
       const metadata = metadataFromTweet(tweet);
       if (metadata.text !== undefined) return metadata;
@@ -94,6 +120,7 @@
       if (!key) continue;
       let fiber = element[key];
       let variants = null;
+      let playerMediaId = null;
       let playerMetadata = {};
       const visited = new Set();
       // X's player can have over 90 ancestors before the tweet props. Follow
@@ -101,14 +128,19 @@
       for (; fiber && !visited.has(fiber) && visited.size < 512; fiber = fiber.return) {
         visited.add(fiber);
         const props = fiber.memoizedProps;
-        if (!variants && Array.isArray(props?.variants)) {
-          variants = props.variants.slice(0, 32).map((variant) => ({
-            url: variant?.src || variant?.url,
-            type: variant?.type || variant?.content_type || variant?.contentType,
-            bitrate: variant?.bitrate ?? variant?.bit_rate
-          }));
+        if (!variants && !playerMediaId) {
+          const sourceId = mediaId(props?.src) || mediaId(props?.content?.mediaAssetUrl);
+          if (sourceId) {
+            const metadata = metadataForPlayer(props, sourceId);
+            if (!metadata) return { variants: [], metadata: {} };
+            playerMediaId = sourceId;
+            playerMetadata = metadata;
+          }
         }
-        if (!variants && props?.downloadUrl !== undefined) {
+        if (!variants && Array.isArray(props?.variants)) {
+          variants = normalizeVariants(props.variants);
+        }
+        if (!variants && props?.downloadUrl != null) {
           const details = detailsForDownloadUrl(props);
           // An invalid/recycled player source must not fall through to a
           // wider ancestor that could belong to a different video.
@@ -116,7 +148,12 @@
           variants = details.variants;
           playerMetadata = details.metadata;
         }
+        if (!variants) variants = variantsForRelayFiber(fiber, playerMediaId);
         if (variants) {
+          if (playerMediaId && variants.some((variant) => {
+            const id = mediaId(variant.url);
+            return id && id !== playerMediaId;
+          })) return { variants: [], metadata: {} };
           const selectedMediaId = variants.map((variant) => mediaId(variant.url)).find(Boolean);
           const metadata = metadataForTweet(props?.tweet, selectedMediaId);
           if (metadata) return { variants, metadata };

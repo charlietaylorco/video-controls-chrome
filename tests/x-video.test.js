@@ -373,6 +373,98 @@ test('logged-out Relay player downloads its supplied MP4 through the existing au
   assert.deepEqual(response.variants, [], 'HLS alone cannot supply a complete MP4');
 });
 
+test('logged-out Relay inline media supplies renditions when downloadUrl is null or absent', async () => {
+  let request;
+  let response;
+  class Video {
+    isConnected = true;
+    getAttribute() { return '12345678-1234-1234-1234-123456789abc'; }
+    dispatchEvent(event) { response = JSON.parse(event.detail); }
+  }
+  vm.runInNewContext(fs.readFileSync(path.join(root, 'x-video-page.js'), 'utf8'), {
+    URL, window: {}, HTMLVideoElement: Video,
+    CustomEvent: class { constructor(type, options) { this.detail = options.detail; } },
+    document: { addEventListener(type, listener) { request = listener; } }
+  });
+  const id = '123456789';
+  const tweetId = '1111111111111111111';
+  const hls = `https://video.twimg.com/amplify_video/${id}/pl/playlist.m3u8`;
+  const hook = (data, next = null) => ({ memoizedState: { snapshot: { data } }, next });
+  // Observed in Arc: no direct player variants or download URL; the resolved
+  // inline-data fragment on the media ancestor has HLS plus three full MP4s.
+  const media = { id_str: id, video_info: { variants: [
+    { url: hls, content_type: 'application/x-mpegURL', bitrate: null },
+    ...[variant(360, 270), variant(480, 360), variant(960, 720)].map(({ type, ...item }) => ({ ...item, content_type: type }))
+  ] } };
+  const snapshot = { __fragments: { useMediaVideoPlayerProps_media: media } };
+  for (const object of [snapshot, media]) Object.defineProperty(object, '__fragmentOwner', {
+    get() { assert.fail('must not traverse fragment owners'); }
+  });
+  const mediaHook = hook(snapshot);
+  Object.defineProperty(mediaHook.memoizedState, 'environment', { get() { assert.fail('must not read Relay store'); } });
+  const tweet = { rest_id: tweetId, details: { full_text: 'Selected post text' },
+    core: { user_results: { result: { core: { screen_name: 'example', name: 'Example Person' } } } } };
+  const post = { memoizedProps: {}, memoizedState: hook(tweet) };
+  const mediaFiber = { memoizedProps: { media: { __id: 'fragment-reference' } }, memoizedState: mediaHook, return: post };
+  const props = { src: hls, downloadUrl: null,
+    content: { contentId: id, tweetId, mediaAssetUrl: hls, displayMetadata: { artist: 'Fallback Name' } },
+    mediaPermalink: `https://x.com/example/status/${tweetId}/video/1` };
+  const player = { memoizedProps: props, return: mediaFiber };
+  const video = new Video();
+  video.parentElement = { __reactFiber$test: { return: player } };
+  const downloads = [];
+  const api = load({ fetch: rangeFetch(Buffer.concat([ftyp, movie('vide', 'soun'), mdat])),
+    chrome: { downloads: { async download(options) { downloads.push(options); return 42; } } } });
+  for (const absent of [false, true]) {
+    if (absent) delete props.downloadUrl;
+    request({ target: video });
+    assert.equal(response.variants.length, 4);
+    assert.deepEqual(response.metadata, { handle: 'example', displayName: 'Example Person', tweetId, text: 'Selected post text' });
+    const result = await api.start(response.variants, response.metadata);
+    assert.equal(result.width, 960);
+    assert.equal(result.height, 720);
+    assert.equal(downloads.at(-1).filename, `@example ${tweetId} Example Person Selected post text.mp4`);
+  }
+
+  media.video_info.variants = [variant(1280, 720)];
+  request({ target: video });
+  assert.equal(api.selectBest(response.variants).width, 1280, 'read current fragment at click time');
+
+  // A quote's media snapshot, sibling or wider player's variants cannot be
+  // substituted for this player. Cycles and excessive hooks stay bounded.
+  media.id_str = '999';
+  mediaHook.next = mediaHook;
+  mediaFiber.sibling = { memoizedState: hook({ __fragments: { useMediaVideoPlayerProps_media: { ...media, id_str: id } } }) };
+  post.memoizedProps.variants = [variant(1920, 1080, 1000, '999')];
+  request({ target: video });
+  assert.deepEqual(response.variants, []);
+  delete post.memoizedProps.variants;
+  mediaHook.next = null;
+  media.id_str = id;
+  media.video_info.variants = [variant(1280, 720, 1000, '999')];
+  request({ target: video });
+  assert.deepEqual(response.variants, [], 'reject recycled URLs despite a matching fragment ID');
+  media.video_info.variants = [variant(1280, 720)];
+  mediaFiber.memoizedState = mediaHook;
+  for (let i = 0; i < 64; i++) mediaFiber.memoizedState = hook({}, mediaFiber.memoizedState);
+  request({ target: video });
+  assert.deepEqual(response.variants, [], 'bound hook traversal');
+  mediaFiber.memoizedState = mediaHook;
+  props.content.contentId = '999';
+  request({ target: video });
+  assert.deepEqual(response.variants, [], 'reject mismatched player identity');
+  props.content.contentId = id;
+  delete props.src;
+  delete props.content.mediaAssetUrl;
+  request({ target: video });
+  assert.deepEqual(response.variants, [], 'require a selected player media ID before reading inline renditions');
+  props.src = hls;
+  media.video_info.variants = [{ url: hls, content_type: 'application/x-mpegURL' }];
+  request({ target: video });
+  await assert.rejects(api.start(response.variants, response.metadata), /no_mp4/);
+  assert.equal(downloads.length, 2, 'HLS-only media cannot start a download');
+});
+
 test('logged-out filenames match signed-in filenames using only the selected post Relay snapshot', () => {
   let request;
   let response;
