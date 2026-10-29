@@ -92,7 +92,7 @@
     let section = document.getElementById('cloud-auth');
     if (!section) {
       section = document.createElement('section'); section.id = 'cloud-auth'; section.className = 'cloud-auth';
-      const heading = document.createElement('h1'); heading.textContent = 'Watchlater'; section.append(heading);
+      const heading = document.createElement('h1'); heading.textContent = 'Recent saves'; section.append(heading);
       const lead = document.createElement('p'); lead.textContent = 'Sign in with ChatGPT to open your private library.'; section.append(lead);
       const link = document.createElement('a'); link.className = 'cloud-signin'; link.href = authPath('in'); link.target = '_top'; link.textContent = 'Sign in with ChatGPT'; section.append(link);
       const status = document.createElement('p'); status.id = 'cloud-auth-status'; status.setAttribute('role', 'status'); section.append(status);
