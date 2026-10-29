@@ -109,7 +109,7 @@ test('JSON recovery validates the whole backup before making requests and never 
 });
 
 test('inline player accepts only canonical YouTube targets and never substitutes another host', () => {
-  assert.equal(embedUrl('https://www.youtube.com/watch?v=abc_X-19', 'https://recent.example'), 'https://www.youtube-nocookie.com/embed/abc_X-19?autoplay=1&playsinline=1&rel=0');
+  assert.equal(embedUrl('https://www.youtube.com/watch?v=abc_X-19', 'https://recent.example'), 'https://www.youtube.com/embed/abc_X-19?autoplay=1&playsinline=1&rel=0');
   for (const url of ['javascript:alert(1)', 'https://youtube.com.evil.test/watch?v=abc', 'https://www.youtube.com@evil.test/watch?v=abc', 'https://www.youtube.com/watch?v=<script>', 'http://www.youtube.com/watch?v=abc', 'https://www.youtube.com:444/watch?v=abc', 'https://www.youtube.com/shorts/abc']) assert.equal(embedUrl(url, 'https://recent.example'), null);
   assert.equal(embedUrl('https://www.youtube.com/watch?v=abc', 'file:///tmp/page.html'), null);
 });

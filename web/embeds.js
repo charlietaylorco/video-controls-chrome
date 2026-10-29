@@ -6,7 +6,7 @@
       if (url.protocol !== 'https:' || url.hostname !== 'www.youtube.com' || url.pathname !== '/watch' || url.username || url.password || url.port) return null;
       const id = url.searchParams.get('v');
       if (!id || !/^[\w-]{1,100}$/.test(id) || !['http:', 'https:'].includes(site.protocol)) return null;
-      const embed = new URL(`https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}`);
+      const embed = new URL(`https://www.youtube.com/embed/${encodeURIComponent(id)}`);
       embed.searchParams.set('autoplay', '1'); embed.searchParams.set('playsinline', '1'); embed.searchParams.set('rel', '0');
       return embed.href;
     } catch { return null; }
