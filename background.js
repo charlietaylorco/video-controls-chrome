@@ -4,6 +4,7 @@ let readerPanelService, readerWatchStore, readerWatchService, watchRevision = 0,
 chrome.storage?.onChanged?.addListener((changes, area) => {
   if (area === 'local' && changes.readerToken) { watchAuthRevision++; void readerPanelService?.invalidateAuth(); void recentSavesCloud?.invalidateSource(); }
   if (area === 'local' && changes.recentSavesCloud) updateCloudDestination(changes.recentSavesCloud.newValue);
+  if (area === 'local' && changes.recentSavesOpenWebsite) openWebsiteFromShortcut = changes.recentSavesOpenWebsite.newValue === true;
 });
 const getReaderWatchStore = () => readerWatchStore ||= MVSReaderWatchStore.create({ storage: chrome.storage.local,
   notify: async videoUrl => {
@@ -31,7 +32,7 @@ let viewingTimerService;
 const getViewingTimerService = () => viewingTimerService ||= MVSWatchTimerService.create({ storage: chrome.storage.local, alarms: chrome.alarms });
 chrome.alarms?.onAlarm?.addListener(alarm => { if (alarm.name === 'watch-viewing-timer') void getViewingTimerService().handle({ action: 'get' }); });
 if (chrome.alarms && globalThis.MVSWatchTimerService) void getViewingTimerService().handle({ action: 'get' });
-let recentSavesCloud, sitesSyncBridge, cloudWatchUrl = null, cloudDestinationRevision = 0;
+let recentSavesCloud, sitesSyncBridge, cloudWatchUrl = null, cloudDestinationRevision = 0, openWebsiteFromShortcut = false;
 const getSitesSyncBridge = () => sitesSyncBridge ||= globalThis.MVSSitesSyncBridge?.create({ chrome });
 const updateCloudDestination = state => {
   const revision = ++cloudDestinationRevision, site = globalThis.MVSRecentSavesCloud?.origin(state?.origin);
@@ -44,7 +45,10 @@ const updateCloudDestination = state => {
 const getRecentSavesCloud = () => recentSavesCloud ||= globalThis.MVSRecentSavesCloud?.create({ storage: chrome.storage.local,
   store: getReaderWatchStore(), fetch: globalThis.MVSSitesSyncBridge ? getSitesSyncBridge().request : async () => { throw Object.assign(new Error('sign_in_required'), { code: 'sign_in_required' }); }, permissions: chrome.permissions, alarms: chrome.alarms });
 if (globalThis.MVSRecentSavesCloud && chrome.storage?.local) {
-  chrome.storage.local.get({ recentSavesCloud: null }, values => updateCloudDestination(values.recentSavesCloud));
+  chrome.storage.local.get({ recentSavesCloud: null, recentSavesOpenWebsite: false }, values => {
+    openWebsiteFromShortcut = values.recentSavesOpenWebsite === true;
+    updateCloudDestination(values.recentSavesCloud);
+  });
   void getRecentSavesCloud().resume();
   chrome.alarms?.onAlarm?.addListener(alarm => { if (alarm.name === MVSRecentSavesCloud.ALARM) void getRecentSavesCloud().resume(); });
   chrome.permissions?.onRemoved?.addListener(() => { cloudDestinationRevision++; cloudWatchUrl = null; });
@@ -53,7 +57,7 @@ const openingRecentSaves = new Map();
 const openRecentSaves = (sourceTab) => {
   const privateContext = Boolean(sourceTab?.incognito);
   if (openingRecentSaves.has(privateContext)) return openingRecentSaves.get(privateContext);
-  const destination = cloudWatchUrl || WATCH_URL;
+  const destination = openWebsiteFromShortcut && cloudWatchUrl || WATCH_URL;
   const work = new Promise(resolve => {
     const finish = ok => resolve(ok ? { ok: true } : { ok: false, code: "runtime_error" });
     const create = () => {

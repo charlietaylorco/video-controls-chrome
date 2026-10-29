@@ -550,6 +550,11 @@ watchTimerDefaultInput.addEventListener('change', () => {
   const open = document.getElementById('cloud-open'), disconnect = document.getElementById('cloud-disconnect');
   const output = document.getElementById('cloud-status'), exportButton = document.getElementById('cloud-export');
   if (!site || !globalThis.MVSRecentSavesCloud) return;
+  const shortcut = document.getElementById('cloud-use-shortcut');
+  chrome.storage.local.get({ recentSavesOpenWebsite: false }, values => { shortcut.checked = values.recentSavesOpenWebsite === true; });
+  shortcut.addEventListener('change', () => chrome.storage.local.set({ recentSavesOpenWebsite: shortcut.checked }, () => {
+    if (chrome.runtime.lastError) { shortcut.checked = !shortcut.checked; output.textContent = 'Could not save shortcut preference.'; }
+  }));
   let busy = false, paired = null;
   const errors = {
     invalid_pairing: 'Enter the device token generated in Watchlater Settings.', permission_required: 'Website permission is missing. Connect again to grant access.', sign_in_required: 'Sign in to Watchlater in this Chrome profile, then choose Connect / verify again. Local data is retained; JSON export also works without pairing.',

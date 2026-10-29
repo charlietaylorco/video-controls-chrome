@@ -45,8 +45,9 @@ top-level navigation links.
 Reload the extension after updating it. On the signed-in website, open Settings
 and generate a device token. In Extension Options → Recent saves website, connect
 the exact Site origin and token, grant access only to that origin, then import
-retained history. The extension keeps its local route until import completes.
-Local history is retained, and disconnecting restores the local route.
+retained history. The extension keeps the original local page as its default, including after import.
+Options always links directly to that page. Opening Watchlater from shortcuts is
+an explicit opt-in; local history is retained, and disconnecting restores the local route.
 
 A durable dirty marker is written atomically with each local history update.
 The extension copies metadata in small idempotent batches, verifies the owner scope

@@ -134,11 +134,11 @@ test('real durable dirty acknowledgements never erase a newer local mutation', a
   await f.store.acknowledge(newer.items); assert.equal((await f.store.dirtyPage()).items.length, 0);
 });
 
-function backgroundFixture(state, { granted = true, tabs = [] } = {}) {
+function backgroundFixture(state, { granted = true, tabs = [], useWebsite = true } = {}) {
   let action, listener, storageListener, removed;
   const created = [], activated = [], handled = [];
   const chrome = { runtime: { id: 'extension', getURL: file => `chrome-extension://extension/${file}`, onMessage: { addListener(fn) { listener = fn; } } },
-    storage: { local: { get(defaults, cb) { cb({ ...defaults, recentSavesCloud: state }); }, set(_patch, cb) { cb?.(); } }, onChanged: { addListener(fn) { storageListener = fn; } } },
+    storage: { local: { get(defaults, cb) { cb({ ...defaults, recentSavesCloud: state, recentSavesOpenWebsite: useWebsite }); }, set(_patch, cb) { cb?.(); } }, onChanged: { addListener(fn) { storageListener = fn; } } },
     permissions: { contains(_request, cb) { cb(granted); }, onRemoved: { addListener(fn) { removed = fn; } } },
     action: { onClicked: { addListener(fn) { action = fn; } } }, tabs: {
       query(_request, cb) { cb(tabs); }, get(id, cb) { cb(tabs.find(tab => tab.id === id)); },
@@ -193,4 +193,11 @@ test('private Site sign-in failure visibly pauses retries while keeping dirty hi
   await f.pair(); await f.sync.startImport(); await f.sync.resume();
   assert.equal((await f.sync.status()).phase, 'paused'); assert.equal((await f.sync.status()).code, 'sign_in_required'); assert.equal(f.dirty.size, 1);
   assert.equal(await f.sync.destination(), null);
+});
+
+test('local Recent saves stays the default even after a completed cloud import', async () => {
+  const f = backgroundFixture({origin:SITE,phase:'ready',importComplete:true}, {useWebsite:false});
+  f.action({windowId:4});await tick();
+  assert.equal(f.created[0].url,'chrome-extension://extension/watch.html');
+  assert.ok(fs.readFileSync(path.join(__dirname,'../options.html'),'utf8').includes('href="watch.html"'));
 });
