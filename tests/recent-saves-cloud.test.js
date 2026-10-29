@@ -171,6 +171,8 @@ test('cloud setup messages accept only the exact active bundled options page', a
   assert.equal(f.handled.length, 0);
   assert.equal((await f.send(message, { id: 'extension', url: 'chrome-extension://extension/options.html', frameId: 0 })).ok, true);
   assert.equal(f.handled.length, 1);
+  assert.equal((await f.send(message, { id: 'extension', url: 'chrome-extension://extension/options.html#connections', frameId: 0, documentLifecycle: 'active' })).ok, true);
+  assert.equal(f.handled.length, 2);
 });
 
 test('Reader credential changes pause an in-flight import without acknowledging another account’s data', async () => {

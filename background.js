@@ -561,7 +561,7 @@ const pickTargetUrl = (message, sender) => {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'recent-saves-cloud') {
-    const trusted = sender.id === chrome.runtime.id && sender.url === chrome.runtime.getURL('options.html') &&
+    const trusted = sender.id === chrome.runtime.id && typeof sender.url === 'string' && sender.url.split('#')[0] === chrome.runtime.getURL('options.html') &&
       (sender.frameId === undefined || sender.frameId === 0) && (!sender.documentLifecycle || sender.documentLifecycle === 'active');
     if (!trusted || !getRecentSavesCloud()) { sendResponse({ ok: false, code: 'invalid_sender' }); return undefined; }
     getRecentSavesCloud().handle(message).then(sendResponse); return true;
