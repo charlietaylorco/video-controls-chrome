@@ -266,11 +266,12 @@
     </article><article class="settings-card connection-card" aria-labelledby="cloud-heading">
       <div class="connection-header"><span class="service-mark" aria-hidden="true">↗</span><div><h3 id="cloud-heading">Recent saves website</h3><p>Keep your retained videos and summaries in your private website.</p></div></div>
       <label class="token-label" for="cloud-origin">Website address</label>
-      <div class="token-row"><input class="token-input" id="cloud-origin" type="url" spellcheck="false" autocomplete="off" placeholder="https://your-recent-saves.vercel.app"></div>
+      <div class="token-row"><input class="token-input" id="cloud-origin" type="url" spellcheck="false" autocomplete="off" value="https://watchlater.chimping.chatgpt.site" readonly></div>
       <label class="token-label" for="cloud-token">Device token</label>
       <div class="token-row"><input class="token-input" id="cloud-token" type="password" spellcheck="false" autocomplete="off" placeholder="Generate a device token on the signed-in website"><button class="save-button" id="cloud-connect" type="button">Connect / verify</button></div>
-      <p class="hint">Connect grants access only to this HTTPS website. Import copies all retained history and available summaries, including deletion markers. Your local Reader/Raindrop tokens and private note drafts stay here. Local history is kept.</p>
-      <div class="token-row"><button class="save-button" id="cloud-import" type="button" disabled>Import history</button><button class="save-button" id="cloud-open" type="button" disabled>Open website</button><button class="save-button" id="cloud-disconnect" type="button" disabled>Disconnect</button></div>
+      <p class="hint">Sign in to Watchlater in this Chrome profile, then generate a device token in its Settings. Sync uses a temporary inactive Site tab and your normal private sign-in. Import copies retained history and available summaries, including deletion markers. Reader/Raindrop tokens and private note drafts stay here. Local history is kept.</p>
+      <div class="token-row"><button class="save-button" id="cloud-import" type="button" disabled>Import history</button><button class="save-button" id="cloud-open" type="button">Open website</button><button class="save-button" id="cloud-disconnect" type="button" disabled>Disconnect</button></div>
+      <div class="token-row"><button class="save-button" id="cloud-export" type="button">Export local history JSON</button></div><p class="hint">You can also import this credential-free JSON file in the signed-in website’s Settings without pairing.</p>
       <p class="hint" id="cloud-status" role="status" aria-live="polite">Checking connection…</p>
     </article></div>
 </section>

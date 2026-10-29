@@ -3,7 +3,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
-const { createTransport, createTimer } = require('../web/client.js');
+const { createTransport, createTimer, authPath } = require('../web/client.js');
+const { backupRecords, importBackup } = require('../web/settings.js');
 const { embedUrl } = require('../web/embeds.js');
 const C = require('../watch-timer-core.js');
 const json = (value, status = 200) => ({ status, json: async () => value });
@@ -45,21 +46,66 @@ test('expired sessions block later data calls until the user signs in again', as
   assert.equal(calls, 2);
 });
 
-test('successful sign-in reloads without persisting credentials and settings notify listeners', async () => {
-  let reloaded = 0; const messages = [], notices = [];
-  const client = createTransport({ reload: () => reloaded++, request: async (_, init) => {
-    if (init.method === 'GET') return json({ ok: true, configured: true, authenticated: false });
-    const message = JSON.parse(init.body); messages.push(message);
-    return json(message.type === 'cloud-settings' ? { ok: true, theme: 'dark', timerDefault: 25 } : { ok: true });
+test('Sites auth uses top-level ChatGPT links and never posts passwords or local auth actions', async () => {
+  assert.equal(authPath('in'), '/signin-with-chatgpt?return_to=%2F');
+  assert.equal(authPath('out'), '/signout-with-chatgpt?return_to=%2F');
+  const calls = [];
+  const client = createTransport({ request: async (url, init) => { calls.push({ url, init }); return json({ ok: true, configured: true, authenticated: false, authProvider: 'chatgpt' }); } });
+  assert.deepEqual(await client.send({ type: 'auth-login' }), { ok: false, code: 'unsupported_auth_action' });
+  assert.deepEqual(await client.send({ type: 'auth-logout' }), { ok: false, code: 'unsupported_auth_action' });
+  assert.equal(calls.length, 1); assert.equal(calls[0].init.method, 'GET');
+  const source = fs.readFileSync(path.join(__dirname, '../web/client.js'), 'utf8');
+  assert.ok(!source.includes("createElement('form')"));
+  assert.ok(!source.includes("createElement('input')"));
+  assert.ok(source.includes("link.target = '_top'"));
+  assert.ok(source.includes("out.target = '_top'"));
+});
+
+test('signed-in cloud settings notify listeners without changing platform authentication', async () => {
+  const messages = [], notices = [];
+  const client = createTransport({ request: async (_, init) => {
+    if (init.method === 'GET') return json({ ok: true, configured: true, authenticated: true, authProvider: 'chatgpt' });
+    messages.push(JSON.parse(init.body)); return json({ ok: true, theme: 'dark', timerDefault: 25 });
   } });
   client.subscribe(status => notices.push(status));
-  await client.send({ type: 'auth-login', email: 'owner@example.test', password: 'one-request-only' });
-  assert.equal(reloaded, 1);
-  assert.equal(client.status.password, undefined);
   await client.send({ type: 'cloud-settings', theme: 'dark', timerDefault: 25 });
-  assert.equal(notices.at(-1).theme, 'dark');
-  assert.equal(notices.at(-1).timerDefault, 25);
-  assert.equal(messages.length, 2);
+  assert.equal(notices.at(-1).theme, 'dark'); assert.equal(notices.at(-1).timerDefault, 25);
+  assert.equal(client.status.authProvider, 'chatgpt'); assert.equal(messages.length, 1);
+});
+
+const backupRow = index => ({ videoUrl: `https://www.youtube.com/watch?v=backup_${index}`, savedAt: 10000 - index, readerId: `reader-${index}`, status: 'saved', title: 'Saved title', description: 'Saved description', notes: 'Personal note', summary: 'Reader summary' });
+
+test('JSON recovery strips nonrecord secrets, skips deletion markers, verifies scope and imports in batches of five', async () => {
+  const rows = Array.from({ length: 7 }, (_, i) => ({ ...backupRow(i), readerToken: 'never-upload', otherSecret: 'never-upload' }));
+  rows.push({ ...backupRow(8), status: 'deleted' });
+  const calls = [], progress = [];
+  const transport = { send: async message => { calls.push(message); return message.type === 'cloud-ping' ? { ok: true, scope: 'private-owner' } : { ok: true, scope: 'private-owner', accepted: message.items.map(row => row.videoUrl) }; } };
+  const result = await importBackup({ version: 1, records: rows }, transport, (...args) => progress.push(args));
+  assert.deepEqual(result, { imported: 7, skippedDeleted: 1 });
+  const batches = calls.filter(message => message.type === 'cloud-import');
+  assert.deepEqual(batches.map(message => message.items.length), [5, 2]);
+  assert.ok(batches.every(message => message.scope === 'private-owner'));
+  assert.ok(batches.flatMap(message => message.items).every(row => !('readerToken' in row) && !('otherSecret' in row) && row.status !== 'deleted'));
+  assert.deepEqual(progress, [[5, 7, 1], [7, 7, 1]]);
+  assert.ok(calls.every(message => ['cloud-ping', 'cloud-import'].includes(message.type)));
+});
+
+test('JSON recovery stops on a changed library or incomplete acknowledgement without retrying writes', async () => {
+  const rows = Array.from({ length: 7 }, (_, i) => backupRow(i)); let pings = 0, imports = 0;
+  const changed = { send: async message => message.type === 'cloud-ping' ? { ok: true, scope: ++pings > 2 ? 'different-owner' : 'private-owner' } : (imports++, { ok: true, scope: 'private-owner', accepted: message.items.map(row => row.videoUrl) }) };
+  await assert.rejects(importBackup(rows, changed), /connection changed/); assert.equal(imports, 1);
+  imports = 0;
+  const partial = { send: async message => message.type === 'cloud-ping' ? { ok: true, scope: 'private-owner' } : (imports++, { ok: true, scope: 'private-owner', accepted: [] }) };
+  await assert.rejects(importBackup(rows, partial), /0 verified records/); assert.equal(imports, 1);
+});
+
+test('JSON recovery validates the whole backup before making requests and never silently truncates text', async () => {
+  let calls = 0; const transport = { send() { calls++; } };
+  await assert.rejects(importBackup({ version: 1, records: [backupRow(1), { ...backupRow(2), description: 'a'.repeat(64001) }] }, transport), /64,000/);
+  assert.equal(calls, 0);
+  assert.throws(() => backupRecords({ version: 2, records: [] }), /version/);
+  assert.throws(() => backupRecords([backupRow(1), backupRow(1)]), /duplicate/);
+  assert.throws(() => backupRecords([{ ...backupRow(1), videoUrl: 'https://evil.example/watch?v=test' }]), /invalid/);
 });
 
 test('inline player accepts only canonical YouTube targets and never substitutes another host', () => {

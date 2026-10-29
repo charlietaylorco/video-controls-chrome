@@ -150,7 +150,7 @@ For Refresh, add `action=refresh`; `outcome=unauthorized` simulates a rejected r
 
 ## Recent saves
 
-The repository includes an optional private website for Vercel + Supabase, with durable descriptions, notes, history, migration and click-to-play embeds. See [website setup and free-tier limits](docs/recent-saves-website.md). The extension keeps its local route until pairing and the initial import finish.
+The repository includes the private Watchlater website on ChatGPT Sites, with durable descriptions, notes, history, migration and click-to-play embeds. See [Watchlater setup and storage](docs/recent-saves-website.md). The extension keeps its local route until pairing and the initial import finish.
 
 **Refresh**, **Open in Reader**, **Save video to Raindrop** and **Send to Downie** share one icon row in that order, with the same 5px gap throughout and no divider; the thumbnail stays unobstructed. The row has no shared background, border or shadow. It retains the YouTube controls’ 28px buttons, 14px icons, green saved/sent treatment and hover/feedback states. Dark mode keeps the pale icon colors; light mode uses the card’s existing text, green accent and error colors for contrast. The actions follow the existing Raindrop/Downie visibility settings and local saved/sent indicators. Raindrop uses the existing token in Options and saves to Unsorted. Downie opens a separate background protocol handoff tab to keep Recent saves in place; the browser may ask to open the installed app. “Sent” records the browser handoff, not a completed download or verified app installation. Failed/uncertain actions show a toast and are never retried automatically. The extension page never reads credentials.
 

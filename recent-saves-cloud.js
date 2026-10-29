@@ -1,6 +1,6 @@
 /* Optional HTTPS sync. Only explicit, verified pairing can upload local history. */
 (() => {
-  const KEY = 'recentSavesCloud', ALARM = 'recent-saves-cloud';
+  const KEY = 'recentSavesCloud', ALARM = 'recent-saves-cloud', SITE = 'https://watchlater.chimping.chatgpt.site';
   const origin = value => {
     try {
       if (typeof value !== 'string' || value !== value.trim() || /:\d+(?:[/?#]|$)/.test(value.replace(/^https:/i, ''))) return null;
@@ -8,12 +8,12 @@
       if (u.protocol !== 'https:' || u.username || u.password || u.port || u.pathname !== '/' || u.search || u.hash ||
           !u.hostname.includes('.') || !/^[a-z0-9.-]+$/.test(u.hostname) || u.hostname.includes('..') || /[:\[\]]/.test(u.hostname) || /^[\d.]+$/.test(u.hostname) ||
           u.hostname.endsWith('.') || /(^|\.)(localhost|local|internal)$/.test(u.hostname)) return null;
-      return u.origin;
+      return u.origin === SITE ? SITE : null;
     } catch { return null; }
   };
   const validToken = value => typeof value === 'string' && /^[A-Za-z0-9_-]{32,256}$/.test(value);
-  const validScope = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(value);
-  const create = ({ storage, store, fetch: request = globalThis.fetch, permissions, alarms, now = Date.now,
+  const validScope = value => typeof value === 'string' && value.length > 0 && value.length <= 256 && !/[\u0000-\u0020\u007f]/.test(value);
+  const create = ({ storage, store, fetch: request, permissions, alarms, now = Date.now,
     uuid = () => crypto.randomUUID(), lastError = () => globalThis.chrome?.runtime?.lastError } = {}) => {
     let serial = Promise.resolve(), running = null, controller = null, operation = 0;
     const fail = code => Object.assign(new Error(code), { code });
@@ -28,7 +28,7 @@
     const schedule = when => {
       try { const result = when ? alarms?.create(ALARM, { when }) : alarms?.clear(ALARM); result?.catch?.(() => {}); } catch { /* next worker wake resumes durable work */ }
     };
-    const publicState = state => ({ ok: true, connected: Boolean(state?.scope && validToken(state?.token)), origin: origin(state?.origin) || '',
+    const publicState = state => ({ ok: true, connected: Boolean(origin(state?.origin) && state?.scope && validToken(state?.token)), origin: origin(state?.origin) || '',
       scope: state?.scope || '', phase: state?.phase || 'disconnected', ready: state?.phase === 'ready' && state?.importComplete === true,
       imported: state?.imported || 0, syncedAt: state?.syncedAt || 0, retryAt: state?.retryAt || 0, code: state?.error || '' });
     const status = async () => publicState(await read());
@@ -39,13 +39,14 @@
     });
     const api = async (state, body) => {
       if (!origin(state.origin) || !validToken(state.token) || !await allowed(state.origin)) throw fail('permission_required');
+      if (typeof request !== 'function') throw fail('sign_in_required');
       const abort = new AbortController(); controller = abort;
       const timeout = setTimeout(() => abort.abort(), 15000);
       let response;
       try {
         response = await request(state.origin + '/api/recent-saves', { method: 'POST', credentials: 'omit', redirect: 'error', cache: 'no-store',
           signal: abort.signal, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + state.token }, body: JSON.stringify(body) });
-      } catch { throw fail('network_error'); }
+      } catch (e) { throw fail(['sign_in_required', 'connection_changed'].includes(e?.code) ? e.code : 'network_error'); }
       finally { clearTimeout(timeout); if (controller === abort) controller = null; }
       if ([401, 403].includes(response.status)) throw fail('pairing_expired');
       if (!response.ok) throw fail(response.status === 429 ? 'rate_limited' : 'server_error');
@@ -123,7 +124,7 @@
           schedule(now() + 60000);
         } catch (e) {
           const attempts = (state?.attempts || 0) + 1;
-          const stopped = ['pairing_expired', 'account_changed', 'permission_required'].includes(e.code);
+          const stopped = ['pairing_expired', 'account_changed', 'permission_required', 'sign_in_required'].includes(e.code);
           const retryAt = stopped ? 0 : now() + Math.min(3600000, 60000 * 2 ** Math.min(attempts - 1, 6));
           const updated = await patchCurrent(state, { attempts, retryAt, error: e.code || 'storage_error', ...(stopped ? { phase: 'paused' } : {}) });
           if (updated) schedule(retryAt || null);
@@ -152,6 +153,7 @@
     const handle = async message => {
       try {
         if (message.action === 'status') return await status();
+        if (message.action === 'export') return { ok: true, ...await store.exportPage(message.cursor || null, 5) };
         if (message.action === 'connect') {
           const saved = await read();
           const token = message.token || (saved?.origin === origin(message.origin) ? saved.token : '');
@@ -164,7 +166,7 @@
     };
     return { handle, status, connect, disconnect, invalidateSource, startImport, resume, dirty, destination };
   };
-  const api = { create, origin, validToken, KEY, ALARM };
+  const api = { create, origin, validToken, KEY, ALARM, SITE };
   globalThis.MVSRecentSavesCloud = api;
   if (typeof module !== 'undefined') module.exports = api;
 })();

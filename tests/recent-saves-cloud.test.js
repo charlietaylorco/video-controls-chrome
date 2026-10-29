@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { IDBFactory, IDBKeyRange } = require('fake-indexeddb');
 const cloud = require('../recent-saves-cloud');
-const A = 'https://www.youtube.com/watch?v=alpha', TOKEN = 'a'.repeat(43), SITE = 'https://saves.example.test';
+const A = 'https://www.youtube.com/watch?v=alpha', TOKEN = 'a'.repeat(43), SITE = 'https://watchlater.chimping.chatgpt.site';
 const row = i => ({ videoUrl: `https://www.youtube.com/watch?v=video_${i}`, readerId: `doc-${i}`, savedAt: 1000 + i, updatedAt: 2000 + i, title: `Video ${i}`, status: 'saved' });
 const tick = () => new Promise(setImmediate);
 function fixture({ count = 0, responder, permitted = true, saved = null } = {}) {
@@ -180,4 +180,17 @@ test('Reader credential changes pause an in-flight import without acknowledging 
   await f.sync.invalidateSource(); release(); await f.sync.resume();
   assert.equal((await f.sync.status()).phase, 'paused'); assert.equal((await f.sync.status()).code, 'reader_account_changed');
   assert.equal(f.acknowledged.length, 0); assert.equal(f.dirty.size, 2); assert.equal(await f.sync.destination(), null);
+});
+
+test('local history JSON export works without pairing and never calls the website', async () => {
+  const f = fixture({ count: 13 }); let cursor = null, items = [];
+  do { const result = await f.sync.handle({ action: 'export', cursor }); assert.equal(result.ok, true); assert.ok(result.items.length <= 5); items.push(...result.items); cursor = result.nextCursor; } while (cursor);
+  assert.equal(items.length, 13); assert.equal(f.requests.length, 0); assert.ok(!JSON.stringify(items).includes('PRIVATE_'));
+});
+
+test('private Site sign-in failure visibly pauses retries while keeping dirty history', async () => {
+  const f = fixture({ count: 1, responder: body => body.type === 'cloud-import' ? Object.assign(new Error('private gate'), { code: 'sign_in_required' }) : null });
+  await f.pair(); await f.sync.startImport(); await f.sync.resume();
+  assert.equal((await f.sync.status()).phase, 'paused'); assert.equal((await f.sync.status()).code, 'sign_in_required'); assert.equal(f.dirty.size, 1);
+  assert.equal(await f.sync.destination(), null);
 });

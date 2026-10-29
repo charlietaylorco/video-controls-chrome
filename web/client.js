@@ -1,8 +1,9 @@
 /* Hosted transport. Records and credentials are never persisted in browser storage. */
 (() => {
-  const createTransport = ({ request = globalThis.fetch, reload = () => globalThis.location.reload() } = {}) => {
+  const authPath = kind => `/${kind === 'out' ? 'signout' : 'signin'}-with-chatgpt?return_to=%2F`;
+  const createTransport = ({ request = globalThis.fetch } = {}) => {
     const listeners = new Set();
-    let status = { authenticated: false, configured: false, theme: 'system', timerDefault: 15 };
+    let status = { authenticated: false, configured: true, authProvider: 'chatgpt', theme: 'system', timerDefault: 15 };
     const messageFor = result => ({
       auth_required: 'Your sign-in expired. Sign in again to continue.',
       forbidden: 'This account does not have access to Recent saves.',
@@ -31,7 +32,7 @@
           signal: AbortSignal.timeout(60000),
         });
         const result = await response.json();
-        if (response.status === 401 && message?.type !== 'auth-login') {
+        if (response.status === 401) {
           update({ authenticated: false });
           if (globalThis.document) showAuth('Your sign-in expired. Sign in again to continue.');
         }
@@ -41,11 +42,10 @@
     const ready = raw(null, true).then(result => update(result));
     const send = async message => {
       await ready;
-      if (!status.authenticated && !['auth-login', 'auth-logout'].includes(message.type)) return { ok: false, code: 'auth_required' };
+      if (['auth-login', 'auth-logout'].includes(message.type)) return { ok: false, code: 'unsupported_auth_action' };
+      if (!status.authenticated) return { ok: false, code: 'auth_required' };
       const result = await raw(message);
       if (result.ok && message.type === 'cloud-settings') update(result);
-      if (result.ok && message.type === 'auth-login') { update({ authenticated: true }); reload(); }
-      if (result.ok && message.type === 'auth-logout') { update({ authenticated: false }); if (globalThis.document) showAuth('Signed out.'); reload(); }
       return result;
     };
     return { ready, send, messageFor, get status() { return status; }, subscribe(listener) { listeners.add(listener); listener(status); return () => listeners.delete(listener); } };
@@ -92,28 +92,16 @@
     let section = document.getElementById('cloud-auth');
     if (!section) {
       section = document.createElement('section'); section.id = 'cloud-auth'; section.className = 'cloud-auth';
-      const heading = document.createElement('h1'); heading.textContent = 'Recent saves'; section.append(heading);
-      const lead = document.createElement('p'); lead.textContent = 'Sign in to your private library.'; section.append(lead);
-      const form = document.createElement('form'); form.id = 'cloud-auth-form';
-      for (const [id, label, type, autocomplete] of [['email', 'Email', 'email', 'username'], ['password', 'Password', 'password', 'current-password']]) {
-        const group = document.createElement('label'); group.textContent = label;
-        const input = document.createElement('input'); input.id = `cloud-${id}`; input.name = id; input.type = type; input.required = true; input.autocomplete = autocomplete;
-        group.append(input); form.append(group);
-      }
-      const button = document.createElement('button'); button.type = 'submit'; button.textContent = 'Sign in'; form.append(button);
-      const status = document.createElement('p'); status.id = 'cloud-auth-status'; status.setAttribute('role', 'status'); form.append(status); section.append(form);
-      form.addEventListener('submit', async event => {
-        event.preventDefault(); button.disabled = true; status.textContent = 'Signing in…';
-        const result = await globalThis.MVSWatchTransport.send({ type: 'auth-login', email: document.getElementById('cloud-email').value.trim(), password: document.getElementById('cloud-password').value });
-        document.getElementById('cloud-password').value = '';
-        if (!result.ok) { status.textContent = result.code === 'not_configured' ? 'The website’s server settings are incomplete.' : result.code === 'forbidden' ? 'This account does not have access.' : 'Could not sign in. Check your email and password, then try again.'; button.disabled = false; }
-      });
+      const heading = document.createElement('h1'); heading.textContent = 'Watchlater'; section.append(heading);
+      const lead = document.createElement('p'); lead.textContent = 'Sign in with ChatGPT to open your private library.'; section.append(lead);
+      const link = document.createElement('a'); link.className = 'cloud-signin'; link.href = authPath('in'); link.target = '_top'; link.textContent = 'Sign in with ChatGPT'; section.append(link);
+      const status = document.createElement('p'); status.id = 'cloud-auth-status'; status.setAttribute('role', 'status'); section.append(status);
       document.body.append(section);
     }
     section.hidden = false;
     document.getElementById('cloud-auth-status').textContent = message || '';
   };
-  const api = { createTransport, createTimer };
+  const api = { createTransport, createTimer, authPath };
   if (typeof module !== 'undefined') module.exports = api;
   if (!globalThis.document) return;
   const transport = globalThis.MVSWatchTransport = createTransport();
@@ -123,17 +111,14 @@
     document.documentElement.classList.remove('cloud-starting');
     if (!status.ok || !status.configured || !status.authenticated) {
       showAuth(!status.ok ? 'The website could not connect. Reload to try again.' : !status.configured ? 'The website needs its server settings before sign-in is available.' : '');
-      const form = document.getElementById('cloud-auth-form');
-      if (!status.ok || !status.configured) for (const control of form.elements) control.disabled = true;
       return;
     }
     const session = document.createElement('nav'); session.className = 'cloud-session'; session.setAttribute('aria-label', 'Account');
-    const label = document.createElement('span'); label.textContent = 'Private cloud library'; session.append(label);
-    const out = document.createElement('button'); out.type = 'button'; out.textContent = 'Sign out'; session.append(out);
-    out.addEventListener('click', async () => { out.disabled = true; const result = await transport.send({ type: 'auth-logout' }); if (!result.ok) { out.disabled = false; label.textContent = 'Could not sign out. Try again.'; } });
+    const label = document.createElement('span'); label.textContent = 'Private Watchlater library'; session.append(label);
+    const out = document.createElement('a'); out.href = authPath('out'); out.target = '_top'; out.textContent = 'Sign out'; session.append(out);
     document.body.append(session);
     const media = matchMedia('(prefers-color-scheme: dark)');
-    const theme = () => { document.documentElement.dataset.theme = status.theme === 'system' ? media.matches ? 'dark' : 'light' : status.theme; };
+    const theme = () => { const choice = transport.status.theme; document.documentElement.dataset.theme = choice === 'system' ? media.matches ? 'dark' : 'light' : choice; };
     media.addEventListener('change', theme); theme();
   });
 })();

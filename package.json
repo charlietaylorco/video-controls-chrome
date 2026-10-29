@@ -3,7 +3,9 @@
   "private": true,
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "build:web": "node web/scripts/build.mjs"
+    "build:web": "node web/scripts/build.mjs",
+    "prepare:site": "node scripts/prepare-watchlater.mjs",
+    "build:site": "node scripts/prepare-watchlater.mjs && npm --prefix watchlater run build"
   },
   "devDependencies": {
     "fake-indexeddb": "6.2.6"

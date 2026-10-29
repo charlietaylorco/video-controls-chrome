@@ -1,125 +1,111 @@
-# Hosted Recent saves
+# Watchlater on Sites
 
-Recent saves can run as a private website on Vercel Hobby with Supabase Free.
-The extension remains the video capture surface; the website reads its own durable
-cloud records and works without the extension after import. No frontend framework
-or new production dependency is required.
+Watchlater uses ChatGPT Sites with managed ChatGPT sign-in and durable D1 storage.
+Its registered origin is https://watchlater.chimping.chatgpt.site. The Site is
+owner-private. The earlier Vercel/Supabase setup is superseded; no separate
+Supabase account, database password or application login is needed.
 
-## Free-tier design
+## Source and publishing
 
-As checked on 29 October 2026, Vercel Hobby is for personal, non-commercial use.
-Supabase Free includes a 500 MB Postgres database, 5 GB egress, authentication,
-and up to two active projects. It pauses after a week of inactivity and does not
-include automatic backups or database preview branches. The implementation uses
-neither paid branching nor paid scheduled jobs. Video playback and thumbnails load
-from YouTube; video files are not stored in the database or proxied through Vercel.
+The extension and website source remain in this GitHub repository and PR. The
+standalone Sites app is under `watchlater/`. Run `npm run prepare:site` at the
+repository root to copy the shared UI assets into its generated source. The
+Sites starter owns compilation, auth integration and D1 migrations. Keep the
+`sites()` Vite integration and `app/chatgpt-auth.ts` helpers intact.
 
-- [Vercel Hobby](https://vercel.com/docs/plans/hobby)
-- [Supabase pricing](https://supabase.com/pricing)
-- [Supabase backups](https://supabase.com/docs/guides/platform/backups)
+`watchlater/.openai/hosting.json` records the registered Site ID and `DB` D1
+binding. `watchlater/db/schema.ts` and committed Drizzle migrations define the
+storage schema. Generate schema changes using the starter's `db:generate` script.
+Never create or alter migration-owned tables in request handling.
 
-Descriptions, personal notes, Reader summaries and retained history live in
-Postgres. Text fields have explicit size bounds (64,000 characters for cloud
-text); there is no 200-document cloud summary eviction. Existing locally truncated
-summaries remain labelled as excerpts until refreshed. Search includes durable
-metadata, descriptions, personal notes and available summaries.
+Publish from a sanitized, separate checkout outside the GitHub repository. Include
+`watchlater/` source and generated UI assets, and exclude node_modules, runtime
+state, credentials, environment files and the parent repository's Git metadata.
+The Sites source helper must push the exact source used to build the artifact;
+publish its resulting SHA/archive with the native owner-private deployment tool.
 
-## Provisioning
+## Durable records and privacy
 
-1. Create a **Free** Supabase project. Run `web/supabase/schema.sql` once in its SQL
-   editor. For subsequent schema changes, append migrations rather than rerunning
-   this initial schema.
-2. In Supabase Authentication, disable public signup and create the sole allowed
-   user with an email and a strong password. Record its UUID. The application uses
-   Supabase password sign-in with server-managed HttpOnly cookies. It does not
-   require SMTP or an additional OAuth application. Password recovery is handled
-   through the Supabase dashboard; no public signup/reset endpoints are exposed.
-3. Create a **Hobby** Vercel project from this repository. Keep the project root at
-   the repository root. `vercel.json` runs `node web/scripts/build.mjs` and serves
-   only `web/dist`; `api/recent-saves.js` is the server entry point.
-4. Configure server environment variables from `web/.env.example` in Vercel:
-   `APP_ORIGIN` (the exact canonical HTTPS origin), `SUPABASE_URL`,
-   `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `ALLOWED_USER_ID`,
-   and optional `READER_TOKEN` / `RAINDROP_TOKEN` for integration actions. The existing extension tokens are
-   never silently uploaded. No secrets belong in source, static files or a PR.
-5. Deploy, sign in, and check Settings. Never point a preview deployment at live
-   Reader credentials or production data. Free-tier previews can use a second
-   isolated Supabase project; mocked/local checks need no hosted project. Set
-   `APP_ORIGIN` separately for any preview that needs authenticated operations.
-6. In website Settings, generate an extension device token. In Extension Options
-   under Recent saves website, paste the exact origin and token,
-   connect, then import retained history. Grant only that website origin when
-   Chrome asks. Verify the import completes before relying on the hosted route.
+D1 stores retained video metadata, descriptions, personal notes, Reader summaries,
+location/tags and deletion markers. There is no 200-document cloud summary eviction.
+Text fields are bounded at 64,000 characters; local cached excerpts remain labelled
+until refreshed. Twelve-card pages return bounded previews, while opening the
+text editor fetches the full record and revision. Exports retrieve all records in
+bounded pages. Editorial conflicts preserve the in-tab draft.
 
-The normal page and every API operation authorize the sole allowed account on
-the server. The service-role key is server-only; table and RPC permissions are
-revoked for anonymous/authenticated browser database clients, with RLS enabled as
-an additional boundary. Browser writes require the exact configured Origin.
-Device tokens are random, stored hashed server-side, expire after 90 days and can
-be revoked in website Settings. They permit metadata import/status only (plus
-restricted timer reads), never Reader deletion or arbitrary server API access.
+All requests require the platform's authenticated visitor identity. Browser writes
+also require the exact request Origin. The Site's owner-private platform policy is
+the audience boundary; the app uses one owner partition. Keep the Site private.
+This implementation does not expose service-bypass credentials or implement a
+second OAuth/session stack. The reserved platform sign-in/out routes use ordinary
+top-level navigation links.
 
-## Migration and ongoing capture
+## Extension migration and automatic sync
 
-Migration streams all retained IndexedDB history in bounded batches, including
-missing/deleted markers and available summary excerpts. It verifies the owner
-scope and acknowledged URLs. Repeating a failed import is safe. No local data is
-deleted. Only after a verified complete import do extension Recent saves entry
-points open the website. Disconnecting restores the extension route.
+Reload the extension after updating it. On the signed-in website, open Settings
+and generate a device token. In Extension Options → Recent saves website, connect
+the exact Site origin and token, grant access only to that origin, then import
+retained history. The extension keeps its local route until import completes.
+Local history is retained, and disconnecting restores the local route.
 
-Every local history mutation records a dirty marker in the same IndexedDB
-transaction. Background sync uploads dirty records in bounded batches, acknowledges
-only the captured versions, and retries idempotent metadata uploads with backoff.
-Failures remain visible in Options. Account/token changes invalidate an in-flight
-sync. The website protects its own edits and newer Reader state from stale imports.
+A durable dirty marker is written atomically with each local history update.
+The extension copies metadata in small idempotent batches, verifies the owner scope
+and every acknowledged URL, and retains newer changes made during an upload.
+Worker restarts resume an unfinished import; network failures use bounded backoff.
+Old uploads cannot overwrite edited cloud text or restore an old deleted identity.
+An explicit new Reader save can advance to a newer identity.
 
-The import contains only retained extension history. It never imports the whole
-Reader library or reconstructs previously discarded saves. Reader refresh still
-uses exact retained document IDs. An offline or older browser cannot restore a
-cloud tombstone with its old Reader identity.
+Private Sites require a normal browser session. Automatic sync opens a temporary,
+inactive `/extension-sync` tab in the same browser as the extension. An isolated
+content script on that exact origin performs same-origin requests using the
+existing ChatGPT session and narrow device token. It never sends credentials to
+page scripts or uses a platform service-bypass token. Only extension-created tabs
+with the captured URL/document identity are closed. A sign-in redirect pauses sync
+with an explicit sign-in message. Sign into Watchlater in the same browser before
+resuming. Chrome documents content-script requests as made on behalf of the web
+origin: https://developer.chrome.com/docs/extensions/develop/concepts/network-requests
 
-Where the current YouTube watch URL and mounted player identity agree, saving
-captures text already present in the visible description component (up to 20,000
-characters). It makes no additional requests and cannot promise the full original
-description when YouTube has not rendered it. Cards on feeds/embeds usually have no
-description to capture. Descriptions can be edited in the website independently
-of Reader summaries. Website personal notes are independent of Reader Document
-Notes; editing one does not overwrite the other.
+For initial migration or recovery without pairing, export retained local history
+from Extension Options, then select the JSON file in website Settings. Import
+validates records before uploading and reports skipped deletion markers. It never
+sends Reader deletion actions. Saved website records work independently once
+imported. This imports retained extension history, not the entire Reader library.
 
-## Reader actions, playback and timer
+## Descriptions and integrations
 
-Reader refresh/moves/deletion run on the server. Moves PATCH only location and
-read back the result. Deletion uses an expiring single-use snapshot, rechecks
-identity/title/Reader note/update time, requires HTTP 204, and verifies absence.
-No destructive operation is automatically retried. Hosted operations share a
-persisted rate budget and respect Reader 429 cooldowns. Existing extension Reader
-panels still have their own budget; all clients share Reader's upstream quota.
+A save captures description text already rendered on an exactly matched YouTube
+watch page (up to 20,000 characters). It makes no extra requests and cannot recover
+text that YouTube has not rendered. Feed cards/embeds often have no description.
+Website descriptions are editable separately from summaries. Website personal
+notes are independent of Reader Document Notes.
+
+Optional `READER_TOKEN` and `RAINDROP_TOKEN` server secrets can be configured in
+Sites environment settings; they are never copied automatically from extension
+storage. Browsing, importing, editing and exporting work without them. Reader
+refresh/moves/deletion require its token. Moves update only location and verify
+the result. Deletion uses a single-use expiring snapshot, rechecks the exact source,
+identity, title, Document Note and update time, requires HTTP 204 and verifies
+absence. Destructive requests never retry automatically. Hosted Reader operations
+share a persisted rate budget and 429 cooldown. Other Reader clients still share
+the upstream token quota.
 
 Embeds load on click from YouTube's privacy-enhanced domain with a real HTTPS
-referrer. Only one player stays active. External YouTube links remain available.
-The former real extension-origin Error 153 is documented in
-[the embed investigation](recent-saves-embed-feasibility.md). Real HTTPS playback
-must still be verified after deployment; restricted or embedding-disabled videos
-can remain unavailable.
+referrer. One player remains active; ordinary YouTube links remain available.
+Restricted or embedding-disabled videos may not play. The website timer stores a
+cloud deadline and reminds while the page is open; the extension's existing
+YouTube reminders remain a separate timer. Downie is a user-initiated protocol
+handoff, not proof of a completed download.
 
-The website timer uses a persisted cloud deadline and displays a reminder while
-the page is open. The existing extension timer and its closed-page YouTube
-reminders remain a separate timer. This release does not promise a web timer
-notification after closing the website. Downie is a user-clicked protocol handoff;
-the site cannot verify app installation or download completion. Raindrop uses the
-optional server token. Its on-page success indicator is not a cross-device history.
+## Verification and recovery
 
-## Recovery and verification
+Follow the SSD preflight before installs, builds or tests. Run `npm test` and
+`npm run prepare:site`, then the Sites build helper against `watchlater/`.
+The server tests exercise actual SQLite with the generated D1 migration, API
+identity/conflict guards, device scope, concurrent quotas and editorial changes.
+Use the portable starter's local mock ChatGPT sign-in for local browser testing;
+it is excluded from production. Local and hosted D1 databases are separate.
 
-Settings exports all records (including tombstones) through bounded cloud pages to
-JSON. Keep regular independent exports on the Free plan; Supabase recommends
-regular database dumps for off-site recovery. A JSON export preserves library
-content, while a Supabase SQL dump also preserves database configuration. Import
-from another browser's retained extension history is not a substitute for a backup.
-
-Run `npm ci --ignore-scripts --no-audit --no-fund`, `npm test`, then `npm run build:web`.
-Follow the SSD storage preflight before installs, builds or tests. Server tests use
-fake credentials and deterministic API responses. `web/supabase/smoke.sql` can be
-run against an isolated PostgreSQL test database after the schema (never against
-production). Live sign-in, real extension permission prompts, hosted migration and
-YouTube playback require the configured Vercel/Supabase projects.
+Settings exports records to JSON, including descriptions, notes, summaries and
+markers. Keep an independent export before account/project changes. Publication
+provisions and migrates hosted D1. Real Chrome permission prompts, session-based
+sync and platform sign-in should be verified in the browser carrying the extension.

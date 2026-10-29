@@ -1,5 +1,42 @@
 /* Authenticated settings; all durable preferences and records are server-owned. */
 (() => {
+  const backupRecords = value => {
+    if (value && !Array.isArray(value) && value.version != null && value.version !== 1) throw new Error('This backup version is not supported.');
+    const source = Array.isArray(value) ? value : value?.records || value?.items;
+    if (!Array.isArray(source)) throw new Error('Choose a metadata JSON export from the extension or Watchlater.');
+    const fields = ['videoUrl', 'readerId', 'savedAt', 'firstSavedAt', 'title', 'author', 'description', 'notes', 'summary', 'summaryTruncated', 'tags', 'location', 'status', 'checkedAt', 'durationSeconds', 'durationIsLive', 'provenance', 'revision'];
+    const seen = new Set(), records = []; let skippedDeleted = 0;
+    for (const row of source) {
+      if (!row || typeof row !== 'object' || Array.isArray(row)) throw new Error('The backup contains an invalid record.');
+      if (row.status === 'deleted') { skippedDeleted++; continue; }
+      let url;
+      try { url = new URL(row.videoUrl); } catch { throw new Error('The backup contains an invalid video address.'); }
+      if (url.origin !== 'https://www.youtube.com' || url.pathname !== '/watch' || !/^[\w-]{1,100}$/.test(url.searchParams.get('v') || '') || url.href !== `https://www.youtube.com/watch?v=${url.searchParams.get('v')}` || !Number.isFinite(row.savedAt) || row.savedAt <= 0) throw new Error('The backup contains an invalid saved-video record.');
+      if (seen.has(row.videoUrl)) throw new Error('The backup contains duplicate video addresses.');
+      if (['description', 'notes', 'summary'].some(key => row[key] != null && (typeof row[key] !== 'string' || row[key].length > 64000))) throw new Error('A saved text field exceeds the supported 64,000-character length.');
+      seen.add(row.videoUrl);
+      records.push(Object.fromEntries(fields.filter(key => Object.hasOwn(row, key)).map(key => [key, row[key]])));
+    }
+    return { records, skippedDeleted };
+  };
+  const importBackup = async (value, transport, onProgress = () => {}) => {
+    const { records, skippedDeleted } = backupRecords(value);
+    const initial = await transport.send({ type: 'cloud-ping' });
+    if (!initial.ok || typeof initial.scope !== 'string' || !initial.scope) throw new Error('Could not verify the signed-in library. Sign in again before importing.');
+    let imported = 0;
+    for (let offset = 0; offset < records.length; offset += 5) {
+      const session = await transport.send({ type: 'cloud-ping' });
+      if (!session.ok || session.scope !== initial.scope) throw new Error(`Import stopped after ${imported} records because the library connection changed. Sign in and import the same file again.`);
+      const items = records.slice(offset, offset + 5);
+      const result = await transport.send({ type: 'cloud-import', items, scope: initial.scope });
+      const expected = items.map(row => row.videoUrl).sort();
+      if (!result.ok || result.scope !== initial.scope || !Array.isArray(result.accepted) || JSON.stringify([...result.accepted].sort()) !== JSON.stringify(expected)) throw new Error(`Import stopped after ${imported} verified records. It is safe to import the same file again after checking the connection.`);
+      imported += items.length; onProgress(imported, records.length, skippedDeleted);
+    }
+    return { imported, skippedDeleted };
+  };
+  if (typeof module !== 'undefined') module.exports = { backupRecords, importBackup };
+  if (!globalThis.document) return;
   const $ = id => document.getElementById(id), transport = globalThis.MVSWatchTransport;
   const failure = result => transport.messageFor(result) || (result.code === 'rate_limited' ? 'Too many requests. Wait a moment and try again.' : 'The request could not be confirmed. Check the connection before retrying.');
   const locks = new Set();
@@ -57,5 +94,21 @@
     link.href = url; link.download = `recent-saves-${new Date().toISOString().slice(0, 10)}.json`; document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 60000);
     note.textContent = `Export downloaded: ${items.length} records.`;
   }));
+  $('import-backup-form').addEventListener('submit', event => {
+    event.preventDefault();
+    const file = $('import-backup-file').files?.[0];
+    if (!file) return;
+    void run('import-backup', 'import-status', async note => {
+      if (file.size > 50 * 1024 * 1024) { note.textContent = 'This file is larger than 50 MB. Split it into smaller metadata exports before importing.'; return; }
+      note.textContent = 'Checking backup…';
+      let value;
+      try { value = JSON.parse(await file.text()); }
+      catch { note.textContent = 'This file is not valid JSON. Choose an export from the extension or Watchlater.'; return; }
+      try {
+        const result = await importBackup(value, transport, (count, total) => { note.textContent = `Importing… ${count} of ${total} records verified`; });
+        note.textContent = `Imported ${result.imported} records.${result.skippedDeleted ? ` Skipped ${result.skippedDeleted} deletion markers.` : ''} Your source file and local extension history are kept.`;
+      } catch (error) { note.textContent = error.message || 'Import could not be verified. Check the connection before trying the file again.'; }
+    });
+  });
   window.addEventListener('pagehide', () => { $('device-token').value = ''; });
 })();

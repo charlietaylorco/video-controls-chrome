@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repo = path.resolve(web, '..');
 const out = path.join(web, 'dist');
-// This folder contains generated output only. Vercel serves only this allowlist,
+// This folder contains generated output only. Sites serves only this allowlist,
 // never extension source, server credentials, SQL, or the repository root.
 await rm(out, { recursive: true, force: true });
 await mkdir(out, { recursive: true });
@@ -21,7 +21,7 @@ for (const name of shared) {
 }
 for (const name of hosted) await copyFile(path.join(web, name), path.join(out, name));
 let html = await readFile(path.join(repo, 'watch.html'), 'utf8');
-html = html.replace('<link rel="stylesheet" href="watch.css">', '<meta name="referrer" content="strict-origin-when-cross-origin"><meta name="description" content="Your private saved video library, summaries, descriptions and notes."><link rel="stylesheet" href="watch.css"><link rel="stylesheet" href="app.css">')
+html = html.replace('<link rel="stylesheet" href="watch.css">', '<link rel="icon" href="/favicon.svg" type="image/svg+xml"><meta name="referrer" content="strict-origin-when-cross-origin"><meta name="description" content="Your private saved video library, summaries, descriptions and notes."><link rel="stylesheet" href="watch.css"><link rel="stylesheet" href="app.css">')
   .replace('href="options.html#watch-timer-default-minutes"', 'href="settings.html#timer-default"')
   .replace('Default duration in Options', 'Default duration in Settings')
   .replace('<a class="yt-lists-link" href="feed.html">YT Lists</a>', '<a class="yt-lists-link" href="settings.html">Settings</a>')
