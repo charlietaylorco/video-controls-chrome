@@ -66,7 +66,9 @@ export function createDatabase(db, { now = Date.now } = {}) {
       if (args.terms?.length) { clauses.push('NOT EXISTS(SELECT 1 FROM json_each(?) WHERE instr(search_text,value)=0)'); values.push(JSON.stringify(args.terms)); }
     }
     values.push(count + 1);
-    const rows = await all(`SELECT data,revision FROM rs_items WHERE ${clauses.join(' AND ')} ORDER BY saved_at DESC,video_url DESC LIMIT ?`, values);
+    const rows = await all(`SELECT ${args.versionOnly ? 'video_url,saved_at,revision' : 'data,revision,video_url,saved_at'} FROM rs_items WHERE ${clauses.join(' AND ')} ORDER BY saved_at DESC,video_url DESC LIMIT ?`, values);
+    const version = JSON.stringify(rows.map(row => [row.video_url, row.saved_at, row.revision]));
+    if (args.versionOnly) return { version };
     const hasNext = rows.length > count;
     const items = rows.slice(0, count).map(row => {
       const full = item(row);
@@ -77,7 +79,7 @@ export function createDatabase(db, { now = Date.now } = {}) {
       display.summaryTruncated = full.summaryTruncated === true || typeof full.summary === 'string' && full.summary.length > 32768;
       return display;
     });
-    return { items, hasNext, nextCursor: hasNext ? [items.at(-1).savedAt, items.at(-1).videoUrl] : null };
+    return { items, hasNext, nextCursor: hasNext ? [items.at(-1).savedAt, items.at(-1).videoUrl] : null, ...(!args.export ? { version } : {}) };
   };
   const importItems = async (owner, items) => {
     const accepted = [];
@@ -155,6 +157,7 @@ export function createDatabase(db, { now = Date.now } = {}) {
         case 'rs_item': return item(await rawItem(owner, args.videoUrl));
         case 'rs_page': return await page(owner, args);
         case 'rs_import': return await importItems(owner, args.items);
+        case 'rs_page_version': return await page(owner, { ...args, export: false, versionOnly: true });
         case 'rs_settings': return await settings(owner, args);
         case 'rs_timer': return await timer(owner, args);
         case 'rs_rate': return await rate(owner, args);

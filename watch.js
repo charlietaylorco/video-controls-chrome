@@ -14,6 +14,8 @@
   let hasSettledView = false, displayedSearch = false, displayedPage = 1;
   const media = matchMedia('(prefers-color-scheme: dark)');
   const transport = globalThis.MVSWatchTransport;
+  let liveRefresh;
+  const cloudView = () => ({ filter, query, channel: channelFilter, tag: tagFilter, cursor: cursors.at(-1) });
   const send = message => transport ? transport.send(message) : new Promise(resolve => {
     let settled = false;
     const finish = reply => { if (!settled) { settled = true; clearTimeout(timer); resolve(reply || { ok: false, code: 'runtime_error' }); } };
@@ -185,11 +187,13 @@
     grid.setAttribute('aria-busy', String(!loaded)); controls();
   };
   const load = async ({ clearStatus = false } = {}) => {
-    const request = ++pageRequest, result = await send({ type: 'watch-list-page', filter, query, channel: channelFilter, tag: tagFilter, cursor: cursors.at(-1) });
+    const view = cloudView();
+    const request = ++pageRequest, result = await send({ type: 'watch-list-page', ...view });
     if (request !== pageRequest) return;
     if (!result.ok) { announce(messageFor(result), true); controls(); return; }
     items = result.items.filter(item => C.canonical(item.videoUrl) === item.videoUrl && (!item.readerId || C.validId(item.readerId)));
     hasNext = result.hasNext; nextCursor = result.nextCursor; loaded = hasSettledView = true;
+    liveRefresh?.setSnapshot(view, result.version);
     displayedSearch = Boolean(query.trim() || channelFilter || tagFilter); displayedPage = cursors.length; render();
     $('search-status').textContent = `${items.length} ${query.trim() || channelFilter || tagFilter ? 'matching ' : ''}video${items.length === 1 ? '' : 's'} on page ${cursors.length}${hasNext ? '. More results available.' : '.'}`;
     if (clearStatus && !refreshing && pending.size === 0 && !deletion) announce('');
@@ -285,6 +289,10 @@
   const applyTheme = () => { document.documentElement.dataset.theme = theme === 'system' ? media.matches ? 'dark' : 'light' : theme; };
   media.addEventListener('change', applyTheme);
   if (transport) {
+    liveRefresh = globalThis.MVSWatchLiveRefresh?.create({ transport, onChange: () => load(),
+      canRefresh: () => loaded && !refreshing && !pending.size && !deletion &&
+        !document.querySelector('.cloud-player, .cloud-details[open], [aria-haspopup][aria-expanded="true"]') &&
+        !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName) });
     transport.subscribe(status => { theme = ['system', 'dark', 'light'].includes(status.theme) ? status.theme : 'system'; applyTheme(); });
   } else {
   chrome.storage.local.get({ readerPanelTheme: 'system' }, data => { theme = ['system', 'dark', 'light'].includes(data.readerPanelTheme) ? data.readerPanelTheme : 'system'; applyTheme(); });

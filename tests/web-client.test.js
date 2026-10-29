@@ -3,12 +3,34 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
-const { createTransport, createTimer, authPath } = require('../web/client.js');
+const { createTransport, createTimer, createLiveRefresh, authPath } = require('../web/client.js');
 const { backupRecords, importBackup } = require('../web/settings.js');
 const { embedUrl } = require('../web/embeds.js');
 const C = require('../watch-timer-core.js');
 const json = (value, status = 200) => ({ status, json: async () => value });
 const tick = () => new Promise(setImmediate);
+
+test('live refresh checks compact cloud versions, pauses while hidden or busy, and resumes on focus', async () => {
+  const listeners = {}, calls = [], doc = { hidden: false, addEventListener(name, fn) { listeners[name] = fn; }, removeEventListener(name) { delete listeners[name]; } };
+  let busy = false, version = 'one', refreshes = 0, interval, cleared = false;
+  const live = createLiveRefresh({ document: doc, events: doc, canRefresh: () => !busy,
+    timers: { setInterval(fn, ms) { assert.equal(ms, 15000); interval = fn; return 9; }, clearInterval(id) { assert.equal(id, 9); cleared = true; } },
+    transport: { async send(message) { calls.push(message); return { ok: true, version }; } },
+    onChange() { refreshes++; live.setSnapshot({ filter: 'watch', cursor: null }, version); } });
+  live.setSnapshot({ filter: 'watch', cursor: null }, 'one'); await live.check(); assert.equal(refreshes, 0);
+  version = 'two'; doc.hidden = true; await live.check(); doc.hidden = false; busy = true; await live.check(); assert.equal(calls.length, 1);
+  busy = false; listeners.focus(); await tick(); assert.equal(refreshes, 1); assert.equal(calls[1].type, 'cloud-page-version');
+  interval(); await tick(); assert.equal(refreshes, 1);
+  listeners.pagehide(); assert.equal(cleared, true); assert.equal(listeners.focus, undefined); await live.check(); assert.equal(calls.length, 3);
+});
+
+test('an old change check cannot refresh a newly selected view or overlap another check', async () => {
+ let release, calls = 0, refreshes = 0;
+ const live = createLiveRefresh({ document: { hidden: false, addEventListener() {}, removeEventListener() {} }, timers: { setInterval() {}, clearInterval() {} },
+   transport: { send() { calls++; return new Promise(resolve => { release = resolve; }); } }, onChange() { refreshes++; } });
+ live.setSnapshot({ filter: 'watch' }, 'old'); const pending = live.check(); await live.check(); assert.equal(calls, 1);
+ live.setSnapshot({ filter: 'archive' }, 'new'); release({ ok: true, version: 'different' }); await pending; assert.equal(refreshes, 0); live.dispose();
+});
 
 test('hosted requests wait for authentication and never use extension or browser storage', async () => {
   let release;

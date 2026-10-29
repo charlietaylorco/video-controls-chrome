@@ -256,6 +256,14 @@ test('integration checks use read-only authentication requests and never expose 
  assert.equal((await f.call({type:'cloud-check-integrations'},{headers:{authorization:'Bearer '+'a'.repeat(43)}})).statusCode,403);
 });
 
+test('cloud version checks use validated page criteria without external service calls', async () => {
+ const f = fixture({ rpc: name => name === 'rs_page_version' ? { version: 'snapshot' } : undefined });
+ assert.deepEqual((await f.call({ type: 'cloud-page-version', filter: 'watch', query: 'Example' })).body, { ok: true, version: 'snapshot' });
+ assert.equal(f.calls.at(-1).name, 'rs_page_version'); assert.equal(f.network.length, 0);
+ assert.equal((await f.call({ type: 'cloud-page-version', filter: '__proto__' })).body.code, 'invalid_request');
+ assert.equal((await f.call({ type: 'cloud-page-version' }, { headers: { authorization: 'Bearer ' + 'a'.repeat(43) } })).statusCode, 403);
+});
+
 test('integration check failures report safe diagnostics without upstream bodies or errors', async () => {
  const f=fixture({environment:{...env,RAINDROP_TOKEN:'private-raindrop'},fetch:url=>{if(url.includes('readwise'))return json({message:'private-token'},401);throw Error('private-raindrop');}});
  const result=await f.call({type:'cloud-check-integrations'});

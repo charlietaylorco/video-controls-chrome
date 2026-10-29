@@ -50,6 +50,24 @@
     };
     return { ready, send, messageFor, get status() { return status; }, subscribe(listener) { listeners.add(listener); listener(status); return () => listeners.delete(listener); } };
   };
+  const createLiveRefresh = ({ transport, onChange, canRefresh = () => true, document: doc = globalThis.document, events = globalThis.window, timers = globalThis } = {}) => {
+    let snapshot = null, running = false, disposed = false;
+    const check = async () => {
+      if (disposed || running || doc?.hidden || !snapshot || !canRefresh()) return;
+      const captured = snapshot; running = true;
+      try {
+        const result = await transport.send({ ...captured.view, type: 'cloud-page-version' });
+        if (!disposed && snapshot === captured && !doc?.hidden && canRefresh() && result.ok && typeof result.version === 'string' && result.version !== captured.version) await onChange();
+      } catch { /* Read-only checks resume on the next interval or focus. */ }
+      finally { running = false; }
+    };
+    const wake = () => { void check(); };
+    const interval = timers.setInterval(wake, 15000);
+    doc?.addEventListener('visibilitychange', wake); events?.addEventListener('focus', wake);
+    const dispose = () => { disposed = true; timers.clearInterval(interval); doc?.removeEventListener('visibilitychange', wake); events?.removeEventListener('focus', wake); events?.removeEventListener('pagehide', dispose); };
+    events?.addEventListener('pagehide', dispose);
+    return { check, dispose, setSnapshot(view, version) { snapshot = typeof version === 'string' ? { view: structuredClone(view), version } : null; } };
+  };
   const createTimer = ({ onChange, now = Date.now, timers = globalThis, transport = globalThis.MVSWatchTransport } = {}) => {
     const C = globalThis.MVSWatchTimerCore;
     let state = C.idle(), defaults = 15, timer, disposed = false, expiry = null, reminder;
@@ -101,10 +119,11 @@
     section.hidden = false;
     document.getElementById('cloud-auth-status').textContent = message || '';
   };
-  const api = { createTransport, createTimer, authPath };
+  const api = { createTransport, createTimer, createLiveRefresh, authPath };
   if (typeof module !== 'undefined') module.exports = api;
   if (!globalThis.document) return;
   const transport = globalThis.MVSWatchTransport = createTransport();
+  globalThis.MVSWatchLiveRefresh = { create: createLiveRefresh };
   globalThis.MVSWatchTimerClient = { create: createTimer };
   document.documentElement.classList.add('cloud-starting');
   transport.ready.then(status => {

@@ -56,6 +56,13 @@ Worker restarts resume an unfinished import; network failures use bounded backof
 Old uploads cannot overwrite edited cloud text or restore an old deleted identity.
 An explicit new Reader save can advance to a newer identity.
 
+The website checks a compact version of its current filtered page every 15 seconds
+while visible, and on returning to the tab. A changed version reloads cloud cards
+without making Reader requests. Checks pause during playback, open text editors,
+input focus and pending actions, so an update does not interrupt viewing or edits.
+New saves made during the initial history import remain in the durable dirty queue
+and upload after that import reaches the end.
+
 Private Sites require a normal browser session. Automatic sync opens a temporary,
 inactive `/extension-sync` tab in the same browser as the extension. An isolated
 content script on that exact origin performs same-origin requests using the

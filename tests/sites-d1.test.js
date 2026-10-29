@@ -69,6 +69,21 @@ test('full summaries remain durable while card payloads are explicit excerpts', 
   const card = (await f.rpc('page', { filter: 'all' })).items[0]; assert.equal(card.summary.length, 32768); assert.equal(card.summaryTruncated, true);
 });
 
+test('compact page versions match card snapshots and detect inserts, edits and filtered removals', async t => {
+ const f = fixture(t), view = { filter: 'watch' };
+ const empty = await f.rpc('page_version', view);
+ await f.rpc('import', { items: [f.source(1)] });
+ const first = await f.rpc('page', view); assert.notEqual(first.version, empty.version);
+ assert.deepEqual(await f.rpc('page_version', view), { version: first.version });
+ assert.ok(!first.version.includes('Source description'));
+ await f.rpc('import', { items: [f.source(1)] }); assert.equal((await f.rpc('page_version', view)).version, first.version);
+ await f.rpc('edit', { videoUrl: url(1), revision: 1, description: 'New text', notes: '' });
+ const edited = await f.rpc('page_version', view); assert.notEqual(edited.version, first.version);
+ await f.rpc('verify', { doc: { id: 'reader1', videoUrl: url(1), location: 'archive' }, now: base });
+ assert.equal((await f.rpc('page_version', view)).version, empty.version);
+ assert.notEqual((await f.rpc('page_version', { filter: 'archive' })).version, empty.version);
+});
+
 test('concurrent editorial writes use revision CAS and only one same-baseline edit can win', async t => {
   const f = fixture(t); await f.rpc('import', { items: [f.source(1)] });
   const writes = await Promise.all(['First', 'Second'].map(description => f.rpc('edit', { videoUrl: url(1), revision: 1, description, notes: 'Cloud note' })));

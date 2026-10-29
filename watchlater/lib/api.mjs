@@ -124,14 +124,14 @@ export function createApi({ db, env = {}, fetch: request = globalThis.fetch, now
         const item = await run('item', { videoUrl: message.videoUrl });
         return send(item ? { ok: true, item } : { ok: false, code: 'not_found' });
       }
-      if (message.type === 'watch-list-page' || message.type === 'cloud-export') {
+      if (['watch-list-page', 'cloud-export', 'cloud-page-version'].includes(message.type)) {
         if (!V.validCursor(message.cursor)) throw fail('invalid_request');
         const args = { cursor: message.cursor || null, export: message.type === 'cloud-export' };
         if (!args.export) {
           if (!['watch', 'all', 'later', 'shortlist', 'archive'].includes(message.filter || 'watch') || ['query', 'channel', 'tag'].some(key => message[key] != null && (typeof message[key] !== 'string' || message[key].length > (key === 'tag' ? 200 : 300)))) throw fail('invalid_request');
           Object.assign(args, { filter: message.filter || 'watch', terms: [...new Set(V.normalize(message.query).split(' ').filter(Boolean))], channel: V.normalize(message.channel), tag: V.normalize(message.tag) });
         }
-        const page = await run('page', args);
+        const page = await run(message.type === 'cloud-page-version' ? 'page_version' : 'page', args);
         if (args.export) {
           // Keep full-row exports bounded for browsers and service intermediaries. JSON
           // escaping can expand control characters: shrink rare oversized pages
