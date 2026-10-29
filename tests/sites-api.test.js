@@ -254,3 +254,10 @@ test('integration checks use read-only authentication requests and never expose 
  assert.ok(!JSON.stringify(result.body).includes('private-raindrop'));
  assert.equal((await f.call({type:'cloud-check-integrations'},{headers:{authorization:'Bearer '+'a'.repeat(43)}})).statusCode,403);
 });
+
+test('integration check failures report safe diagnostics without upstream bodies or errors', async () => {
+ const f=fixture({environment:{...env,RAINDROP_TOKEN:'private-raindrop'},fetch:url=>{if(url.includes('readwise'))return json({message:'private-token'},401);throw Error('private-raindrop');}});
+ const result=await f.call({type:'cloud-check-integrations'});
+ assert.deepEqual(result.body,{ok:true,reader:{configured:true,connected:false,reason:'unauthorized',status:401},raindrop:{configured:true,connected:false,reason:'network_error'}});
+ assert.ok(!JSON.stringify(result.body).includes('private-'));
+});

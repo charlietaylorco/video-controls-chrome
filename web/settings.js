@@ -55,7 +55,7 @@
   $('check-integrations').addEventListener('click', async () => {
     const button=$('check-integrations'), note=$('integrations-status');button.disabled=true;note.textContent='Checking…';
     const result=await transport.send({type:'cloud-check-integrations'});
-    const label=value=>!value?.configured?'not configured':value.connected?'connected':'could not connect';
+    const label=value=>!value?.configured?'not configured':value.connected?'connected':value.reason==='unauthorized'?'token rejected':value.reason==='timeout'?'connection timed out':value.reason==='network_error'?'network unavailable':value.status?`service returned HTTP ${value.status}`:'could not connect';
     note.textContent=result.ok?`Reader: ${label(result.reader)}. Raindrop: ${label(result.raindrop)}.`:'Could not check connections. Try again.';
     button.disabled=false;
   });
