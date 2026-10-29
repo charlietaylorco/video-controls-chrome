@@ -6,6 +6,7 @@
     <title>Settings · Minimal Video Speed</title>
     <link rel="stylesheet" href="options.css">
     <script src="options-ui.js" defer></script>
+    <script src="recent-saves-cloud.js" defer></script>
     <script src="options.js" defer></script>
   </head>
   <body>
@@ -262,6 +263,17 @@
       <label class="token-label" for="raindrop-token">Raindrop.io API token</label>
       <div class="token-row"><input class="token-input" id="raindrop-token" type="password" spellcheck="false" autocomplete="off" placeholder="Paste your API token" aria-describedby="raindrop-token-hint"><button class="save-button" id="save-raindrop-token" type="button">Save token</button></div>
       <p class="hint" id="raindrop-token-hint">Create an app in <a href="https://app.raindrop.io/settings/integrations" target="_blank" rel="noreferrer">Raindrop integrations</a>, then paste its Test token here. Stored locally in this browser.</p>
+    </article><article class="settings-card connection-card" aria-labelledby="cloud-heading">
+      <div class="connection-header"><span class="service-mark" aria-hidden="true">↗</span><div><h3 id="cloud-heading">Recent saves website</h3><p>Keep your retained videos and summaries in your private website.</p></div></div>
+      <label class="token-label" for="cloud-origin">Website address</label>
+      <div class="token-row"><input class="token-input" id="cloud-origin" type="url" spellcheck="false" autocomplete="off" value="https://watchlater.chimping.chatgpt.site" readonly></div>
+      <label class="token-label" for="cloud-token">Device token</label>
+      <div class="token-row"><input class="token-input" id="cloud-token" type="password" spellcheck="false" autocomplete="off" placeholder="Generate a device token on the signed-in website"><button class="save-button" id="cloud-connect" type="button">Connect / verify</button></div>
+      <p class="hint">Sign in to Watchlater in this Chrome profile, then generate a device token in its Settings. Sync uses a temporary inactive Site tab and your normal private sign-in. Import copies retained history and available summaries, including deletion markers. Reader/Raindrop tokens and private note drafts stay here. Local history is kept.</p>
+      <div class="token-row"><button class="save-button" id="cloud-import" type="button" disabled>Import history</button><button class="save-button" id="cloud-open" type="button">Open website</button><button class="save-button" id="cloud-disconnect" type="button" disabled>Disconnect</button></div>
+      <p class="hint"><a href="watch.html" target="_blank">Open local Recent saves</a> · Your original page and history stay available.</p><label class="hint"><input type="checkbox" id="cloud-use-shortcut"> Open Watchlater from Recent saves shortcuts (local page is the default)</label>
+      <div class="token-row"><button class="save-button" id="cloud-export" type="button">Export local history JSON</button></div><p class="hint">You can also import this credential-free JSON file in the signed-in website’s Settings without pairing.</p>
+      <p class="hint" id="cloud-status" role="status" aria-live="polite">Checking connection…</p>
     </article></div>
 </section>
         <footer class="page-footer">Video controls · A little less distraction.</footer>

@@ -1,11 +1,16 @@
-importScripts("x-video-download.js", "reader-core.js", "reader-watch-core.js", "reader-watch-store.js", "reader-service.js", "reader-watch-service.js", "reader-summary-service.js", "watch-timer-core.js", "watch-timer-service.js");
+importScripts("x-video-download.js", "reader-core.js", "reader-watch-core.js", "reader-watch-store.js", "recent-saves-cloud.js", "sites-sync-bridge.js", "reader-service.js", "reader-watch-service.js", "reader-summary-service.js", "watch-timer-core.js", "watch-timer-service.js");
 
 let readerPanelService, readerWatchStore, readerWatchService, watchRevision = 0, watchAuthRevision = 0;
 chrome.storage?.onChanged?.addListener((changes, area) => {
-  if (area === 'local' && changes.readerToken) { watchAuthRevision++; void readerPanelService?.invalidateAuth(); }
+  if (area === 'local' && changes.readerToken) { watchAuthRevision++; void readerPanelService?.invalidateAuth(); void recentSavesCloud?.invalidateSource(); }
+  if (area === 'local' && changes.recentSavesCloud) updateCloudDestination(changes.recentSavesCloud.newValue);
+  if (area === 'local' && changes.recentSavesOpenWebsite) openWebsiteFromShortcut = changes.recentSavesOpenWebsite.newValue === true;
 });
 const getReaderWatchStore = () => readerWatchStore ||= MVSReaderWatchStore.create({ storage: chrome.storage.local,
-  notify: videoUrl => new Promise(resolve => chrome.storage.local.set({ readerWatchChanged: { videoUrl, at: Date.now(), revision: ++watchRevision } }, resolve)) });
+  notify: async videoUrl => {
+    await new Promise(resolve => chrome.storage.local.set({ readerWatchChanged: { videoUrl, at: Date.now(), revision: ++watchRevision } }, resolve));
+    await getRecentSavesCloud()?.dirty();
+  } });
 const getReaderPanelService = () => readerPanelService ||= MVSReaderSummaryService.create({ storage: chrome.storage.local, alarms: chrome.alarms,
   reader: MVSReaderService.create({ storage: chrome.storage.local, fetch, history: getReaderWatchStore() }) });
 chrome.alarms?.onAlarm?.addListener(alarm => { if (alarm.name === 'reader-summary') void getReaderPanelService().resume(); });
@@ -27,18 +32,40 @@ let viewingTimerService;
 const getViewingTimerService = () => viewingTimerService ||= MVSWatchTimerService.create({ storage: chrome.storage.local, alarms: chrome.alarms });
 chrome.alarms?.onAlarm?.addListener(alarm => { if (alarm.name === 'watch-viewing-timer') void getViewingTimerService().handle({ action: 'get' }); });
 if (chrome.alarms && globalThis.MVSWatchTimerService) void getViewingTimerService().handle({ action: 'get' });
+let recentSavesCloud, sitesSyncBridge, cloudWatchUrl = null, cloudDestinationRevision = 0, openWebsiteFromShortcut = false;
+const getSitesSyncBridge = () => sitesSyncBridge ||= globalThis.MVSSitesSyncBridge?.create({ chrome });
+const updateCloudDestination = state => {
+  const revision = ++cloudDestinationRevision, site = globalThis.MVSRecentSavesCloud?.origin(state?.origin);
+  cloudWatchUrl = null;
+  if (state?.phase !== 'ready' || state.importComplete !== true || !site) return;
+  chrome.permissions?.contains?.({ origins: [site + '/*'] }, granted => {
+    if (revision === cloudDestinationRevision && granted === true && !chrome.runtime.lastError) cloudWatchUrl = site + '/';
+  });
+};
+const getRecentSavesCloud = () => recentSavesCloud ||= globalThis.MVSRecentSavesCloud?.create({ storage: chrome.storage.local,
+  store: getReaderWatchStore(), fetch: globalThis.MVSSitesSyncBridge ? getSitesSyncBridge().request : async () => { throw Object.assign(new Error('sign_in_required'), { code: 'sign_in_required' }); }, permissions: chrome.permissions, alarms: chrome.alarms });
+if (globalThis.MVSRecentSavesCloud && chrome.storage?.local) {
+  chrome.storage.local.get({ recentSavesCloud: null, recentSavesOpenWebsite: false }, values => {
+    openWebsiteFromShortcut = values.recentSavesOpenWebsite === true;
+    updateCloudDestination(values.recentSavesCloud);
+  });
+  void getRecentSavesCloud().resume();
+  chrome.alarms?.onAlarm?.addListener(alarm => { if (alarm.name === MVSRecentSavesCloud.ALARM) void getRecentSavesCloud().resume(); });
+  chrome.permissions?.onRemoved?.addListener(() => { cloudDestinationRevision++; cloudWatchUrl = null; });
+}
 const openingRecentSaves = new Map();
 const openRecentSaves = (sourceTab) => {
   const privateContext = Boolean(sourceTab?.incognito);
   if (openingRecentSaves.has(privateContext)) return openingRecentSaves.get(privateContext);
+  const destination = openWebsiteFromShortcut && cloudWatchUrl || WATCH_URL;
   const work = new Promise(resolve => {
     const finish = ok => resolve(ok ? { ok: true } : { ok: false, code: "runtime_error" });
     const create = () => {
-      const options = { url: WATCH_URL };
+      const options = { url: destination };
       if (Number.isInteger(sourceTab?.windowId) && sourceTab.windowId >= 0) options.windowId = sourceTab.windowId;
       try { chrome.tabs.create(options, tab => finish(!chrome.runtime.lastError && Boolean(tab))); } catch { finish(false); }
     };
-    const matches = tab => Number.isInteger(tab?.id) && tab.id >= 0 && tab.url === WATCH_URL && !tab.pendingUrl && Boolean(tab.incognito) === privateContext;
+    const matches = tab => Number.isInteger(tab?.id) && tab.id >= 0 && tab.url === destination && !tab.pendingUrl && Boolean(tab.incognito) === privateContext;
     try {
       chrome.tabs.query({}, tabs => {
         if (chrome.runtime.lastError) { create(); return; }
@@ -533,6 +560,12 @@ const pickTargetUrl = (message, sender) => {
 };
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === 'recent-saves-cloud') {
+    const trusted = sender.id === chrome.runtime.id && typeof sender.url === 'string' && sender.url.split('#')[0] === chrome.runtime.getURL('options.html') &&
+      (sender.frameId === undefined || sender.frameId === 0) && (!sender.documentLifecycle || sender.documentLifecycle === 'active');
+    if (!trusted || !getRecentSavesCloud()) { sendResponse({ ok: false, code: 'invalid_sender' }); return undefined; }
+    getRecentSavesCloud().handle(message).then(sendResponse); return true;
+  }
   if (message?.type === 'viewing-timer') {
     const active = sender.id === chrome.runtime.id && (sender.frameId === undefined || sender.frameId === 0) &&
       (!sender.documentLifecycle || sender.documentLifecycle === 'active');
@@ -788,6 +821,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         title: message?.title || undefined,
         author: message?.author || undefined
       });
+      if (MVSReaderCore.canonical(message.descriptionVideoUrl) === MVSReaderCore.canonical(targetUrl) && typeof message.description === 'string') {
+        metadata.description = message.description.slice(0, 20000);
+      }
       // Capture stays bound to the clicked target, even if metadata enrichment
       // finishes after the user navigates or a YouTube card is recycled.
       if (MVSReaderCore.canonical(message.durationVideoUrl) === MVSReaderCore.canonical(targetUrl)) {

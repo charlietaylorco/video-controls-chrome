@@ -541,3 +541,83 @@ watchTimerDefaultInput.addEventListener('change', () => {
     showStatus(chrome.runtime.lastError ? 'Could not save timer default' : 'Viewing timer default saved');
   });
 });
+
+// Pairing is optional. Request exactly the chosen origin during this click;
+// no third-party service credentials leave the extension.
+(() => {
+  const site = document.getElementById('cloud-origin'), token = document.getElementById('cloud-token');
+  const connect = document.getElementById('cloud-connect'), migrate = document.getElementById('cloud-import');
+  const open = document.getElementById('cloud-open'), disconnect = document.getElementById('cloud-disconnect');
+  const output = document.getElementById('cloud-status'), exportButton = document.getElementById('cloud-export');
+  if (!site || !globalThis.MVSRecentSavesCloud) return;
+  const shortcut = document.getElementById('cloud-use-shortcut');
+  chrome.storage.local.get({ recentSavesOpenWebsite: false }, values => { shortcut.checked = values.recentSavesOpenWebsite === true; });
+  shortcut.addEventListener('change', () => chrome.storage.local.set({ recentSavesOpenWebsite: shortcut.checked }, () => {
+    if (chrome.runtime.lastError) { shortcut.checked = !shortcut.checked; output.textContent = 'Could not save shortcut preference.'; }
+  }));
+  let busy = false, paired = null;
+  const errors = {
+    invalid_pairing: 'Enter the device token generated in Watchlater Settings.', permission_required: 'Website permission is missing. Connect again to grant access.', sign_in_required: 'Sign in to Watchlater in this Chrome profile, then choose Connect / verify again. Local data is retained; JSON export also works without pairing.',
+    pairing_expired: 'The device token expired or was revoked. Generate a new token on the website and connect again.',
+    account_changed: 'The website account changed. Verify the intended account and connect again before importing.',
+    reader_account_changed: 'Reader credentials changed. Verify the website account and connect again before importing.',
+    network_error: 'The website could not be reached. Retained changes will retry automatically.', server_error: 'The website could not accept this batch. Retained changes will retry automatically.',
+    incomplete_acknowledgement: 'The website did not confirm the whole batch. The import is retained for retry.', invalid_response: 'The website returned an invalid response. Check its deployment.',
+    rate_limited: 'The website is rate limited. Retained changes will retry automatically.', storage_error: 'Could not save cloud sync settings. Local history is retained.',
+    pairing_required: 'Connect and verify the website first.', connection_changed: 'Connection changed. Check the current account before importing.'
+  };
+  const send = message => new Promise(resolve => {
+    chrome.runtime.sendMessage({ type: 'recent-saves-cloud', ...message }, reply => resolve(chrome.runtime.lastError ? { ok: false, code: 'storage_error' } : reply || { ok: false, code: 'storage_error' }));
+  });
+  const render = value => {
+    paired = value;
+    if (value?.origin && document.activeElement !== site) site.value = value.origin;
+    connect.disabled = busy; disconnect.disabled = busy || !value?.connected;
+    migrate.disabled = busy || !value?.connected || ['importing', 'paused'].includes(value.phase);
+    open.disabled = busy; exportButton.disabled = busy;
+    if (!value?.ok || value.code) output.textContent = errors[value?.code] || 'The connection needs attention. Local history is retained.';
+    else if (value.phase === 'importing') output.textContent = `Importing retained history: ${value.imported} confirmed. You can close this page; the import resumes automatically.`;
+    else if (value.ready) output.textContent = `Website ready. ${value.imported} imported. Changes sync automatically.${value.syncedAt ? ' Last confirmed ' + new Date(value.syncedAt).toLocaleString() + '.' : ''}`;
+    else if (value.connected) output.textContent = 'Connection verified. Choose Import history to copy retained data and enable sync. Local Recent saves stays available and remains the default.';
+    else output.textContent = 'Not connected. Recent saves continues to open locally.';
+    if (value?.retryAt) output.textContent += ` Next retry after ${new Date(value.retryAt).toLocaleTimeString()}.`;
+  };
+  const refresh = async () => render(await send({ action: 'status' }));
+  connect.addEventListener('click', () => {
+    const origin = MVSRecentSavesCloud.origin(site.value.trim());
+    if (!origin) { output.textContent = errors.invalid_pairing; return; }
+    if (!chrome.permissions?.request) { output.textContent = errors.permission_required; return; }
+    busy = true; render(paired);
+    // The user gesture must reach permissions.request synchronously.
+    chrome.permissions.request({ origins: [origin + '/*'] }, async granted => {
+      if (chrome.runtime.lastError || !granted) { busy = false; await refresh(); output.textContent = errors.permission_required; return; }
+      const result = await send({ action: 'connect', origin, token: token.value.trim() });
+      busy = false;
+      if (result.ok) { token.value = ''; render(result); }
+      else { await refresh(); output.textContent = errors[result.code] || 'Could not verify this website.'; }
+    });
+  });
+  migrate.addEventListener('click', async () => { busy = true; render(paired); const result = await send({ action: 'import' }); busy = false; render(result); });
+  disconnect.addEventListener('click', async () => { busy = true; render(paired); const result = await send({ action: 'disconnect' }); busy = false; token.value = ''; render(result); });
+  open.addEventListener('click', () => chrome.tabs.create({ url: MVSRecentSavesCloud.SITE + '/' }));
+  exportButton.addEventListener('click', async () => {
+    busy = true; render(paired);
+    const records = [], seen = new Set(); let cursor = null;
+    try {
+      do {
+        const result = await send({ action: 'export', cursor });
+        if (!result.ok || !Array.isArray(result.items)) throw new Error(result.code || 'storage_error');
+        records.push(...result.items); output.textContent = `Exporting local history… ${records.length} records`;
+        cursor = result.nextCursor || null;
+        if (cursor) { const key = JSON.stringify(cursor); if (seen.has(key)) throw new Error('storage_error'); seen.add(key); }
+      } while (cursor);
+      const blob = new Blob([JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), records })], { type: 'application/json' });
+      const url = URL.createObjectURL(blob), link = document.createElement('a');
+      link.href = url; link.download = `recent-saves-local-${new Date().toISOString().slice(0, 10)}.json`; document.body.append(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000); output.textContent = `Export downloaded: ${records.length} retained records. Import it in Watchlater Settings.`;
+    } catch (e) { output.textContent = errors[e.message] || 'Could not export local history. Local data is retained.'; }
+    finally { const message = output.textContent; busy = false; render(paired); output.textContent = message; }
+  });
+  chrome.storage.onChanged.addListener((changes, area) => { if (area === 'local' && changes.recentSavesCloud) void refresh(); });
+  void refresh();
+})();

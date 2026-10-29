@@ -13,14 +13,17 @@
   // Request readiness must not hide the last settled view during local search.
   let hasSettledView = false, displayedSearch = false, displayedPage = 1;
   const media = matchMedia('(prefers-color-scheme: dark)');
-  const send = message => new Promise(resolve => {
+  const transport = globalThis.MVSWatchTransport;
+  let liveRefresh;
+  const cloudView = () => ({ filter, query, channel: channelFilter, tag: tagFilter, cursor: cursors.at(-1) });
+  const send = message => transport ? transport.send(message) : new Promise(resolve => {
     let settled = false;
     const finish = reply => { if (!settled) { settled = true; clearTimeout(timer); resolve(reply || { ok: false, code: 'runtime_error' }); } };
     const timer = setTimeout(() => finish({ ok: false, code: 'request_uncertain' }), 20000);
     try { chrome.runtime.sendMessage(message, reply => finish(chrome.runtime.lastError ? { ok: false, code: 'runtime_error' } : reply)); }
     catch { finish({ ok: false, code: 'runtime_error' }); }
   });
-  const messageFor = result => ({ missing_token: 'Add your Reader token in Options, then refresh.', unauthorized: 'Reader rejected the token. Check Options.',
+  const messageFor = result => transport?.messageFor?.(result) || ({ missing_token: 'Add your Reader token in Options, then refresh.', unauthorized: 'Reader rejected the token. Check Options.',
     unlinked: 'Reader ID not retained. Open the video page to link it; this list does not scan Reader history.',
     not_found: 'The matched Reader document is no longer available.', document_changed: 'The document changed. Refresh and review it before trying again.',
     delete_conflict: 'Reader changed since it was checked. Review the current document before choosing Trash again.',
@@ -110,15 +113,17 @@
       if (['ArrowDown', 'ArrowUp'].includes(event.key)) { event.preventDefault(); const captured = target(); if (captured) locationMenu.open(captured, event.key === 'ArrowUp' ? 'last' : 'first'); }
     });
     refresh.addEventListener('click', () => void refreshCard(item.videoUrl, refresh));
-    return { card, link, channel, tagList, date, duration, summary, move, readerLink, refresh, trash, note, thumbnailLink, thumbnail, actions };
+    const extras = globalThis.MVSWatchExtras?.attach({ card, mediaBox, copy, item, announce, reload: reloadLocal });
+    return { card, link, channel, tagList, date, duration, summary, move, readerLink, refresh, trash, note, thumbnailLink, thumbnail, actions, extras };
   };
   const render = () => {
     const order = items.map(item => item.videoUrl);
-    for (const url of rows.keys()) if (!order.includes(url)) { rows.get(url).thumbnail.destroy(); rows.get(url).actions.destroy(); rows.delete(url); }
+    for (const url of rows.keys()) if (!order.includes(url)) { rows.get(url).thumbnail.destroy(); rows.get(url).actions.destroy(); rows.get(url).extras?.destroy(); rows.delete(url); }
     const cards = [];
     for (const item of items) {
       let row = rows.get(item.videoUrl); if (!row) { row = makeRow(item); rows.set(item.videoUrl, row); }
       row.actions.update(item.title, loaded && !refreshing && !deletion && !pending.size);
+      row.extras?.update(item, loaded && !refreshing && !deletion && !pending.size);
       row.link.textContent = item.title || `YouTube video · ${new URL(item.videoUrl).searchParams.get('v')}`;
       row.thumbnailLink.setAttribute('aria-label', `Watch ${item.title || 'video'} on YouTube`); row.thumbnailLink.title = 'Open on YouTube';
       row.channel.textContent = item.author || 'Not retained';
@@ -182,11 +187,13 @@
     grid.setAttribute('aria-busy', String(!loaded)); controls();
   };
   const load = async ({ clearStatus = false } = {}) => {
-    const request = ++pageRequest, result = await send({ type: 'watch-list-page', filter, query, channel: channelFilter, tag: tagFilter, cursor: cursors.at(-1) });
+    const view = cloudView();
+    const request = ++pageRequest, result = await send({ type: 'watch-list-page', ...view });
     if (request !== pageRequest) return;
     if (!result.ok) { announce(messageFor(result), true); controls(); return; }
     items = result.items.filter(item => C.canonical(item.videoUrl) === item.videoUrl && (!item.readerId || C.validId(item.readerId)));
     hasNext = result.hasNext; nextCursor = result.nextCursor; loaded = hasSettledView = true;
+    liveRefresh?.setSnapshot(view, result.version);
     displayedSearch = Boolean(query.trim() || channelFilter || tagFilter); displayedPage = cursors.length; render();
     $('search-status').textContent = `${items.length} ${query.trim() || channelFilter || tagFilter ? 'matching ' : ''}video${items.length === 1 ? '' : 's'} on page ${cursors.length}${hasNext ? '. More results available.' : '.'}`;
     if (clearStatus && !refreshing && pending.size === 0 && !deletion) announce('');
@@ -281,6 +288,13 @@
   $('next').addEventListener('click', () => { if (nextCursor) { cursors.push(nextCursor); changePage(); } });
   const applyTheme = () => { document.documentElement.dataset.theme = theme === 'system' ? media.matches ? 'dark' : 'light' : theme; };
   media.addEventListener('change', applyTheme);
+  if (transport) {
+    liveRefresh = globalThis.MVSWatchLiveRefresh?.create({ transport, onChange: () => load(),
+      canRefresh: () => loaded && !refreshing && !pending.size && !deletion &&
+        !document.querySelector('.cloud-player, .cloud-details[open], [aria-haspopup][aria-expanded="true"]') &&
+        !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName) });
+    transport.subscribe(status => { theme = ['system', 'dark', 'light'].includes(status.theme) ? status.theme : 'system'; applyTheme(); });
+  } else {
   chrome.storage.local.get({ readerPanelTheme: 'system' }, data => { theme = ['system', 'dark', 'light'].includes(data.readerPanelTheme) ? data.readerPanelTheme : 'system'; applyTheme(); });
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
@@ -292,5 +306,7 @@
       render(); announce('Reader connection changed. Refresh to check current data.', true);
     }
   });
-  void load({ clearStatus: true });
+  }
+  if (transport) void transport.ready.then(status => { if (status.authenticated) return load({ clearStatus: true }); });
+  else void load({ clearStatus: true });
 })();

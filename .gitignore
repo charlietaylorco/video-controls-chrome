@@ -2,3 +2,12 @@
 output/
 
 node_modules/
+
+web/dist/
+.env
+.env.*
+!.env.example
+
+/watchlater/app/generated/
+/watchlater/public/*.js
+/watchlater/public/*.css

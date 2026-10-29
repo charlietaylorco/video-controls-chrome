@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="strict-origin-when-cross-origin"><title>Recent saves · Settings</title><link rel="stylesheet" href="/watch.css"><link rel="stylesheet" href="/app.css"></head>
+<body>
+<main class="cloud-settings">
+  <header class="page-header"><h1>Settings</h1><a href="/">Recent saves</a></header>
+  <section class="cloud-settings-section" aria-labelledby="appearance-heading">
+    <h2 id="appearance-heading">Appearance & viewing timer</h2>
+    <form id="preferences">
+      <label for="theme">Theme</label><select id="theme" name="theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select>
+      <label for="timer-default">Default timer duration</label><div class="cloud-inline"><input id="timer-default" name="timerDefault" type="number" min="1" max="180" step="1" value="15" required><span>minutes</span></div>
+      <p class="cloud-help">The timer is saved in your cloud library. Keep the website open for its reminder. Your extension’s existing YouTube timer remains separate.</p>
+      <button type="submit" id="save-preferences">Save settings</button><p id="preferences-status" role="status"></p>
+    </form>
+  </section>
+  <section class="cloud-settings-section" aria-labelledby="extension-heading">
+    <h2 id="extension-heading">Connect the extension</h2>
+    <p>Pair the extension to import your retained saves and sync future saves. The website works independently after import. Keep Watchlater signed in with ChatGPT in the same browser so the extension can sync to this private Site.</p>
+    <ol><li>Generate a device token below.</li><li>Open the extension’s Options and find Recent saves website.</li><li>Paste this website’s address and the token, then connect and import.</li></ol>
+    <label for="site-origin">Website address</label><input id="site-origin" readonly spellcheck="false">
+    <div class="cloud-inline cloud-settings-actions"><button id="pair" type="button">Generate device token</button><button id="revoke" type="button">Disconnect all extensions</button></div>
+    <div id="pair-result" hidden><label for="device-token">Device token · copy before leaving</label><input id="device-token" type="password" readonly spellcheck="false" autocomplete="off"><button id="copy-token" type="button">Copy token</button><p class="cloud-help">Keep this token private. It grants extension sync access to your library. It is separate from your Reader token and ChatGPT sign-in.</p></div>
+    <p id="pair-status" role="status"></p>
+  </section>
+  <section class="cloud-settings-section" aria-labelledby="integrations-heading">
+    <h2 id="integrations-heading">Reader &amp; Raindrop</h2>
+    <p>Integration tokens are protected server secrets. Check their connections without changing either library.</p>
+    <button id="check-integrations" type="button">Check connections</button><p id="integrations-status" role="status"></p>
+  </section>
+  <section class="cloud-settings-section" aria-labelledby="export-heading">
+    <h2 id="export-heading">Export & recovery</h2>
+    <p>Download all cloud records, including descriptions, personal notes, summaries and deletion markers, as JSON for safekeeping.</p>
+    <button id="export" type="button">Export library</button><p id="export-status" role="status"></p>
+    <form id="import-backup-form" class="cloud-import-form">
+      <label for="import-backup-file">Import saved metadata</label><input id="import-backup-file" type="file" accept="application/json,.json" required>
+      <p class="cloud-help">Choose a JSON export from the extension or Watchlater. Available records import in small batches; deletion markers are skipped. This never deletes Reader documents.</p>
+      <button id="import-backup" type="submit">Import selected JSON</button><p id="import-status" role="status"></p>
+    </form>
+    <p class="cloud-help">Keep an export somewhere safe before disconnecting services or deleting a project. Local extension history remains in its browser after import.</p>
+  </section>
+</main>
+<script src="/client.js"></script><script src="/settings.js"></script>
+</body>
+</html>

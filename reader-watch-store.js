@@ -7,9 +7,11 @@
     const fail = () => Object.assign(new Error('watch_storage_error'), { code: 'watch_storage_error' });
     const open = () => opening ||= new Promise((resolve, reject) => {
       if (!indexedDB) { reject(fail()); return; }
-      const request = indexedDB.open(name, 1);
+      const request = indexedDB.open(name, 2);
       request.onupgradeneeded = () => {
         const db = request.result;
+        db.createObjectStore('cloudDirty', { keyPath: 'videoUrl' });
+        if (db.objectStoreNames.contains('items')) return;
         const items = db.createObjectStore('items', { keyPath: 'videoUrl' });
         items.createIndex('recent', ['savedAt', 'videoUrl']);
         items.createIndex('queueRecent', ['queue', 'savedAt', 'videoUrl']);
@@ -49,14 +51,17 @@
     const update = async (videoUrl, change, cached) => {
       if (C.canonical(videoUrl) !== videoUrl) throw Object.assign(fail(), { code: 'invalid_request' });
       await ready();
-      const result = await transaction(['items', 'summaries'], 'readwrite', (tx, done) => {
+      const result = await transaction(['items', 'summaries', 'cloudDirty'], 'readwrite', (tx, done) => {
         const items = tx.objectStore('items'), summaries = tx.objectStore('summaries');
         const request = items.get(videoUrl);
         request.onsuccess = () => {
           try {
             const row = change(request.result);
             if (!row) { done(null); return; }
-            items.put(W.decorate(row)); done(row);
+            row.updatedAt = Math.max(now(), (Number(request.result?.updatedAt) || 0) + 1);
+            items.put(W.decorate(row));
+            tx.objectStore('cloudDirty').put({ videoUrl, updatedAt: row.updatedAt });
+            done(row);
             if (cached) {
               summaries.put(cached);
               const count = summaries.count(); count.onsuccess = () => {
@@ -90,6 +95,7 @@
         return { ...previous, videoUrl, readerId: C.validId(id) ? id : previous?.status === 'saved' ? previous.readerId : null,
           savedAt: openExisting && previous ? previous.savedAt : at, firstSavedAt: previous?.firstSavedAt || at,
           title: W.text(metadata.title, 500) || previous?.title || '', author: W.text(metadata.author, 300) || previous?.author || '',
+          description: typeof metadata.description === 'string' ? W.text(metadata.description, 20000) : previous?.description || '',
           durationSeconds: keepLive ? null : seconds || C.durationSeconds(previous?.durationSeconds),
           durationIsLive: keepLive,
           tags: previous?.readerId === id && previous.status === 'saved' ? previous.tags : null,
@@ -176,7 +182,61 @@
       }
       return isCurrent() ? result : { stale: true };
     };
-    return { ready, recordSave, verify, mark, get, cachedSummary, page };
+    // Export only retained video metadata. Reader/Raindrop tokens and private note
+    // drafts are never read, serialized, or sent to the website.
+    const snapshot = (row, cached) => {
+      const item = {};
+      for (const key of ['videoUrl', 'readerId', 'savedAt', 'firstSavedAt', 'title', 'author', 'description', 'durationSeconds', 'durationIsLive', 'tags', 'location', 'checkedAt', 'status', 'provenance']) {
+        if (row[key] !== undefined) item[key] = row[key];
+      }
+      item.updatedAt = Number(row.updatedAt) || Number(row.checkedAt) || row.savedAt;
+      if (cached?.id === row.readerId && row.status === 'saved') {
+        item.summary = cached.summary; item.summaryTruncated = Boolean(cached.truncated); item.summaryCheckedAt = cached.checkedAt;
+      }
+      return item;
+    };
+    const exportRows = async ({ cursor = null, limit = 25, dirty = false } = {}) => {
+      if (!W.validCursor(cursor) || !Number.isInteger(limit) || limit < 1 || limit > 25) throw Object.assign(fail(), { code: 'invalid_request' });
+      await ready();
+      const result = await transaction(['items', 'summaries', 'cloudDirty'], 'readonly', (tx, done) => {
+        const rows = [], source = dirty ? tx.objectStore('cloudDirty') : tx.objectStore('items').index('recent');
+        const range = !dirty && cursor ? keyRange.upperBound(cursor, true) : null;
+        const request = source.openCursor(range, dirty ? 'next' : 'prev');
+        request.onsuccess = () => {
+          const current = request.result;
+          if (current && rows.length < limit + 1) { rows.push(current.value); current.continue(); return; }
+          const hasNext = rows.length > limit, selected = rows.slice(0, limit), items = [];
+          for (const selectedRow of selected) {
+            const append = row => {
+              if (!row) return;
+              const index = items.length; items.push(snapshot(row));
+              const cached = tx.objectStore('summaries').get(row.videoUrl);
+              cached.onsuccess = () => { items[index] = snapshot(row, cached.result); };
+            };
+            if (dirty) { const row = tx.objectStore('items').get(selectedRow.videoUrl); row.onsuccess = () => append(row.result); }
+            else append(selectedRow);
+          }
+          done({ items, hasNext, nextCursor: !dirty && hasNext ? W.cursor(selected.at(-1)) : null });
+        };
+      });
+      const cached = result.items.some(row => !row.durationIsLive && !C.durationSeconds(row.durationSeconds)) ? await durationCache() : {};
+      for (const row of result.items) row.durationSeconds = row.durationIsLive ? null : C.durationSeconds(row.durationSeconds) || W.cachedDuration(row.videoUrl, cached);
+      return result;
+    };
+    const acknowledge = async items => {
+      await ready();
+      return transaction(['cloudDirty'], 'readwrite', tx => {
+        const dirty = tx.objectStore('cloudDirty');
+        for (const item of items) {
+          const request = dirty.get(item.videoUrl);
+          request.onsuccess = () => { if (request.result?.updatedAt === item.updatedAt) dirty.delete(item.videoUrl); };
+        }
+      });
+    };
+    return { ready, recordSave, verify, mark, get, cachedSummary, page,
+      exportPage: (cursor = null, limit = 25) => exportRows({ cursor, limit }),
+      dirtyPage: (limit = 25) => exportRows({ limit, dirty: true }), acknowledge };
+
   };
   globalThis.MVSReaderWatchStore = { create };
 })();
