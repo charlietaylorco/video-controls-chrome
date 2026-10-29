@@ -578,7 +578,7 @@ watchTimerDefaultInput.addEventListener('change', () => {
     if (!value?.ok || value.code) output.textContent = errors[value?.code] || 'The connection needs attention. Local history is retained.';
     else if (value.phase === 'importing') output.textContent = `Importing retained history: ${value.imported} confirmed. You can close this page; the import resumes automatically.`;
     else if (value.ready) output.textContent = `Website ready. ${value.imported} imported. Changes sync automatically.${value.syncedAt ? ' Last confirmed ' + new Date(value.syncedAt).toLocaleString() + '.' : ''}`;
-    else if (value.connected) output.textContent = 'Connection verified. Choose Import history to copy retained data and switch Recent saves to the website.';
+    else if (value.connected) output.textContent = 'Connection verified. Choose Import history to copy retained data and enable sync. Local Recent saves stays available and remains the default.';
     else output.textContent = 'Not connected. Recent saves continues to open locally.';
     if (value?.retryAt) output.textContent += ` Next retry after ${new Date(value.retryAt).toLocaleTimeString()}.`;
   };

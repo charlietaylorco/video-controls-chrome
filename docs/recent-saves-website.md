@@ -90,8 +90,9 @@ absence. Destructive requests never retry automatically. Hosted Reader operation
 share a persisted rate budget and 429 cooldown. Other Reader clients still share
 the upstream token quota.
 
-Embeds load on click from YouTube's privacy-enhanced domain with a real HTTPS
-referrer. One player remains active; ordinary YouTube links remain available.
+Embeds load on click from YouTube's standard embed domain with a real HTTPS
+referrer. Browser cookies determine whether YouTube recognizes a signed-in session;
+watch history is not guaranteed. One player remains active; ordinary YouTube links remain available.
 Restricted or embedding-disabled videos may not play. The website timer stores a
 cloud deadline and reminds while the page is open; the extension's existing
 YouTube reminders remain a separate timer. Downie is a user-initiated protocol
