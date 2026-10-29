@@ -2,3 +2,9 @@
 output/
 
 node_modules/
+
+web/dist/
+web/.vercel/
+.env
+.env.*
+!.env.example

@@ -541,3 +541,60 @@ watchTimerDefaultInput.addEventListener('change', () => {
     showStatus(chrome.runtime.lastError ? 'Could not save timer default' : 'Viewing timer default saved');
   });
 });
+
+// Pairing is optional. Request exactly the chosen origin during this click;
+// no third-party service credentials leave the extension.
+(() => {
+  const site = document.getElementById('cloud-origin'), token = document.getElementById('cloud-token');
+  const connect = document.getElementById('cloud-connect'), migrate = document.getElementById('cloud-import');
+  const open = document.getElementById('cloud-open'), disconnect = document.getElementById('cloud-disconnect');
+  const output = document.getElementById('cloud-status');
+  if (!site || !globalThis.MVSRecentSavesCloud) return;
+  let busy = false, paired = null;
+  const errors = {
+    invalid_pairing: 'Enter a root HTTPS website address and its device token.', permission_required: 'Website permission is missing. Connect again to grant access.',
+    pairing_expired: 'The device token expired or was revoked. Generate a new token on the website and connect again.',
+    account_changed: 'The website account changed. Verify the intended account and connect again before importing.',
+    reader_account_changed: 'Reader credentials changed. Verify the website account and connect again before importing.',
+    network_error: 'The website could not be reached. Retained changes will retry automatically.', server_error: 'The website could not accept this batch. Retained changes will retry automatically.',
+    incomplete_acknowledgement: 'The website did not confirm the whole batch. The import is retained for retry.', invalid_response: 'The website returned an invalid response. Check its deployment.',
+    rate_limited: 'The website is rate limited. Retained changes will retry automatically.', storage_error: 'Could not save cloud sync settings. Local history is retained.',
+    pairing_required: 'Connect and verify the website first.', connection_changed: 'Connection changed. Check the current account before importing.'
+  };
+  const send = message => new Promise(resolve => {
+    chrome.runtime.sendMessage({ type: 'recent-saves-cloud', ...message }, reply => resolve(chrome.runtime.lastError ? { ok: false, code: 'storage_error' } : reply || { ok: false, code: 'storage_error' }));
+  });
+  const render = value => {
+    paired = value;
+    if (value?.origin && document.activeElement !== site) site.value = value.origin;
+    connect.disabled = busy; disconnect.disabled = busy || !value?.connected;
+    migrate.disabled = busy || !value?.connected || ['importing', 'paused'].includes(value.phase);
+    open.disabled = busy || !value?.connected;
+    if (!value?.ok || value.code) output.textContent = errors[value?.code] || 'The connection needs attention. Local history is retained.';
+    else if (value.phase === 'importing') output.textContent = `Importing retained history: ${value.imported} confirmed. You can close this page; the import resumes automatically.`;
+    else if (value.ready) output.textContent = `Website ready. ${value.imported} imported. Changes sync automatically.${value.syncedAt ? ' Last confirmed ' + new Date(value.syncedAt).toLocaleString() + '.' : ''}`;
+    else if (value.connected) output.textContent = 'Connection verified. Choose Import history to copy retained data and switch Recent saves to the website.';
+    else output.textContent = 'Not connected. Recent saves continues to open locally.';
+    if (value?.retryAt) output.textContent += ` Next retry after ${new Date(value.retryAt).toLocaleTimeString()}.`;
+  };
+  const refresh = async () => render(await send({ action: 'status' }));
+  connect.addEventListener('click', () => {
+    const origin = MVSRecentSavesCloud.origin(site.value.trim());
+    if (!origin) { output.textContent = errors.invalid_pairing; return; }
+    if (!chrome.permissions?.request) { output.textContent = errors.permission_required; return; }
+    busy = true; render(paired);
+    // The user gesture must reach permissions.request synchronously.
+    chrome.permissions.request({ origins: [origin + '/*'] }, async granted => {
+      if (chrome.runtime.lastError || !granted) { busy = false; await refresh(); output.textContent = errors.permission_required; return; }
+      const result = await send({ action: 'connect', origin, token: token.value.trim() });
+      busy = false;
+      if (result.ok) { token.value = ''; render(result); }
+      else { await refresh(); output.textContent = errors[result.code] || 'Could not verify this website.'; }
+    });
+  });
+  migrate.addEventListener('click', async () => { busy = true; render(paired); const result = await send({ action: 'import' }); busy = false; render(result); });
+  disconnect.addEventListener('click', async () => { busy = true; render(paired); const result = await send({ action: 'disconnect' }); busy = false; token.value = ''; render(result); });
+  open.addEventListener('click', () => { const origin = MVSRecentSavesCloud.origin(paired?.origin); if (origin) chrome.tabs.create({ url: origin + '/' }); });
+  chrome.storage.onChanged.addListener((changes, area) => { if (area === 'local' && changes.recentSavesCloud) void refresh(); });
+  void refresh();
+})();
