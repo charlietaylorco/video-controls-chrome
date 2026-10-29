@@ -22,6 +22,11 @@
     <div id="pair-result" hidden><label for="device-token">Device token · copy before leaving</label><input id="device-token" type="password" readonly spellcheck="false" autocomplete="off"><button id="copy-token" type="button">Copy token</button><p class="cloud-help">Keep this token private. It grants extension sync access to your library. It is separate from your Reader token and ChatGPT sign-in.</p></div>
     <p id="pair-status" role="status"></p>
   </section>
+  <section class="cloud-settings-section" aria-labelledby="integrations-heading">
+    <h2 id="integrations-heading">Reader &amp; Raindrop</h2>
+    <p>Integration tokens are protected server secrets. Check their connections without changing either library.</p>
+    <button id="check-integrations" type="button">Check connections</button><p id="integrations-status" role="status"></p>
+  </section>
   <section class="cloud-settings-section" aria-labelledby="export-heading">
     <h2 id="export-heading">Export & recovery</h2>
     <p>Download all cloud records, including descriptions, personal notes, summaries and deletion markers, as JSON for safekeeping.</p>

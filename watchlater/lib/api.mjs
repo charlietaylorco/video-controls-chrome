@@ -84,6 +84,22 @@ export function createApi({ db, env = {}, fetch: request = globalThis.fetch, now
         if (!device?.valid) throw fail('unauthorized');
       }
       if (message.type === 'cloud-ping') return send({ ok: true, scope: user.id });
+      if (message.type === 'cloud-check-integrations') {
+        const check = async (token, url, prefix, expected, raindrop = false) => {
+          if (!token?.trim()) return { configured:false, connected:false };
+          try {
+            const response = await request(url, {method:'GET',redirect:'error',cache:'no-store',credentials:'omit',signal:AbortSignal.timeout(15000),headers:{Authorization:prefix+token.trim()}});
+            const connected = response.status === expected && (!raindrop || (await response.json()).result === true);
+            return {configured:true,connected};
+          } catch { return {configured:true,connected:false}; }
+        };
+        const [reader,raindrop] = await Promise.all([
+          check(env.READER_TOKEN,'https://readwise.io/api/v2/auth/','Token ',204),
+          check(env.RAINDROP_TOKEN,'https://api.raindrop.io/rest/v1/user','Bearer ',200,true)
+        ]);
+        return send({ok:true,reader,raindrop});
+      }
+
       if (message.type === 'cloud-pair') {
         const deviceToken = token();
         await run('device', { action: 'create', hash: await hash(deviceToken) });

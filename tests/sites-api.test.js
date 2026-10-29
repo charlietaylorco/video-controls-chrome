@@ -245,3 +245,12 @@ test('post-write Reader readback failures are uncertain and never retried or rep
     assert(!f.calls.some(call => ['rs_mark','rs_verify'].includes(call.name)));
   }
 });
+
+
+test('integration checks use read-only authentication requests and never expose tokens', async () => {
+ const f=fixture({environment:{...env,RAINDROP_TOKEN:'private-raindrop'},fetch:(url,init)=>{assert.equal(init.method,'GET');return url.includes('readwise')?json(null,204):json({result:true});}});
+ const result=await f.call({type:'cloud-check-integrations'});
+ assert.deepEqual(result.body,{ok:true,reader:{configured:true,connected:true},raindrop:{configured:true,connected:true}});
+ assert.ok(!JSON.stringify(result.body).includes('private-raindrop'));
+ assert.equal((await f.call({type:'cloud-check-integrations'},{headers:{authorization:'Bearer '+'a'.repeat(43)}})).statusCode,403);
+});
