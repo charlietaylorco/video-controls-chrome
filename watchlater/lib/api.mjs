@@ -26,7 +26,7 @@ export function createApi({ db, env = {}, fetch: request = globalThis.fetch, now
     let response;
     try {
       response = await request(`https://readwise.io/api/v3/${path}`, {
-        method, cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(15000),
+        method, cache: 'no-store', redirect: 'manual', signal: AbortSignal.timeout(15000),
         headers: { Authorization: `Token ${env.READER_TOKEN.trim()}`, 'Content-Type': 'application/json' },
         ...(body ? { body: JSON.stringify(body) } : {})
       });
@@ -88,7 +88,7 @@ export function createApi({ db, env = {}, fetch: request = globalThis.fetch, now
         const check = async (token, url, prefix, expected, raindrop = false) => {
           if (!token?.trim()) return { configured:false, connected:false };
           try {
-            const response = await request(url, {method:'GET',redirect:'error',cache:'no-store',credentials:'omit',signal:AbortSignal.timeout(15000),headers:{Authorization:prefix+token.trim()}});
+            const response = await request(url, {method:'GET',redirect:'manual',cache:'no-store',credentials:'omit',signal:AbortSignal.timeout(15000),headers:{Authorization:prefix+token.trim()}});
             const connected = response.status === expected && (!raindrop || (await response.json()).result === true);
             return {configured:true,connected,...(!connected ? {reason:[401,403].includes(response.status)?'unauthorized':'http_error',status:response.status}: {})};
           } catch (error) { return {configured:true,connected:false,reason:['TimeoutError','AbortError'].includes(error?.name)?'timeout':'network_error'}; }
@@ -158,7 +158,7 @@ export function createApi({ db, env = {}, fetch: request = globalThis.fetch, now
         const row = await run('item', { videoUrl: message.videoUrl });
         if (!row || row.status === 'deleted') throw fail('document_changed');
         let result;
-        try { result = await request('https://api.raindrop.io/rest/v1/raindrop', { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(15000), headers: { Authorization: `Bearer ${env.RAINDROP_TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ link: row.videoUrl, title: row.title, collection: { $id: -1 } }) }); } catch { throw fail('save_uncertain'); }
+        try { result = await request('https://api.raindrop.io/rest/v1/raindrop', { method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(15000), headers: { Authorization: `Bearer ${env.RAINDROP_TOKEN.trim()}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ link: row.videoUrl, title: row.title, collection: { $id: -1 } }) }); } catch { throw fail('save_uncertain'); }
         if (!result.ok) throw fail('save_uncertain');
         const data = await result.json(); if (data?.result !== true) throw fail('save_uncertain');
         return send({ ok: true, saved: true });

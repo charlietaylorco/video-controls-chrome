@@ -29,6 +29,7 @@ function fixture({ rpc, fetch: customFetch, environment = env, currentUser = own
     if (name === 'rs_import') return params.p_args.items.map(item => item.videoUrl);
     return {};
   } }, fetch: async (url, init) => {
+    assert.equal(init.redirect, 'manual', 'Cloudflare supports manual redirects; never follow redirects with service credentials');
     network.push({ url, init });
     if (customFetch) { const result = await customFetch(url, init); if (result !== undefined) return result; }
     if (url.includes('readwise.io/api/v3/list/')) return json({ results: [readerDoc()] });
@@ -260,4 +261,15 @@ test('integration check failures report safe diagnostics without upstream bodies
  const result=await f.call({type:'cloud-check-integrations'});
  assert.deepEqual(result.body,{ok:true,reader:{configured:true,connected:false,reason:'unauthorized',status:401},raindrop:{configured:true,connected:false,reason:'network_error'}});
  assert.ok(!JSON.stringify(result.body).includes('private-'));
+});
+
+test('upstream redirects are rejected without following them or claiming a save', async () => {
+ const f=fixture({environment:{...env,RAINDROP_TOKEN:'private-raindrop'},fetch:()=>new Response(null,{status:302,headers:{Location:'https://other.example/'}})});
+ const check=await f.call({type:'cloud-check-integrations'});
+ assert.equal(check.body.reader.status,302);assert.equal(check.body.reader.connected,false);
+ assert.equal(check.body.raindrop.status,302);assert.equal(check.body.raindrop.connected,false);
+ assert.equal((await f.call({type:'watch-list-refresh',videoUrl,id:'reader1'})).body.code,'reader_error');
+ assert.equal((await f.call({type:'watch-card-action',action:'raindrop',videoUrl})).body.code,'save_uncertain');
+ assert.equal(f.network.length,4);
+ assert.ok(f.network.every(call=>!call.url.includes('other.example')));
 });
