@@ -4,10 +4,10 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 
-function background({ token = 'test-token', status = 200, result = true, fail = false } = {}) {
+function background({ token = 'test-token', status = 200, result = true, fail = false, settings = {} } = {}) {
   let listener;
   const requests = [];
-  const stored = {};
+  const stored = { ...settings };
   const context = {
     URL, AbortSignal, importScripts() {},
     chrome: {
@@ -43,6 +43,33 @@ test('Raindrop rejects non-YouTube URLs without a request', async () => {
     assert.equal((await app.save(url)).code, 'invalid_url');
   }
   assert.equal(app.requests.length, 0);
+});
+
+test('Raindrop applies optional tags and collection independently to future saves', async () => {
+  const url = 'https://www.youtube.com/watch?v=abc123';
+  for (const settings of [
+    { raindropTags: ['video', ' watch later ', '', 'video', null] },
+    { raindropCollectionId: 123 },
+    { raindropTags: ['video'], raindropCollectionId: 123 },
+  ]) {
+    const app = background({ settings });
+    assert.equal((await app.save(url)).ok, true);
+    const payload = JSON.parse(app.requests[0].body);
+    assert.deepEqual(payload.collection, { $id: settings.raindropCollectionId || -1 });
+    if (settings.raindropTags) assert.deepEqual(payload.tags, settings.raindropTags.length > 1 ? ['video', 'watch later'] : ['video']);
+    else assert.equal(Object.hasOwn(payload, 'tags'), false);
+    assert.equal((await app.state(url)).saved, true);
+  }
+});
+
+test('Raindrop handles malformed or cleared defaults safely', async () => {
+  for (const raindropCollectionId of [-1, 0, -99, 1.5, '123', null, Number.MAX_SAFE_INTEGER + 1]) {
+    const app = background({ settings: { raindropCollectionId, raindropTags: 'invalid' } });
+    await app.save('https://www.youtube.com/watch?v=abc123');
+    const payload = JSON.parse(app.requests[0].body);
+    assert.deepEqual(payload.collection, { $id: -1 });
+    assert.equal(Object.hasOwn(payload, 'tags'), false);
+  }
 });
 
 test('Raindrop reports missing credentials, API failures, and network failures', async () => {

@@ -704,18 +704,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ok: false, code: "invalid_url" });
       return undefined;
     }
-    chrome.storage.local.get({ raindropToken: "" }, async ({ raindropToken }) => {
+    chrome.storage.local.get({ raindropToken: "", raindropTags: [], raindropCollectionId: -1 }, async ({ raindropToken, raindropTags, raindropCollectionId }) => {
+      if (chrome.runtime.lastError) {
+        sendResponse({ ok: false, code: "save_failed" });
+        return;
+      }
       if (typeof raindropToken !== "string" || !raindropToken.trim()) {
         sendResponse({ ok: false, code: "missing_token" });
         return;
       }
+      const tags = [...new Set((Array.isArray(raindropTags) ? raindropTags : [])
+        .filter(tag => typeof tag === "string").map(tag => tag.trim()).filter(Boolean))];
+      const collectionId = Number.isSafeInteger(raindropCollectionId) && raindropCollectionId > 0 ? raindropCollectionId : -1;
       try {
         const response = await fetch("https://api.raindrop.io/rest/v1/raindrop", {
           method: "POST",
           signal: AbortSignal.timeout(15000),
           redirect: "error",
           headers: { Authorization: `Bearer ${raindropToken.trim()}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ link: targetUrl, collection: { $id: -1 }, pleaseParse: {} })
+          body: JSON.stringify({ link: targetUrl, collection: { $id: collectionId }, pleaseParse: {}, ...(tags.length ? { tags } : {}) })
         });
         if (!response.ok) {
           sendResponse({ ok: false, code: [401, 403].includes(response.status) ? "unauthorized" : "save_failed" });
