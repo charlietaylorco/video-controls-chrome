@@ -8,6 +8,7 @@
     <script src="options-ui.js" defer></script>
     <script src="recent-saves-cloud.js" defer></script>
     <script src="options.js" defer></script>
+    <script src="options-raindrop.js" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#settings">Skip to settings</a>
@@ -259,10 +260,19 @@
       <div class="token-row"><input class="token-input" id="reader-token" type="password" spellcheck="false" autocomplete="off" placeholder="Paste your API token" aria-describedby="reader-token-hint"><button class="save-button" id="save-token" type="button">Save token</button></div>
       <p class="hint" id="reader-token-hint">Get your token from <a href="https://readwise.io/access_token" target="_blank" rel="noreferrer">Readwise</a>. Stored locally in this browser.</p>
     </article><article class="settings-card connection-card" aria-labelledby="raindrop-heading">
-      <div class="connection-header"><span class="service-mark"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M5 15a4 4 0 0 1-1-7 5 5 0 0 1 9-3 4 4 0 1 1 2 10Z"/></svg></span><div><h3 id="raindrop-heading">Raindrop.io</h3><p>Save YouTube videos and embeds to Unsorted.</p></div></div>
+      <div class="connection-header"><span class="service-mark"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M5 15a4 4 0 0 1-1-7 5 5 0 0 1 9-3 4 4 0 1 1 2 10Z"/></svg></span><div><h3 id="raindrop-heading">Raindrop.io</h3><p>Save YouTube videos and embeds with optional tags and a collection.</p></div></div>
       <label class="token-label" for="raindrop-token">Raindrop.io API token</label>
       <div class="token-row"><input class="token-input" id="raindrop-token" type="password" spellcheck="false" autocomplete="off" placeholder="Paste your API token" aria-describedby="raindrop-token-hint"><button class="save-button" id="save-raindrop-token" type="button">Save token</button></div>
       <p class="hint" id="raindrop-token-hint">Create an app in <a href="https://app.raindrop.io/settings/integrations" target="_blank" rel="noreferrer">Raindrop integrations</a>, then paste its Test token here. Stored locally in this browser.</p>
+      <div class="raindrop-defaults">
+        <label class="token-label" for="raindrop-tags">Tags (optional)</label>
+        <input class="token-input" id="raindrop-tags" type="text" placeholder="e.g. video, watch later" aria-describedby="raindrop-tags-hint" disabled>
+        <p class="hint" id="raindrop-tags-hint">Separate tags with commas. Added to every future save from this extension. Leave blank for no tags. Changes save automatically.</p>
+        <label class="token-label" for="raindrop-collection">Collection (optional)</label>
+        <div class="token-row"><select id="raindrop-collection" aria-describedby="raindrop-collection-hint" disabled><option value="-1">Unsorted (default)</option></select><button class="save-button" id="refresh-raindrop-collections" type="button" disabled>Refresh collections</button></div>
+        <p class="hint" id="raindrop-collection-hint">Choose an existing collection for future saves. Changes save automatically; existing bookmarks stay as they are.</p>
+        <p class="hint" id="raindrop-settings-status" role="status" aria-live="polite"></p>
+      </div>
     </article><article class="settings-card connection-card" aria-labelledby="cloud-heading">
       <div class="connection-header"><span class="service-mark" aria-hidden="true">↗</span><div><h3 id="cloud-heading">Recent saves website</h3><p>Keep your retained videos and summaries in your private website.</p></div></div>
       <label class="token-label" for="cloud-origin">Website address</label>

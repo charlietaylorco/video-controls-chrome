@@ -469,23 +469,14 @@ const renderIconOrder = (focusAction, focusDelta) => {
     list.appendChild(row);
   });
 };
-const raindropTokenInput = document.getElementById("raindrop-token");
 const showRaindropInput = document.getElementById("show-raindrop");
-chrome.storage.local.get(["iconOrder", "raindropToken", "showRaindrop"], (result) => {
+chrome.storage.local.get(["iconOrder", "showRaindrop"], (result) => {
   iconOrder = [...new Set([...(Array.isArray(result.iconOrder) ? result.iconOrder : []), ...Object.keys(iconLabels)])]
     .filter((action) => Object.hasOwn(iconLabels, action));
   renderIconOrder();
-  raindropTokenInput.value = typeof result.raindropToken === "string" ? result.raindropToken : "";
   showRaindropInput.checked = result.showRaindrop !== false;
 });
 showRaindropInput.addEventListener("change", () => saveToggle("showRaindrop", showRaindropInput.checked, "Raindrop visibility saved"));
-const saveRaindropToken = () => chrome.storage.local.set({ raindropToken: raindropTokenInput.value.trim() }, () => {
-  showStatus(chrome.runtime.lastError ? "Could not save Raindrop token" : "Raindrop token saved");
-});
-document.getElementById("save-raindrop-token").addEventListener("click", saveRaindropToken);
-raindropTokenInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") { event.preventDefault(); saveRaindropToken(); }
-});
 
 const showReaderPanelInput = document.getElementById("show-reader-panel");
 chrome.storage.local.get(["showReaderPanel"], ({ showReaderPanel }) => {

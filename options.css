@@ -161,6 +161,9 @@ select { width: 142px; flex-shrink: 0; }
 .token-row .save-button { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 .token-row .save-button:hover { filter: brightness(.94); }
 .connection-card .hint { margin-bottom: 0; }
+.raindrop-defaults { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--line); }
+.raindrop-defaults .hint + .token-label { margin-top: 18px; }
+#raindrop-collection { flex: 1; width: 100%; }
 .page-footer { margin: 32px 0 0; color: var(--muted); font-size: 11px; }
 .status { position: fixed; z-index: 3; bottom: 24px; right: 24px; max-width: min(400px, calc(100vw - 32px)); padding: 13px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--accent); box-shadow: 0 6px 24px #0002; font-size: 12px; }
 .status:empty { padding: 0; border: 0; box-shadow: none; }
