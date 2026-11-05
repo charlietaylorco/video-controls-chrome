@@ -166,8 +166,11 @@ export function createApi({ db, env = {}, fetch: request = globalThis.fetch, now
       if (['watch-list-refresh', 'watch-list-move', 'watch-list-mark-watched', 'watch-list-prepare-delete'].includes(message.type)) {
         if (!env.READER_TOKEN?.trim()) throw fail('missing_token');
         const row = await retained(user.id, message);
-        const moving = message.type === 'watch-list-move', watching = message.type === 'watch-list-mark-watched';
-        if (moving && (!['later', 'shortlist', 'archive'].includes(message.location) || typeof message.baseLocation !== 'string')) throw fail('invalid_request');
+        const moving = message.type === 'watch-list-move';
+        const archiveWatched = moving && message.markWatched === true;
+        const watching = archiveWatched || message.type === 'watch-list-mark-watched';
+        if (moving && (!['later', 'shortlist', 'archive'].includes(message.location) || typeof message.baseLocation !== 'string' ||
+          (archiveWatched && message.location !== 'archive'))) throw fail('invalid_request');
         await budget(user.id, moving || watching ? { list: 2, update: 1 } : { list: 1 });
         let doc = await readDocument(user.id, row.videoUrl, row.readerId, true);
         if (!doc) { await run('mark', { videoUrl: row.videoUrl, id: row.readerId, status: 'missing', now: now() }); throw fail('not_found'); }
@@ -176,24 +179,24 @@ export function createApi({ db, env = {}, fetch: request = globalThis.fetch, now
           await run('ticket', { action: 'create', hash: await hash(ticket), snapshot: snapshot(doc) });
           return send({ ok: true, token: ticket, id: doc.id, title: doc.title, videoUrl: doc.videoUrl });
         }
-        if (moving) {
-          if (doc.location !== message.baseLocation) { await run('verify', { doc, now: now() }); throw fail('document_changed'); }
-          await retained(user.id, message);
-          await reader(user.id, `update/${encodeURIComponent(doc.id)}/`, 'PATCH', { location: message.location });
-          try { doc = await readDocument(user.id, row.videoUrl, row.readerId); }
-          catch (cause) { throw fail('save_uncertain', { retryAt: cause.retryAt, rateLimitSource: cause.rateLimitSource }); }
+        if (moving && doc.location !== message.baseLocation) {
+          await run('verify', { doc, now: now() }); throw fail('document_changed');
         }
-        if (watching && doc.readingProgress !== 1) {
+        const needsMove = moving && (!archiveWatched || doc.location !== message.location);
+        const needsProgress = watching && doc.readingProgress !== 1;
+        if (needsMove || needsProgress) {
           await retained(user.id, message);
-          try { await reader(user.id, `update/${encodeURIComponent(doc.id)}/`, 'PATCH', { reading_progress: 1 }); }
-          catch (cause) { if (cause.code === 'save_uncertain') throw fail('progress_uncertain'); throw cause; }
+          const body = { ...(moving ? { location: message.location } : {}), ...(watching ? { reading_progress: 1 } : {}) };
+          const uncertain = archiveWatched ? 'archive_watched_uncertain' : moving ? 'save_uncertain' : 'progress_uncertain';
+          try { await reader(user.id, `update/${encodeURIComponent(doc.id)}/`, 'PATCH', body); }
+          catch (cause) { if (cause.code === 'save_uncertain') throw fail(uncertain); throw cause; }
           try { doc = await readDocument(user.id, row.videoUrl, row.readerId); }
-          catch (cause) { throw fail('progress_uncertain', { retryAt: cause.retryAt, rateLimitSource: cause.rateLimitSource }); }
+          catch (cause) { throw fail(uncertain, { retryAt: cause.retryAt, rateLimitSource: cause.rateLimitSource }); }
         }
         const item = await run('verify', { doc, now: now() });
         if (!item || item.readerId !== doc.id || item.status !== 'saved') throw fail('document_changed');
-        if (watching && doc.readingProgress !== 1) throw fail('progress_not_applied');
         if (moving && doc.location !== message.location) throw fail('location_not_applied');
+        if (watching && doc.readingProgress !== 1) throw fail('progress_not_applied');
         return send({ ok: true, item, ...(moving ? { location: doc.location } : {}) });
       }
       if (message.type === 'watch-list-delete') {

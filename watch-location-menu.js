@@ -3,11 +3,12 @@
   const create = ({ document = globalThis.document, window = globalThis.window, isCurrent, choose }) => {
     const root = document.createElement('div'); root.id = 'recent-location-menu'; root.className = 'location-menu'; root.hidden = true; root.setAttribute('role', 'menu'); document.body.append(root);
     let current = null;
-    const options = [...Object.entries(globalThis.MVSReaderCore.locations), ['trash', 'Trash…']];
-    const buttons = options.map(([value, label]) => {
+    const options = [...Object.entries(globalThis.MVSReaderCore.locations).map(([value, label]) => [value, label, true]),
+      ['archive-watched', 'Archive and watched'], ['trash', 'Trash…']];
+    const buttons = options.map(([value, label, location]) => {
       if (value === 'trash') { const separator = document.createElement('div'); separator.className = 'menu-separator'; separator.setAttribute('role', 'separator'); root.append(separator); }
       const button = document.createElement('button'); button.type = 'button'; button.tabIndex = -1; button.className = value === 'trash' ? 'menu-item destructive-item' : 'menu-item';
-      button.setAttribute('role', value === 'trash' ? 'menuitem' : 'menuitemradio'); button.setAttribute('aria-label', label);
+      button.setAttribute('role', location ? 'menuitemradio' : 'menuitem'); button.setAttribute('aria-label', label);
       const text = document.createElement('span'); text.textContent = label; button.append(text);
       const check = document.createElement('span'); check.className = 'menu-check'; check.setAttribute('aria-hidden', 'true'); button.append(check);
       button.addEventListener('click', event => {
@@ -15,7 +16,7 @@
         if (!captured || !isCurrent(captured)) { close(true); return; }
         close(true); choose(captured, value, event);
       });
-      root.append(button); return { button, check, value, label };
+      root.append(button); return { button, check, value, label, location };
     });
     const close = (focus = false) => {
       const previous = current; current = null; root.hidden = true;
@@ -38,7 +39,7 @@
       close(); if (!isCurrent(target) || target.trigger.disabled || !target.trigger.isConnected) return;
       current = Object.freeze({ ...target }); root.setAttribute('aria-label', `Saved location for ${target.title || 'video'}`);
       for (const row of buttons) {
-        if (row.value !== 'trash') row.button.setAttribute('aria-checked', String(row.value === target.location));
+        if (row.location) row.button.setAttribute('aria-checked', String(row.value === target.location));
         row.check.textContent = row.value === target.location ? '✓' : '';
       }
       root.hidden = false; target.trigger.setAttribute('aria-expanded', 'true'); place();

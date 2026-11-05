@@ -558,6 +558,35 @@ test('durable summary schedule fills actual IndexedDB/Watch bridge cache without
   assert.ok(a.notifications.length >= 2); assert.ok(!JSON.stringify(page).includes('Private saved note'));
 });
 
+test('Archive and watched verifies and persists both fields, including when Reader only applies the move', async () => {
+  for (const ignoreProgress of [false, true]) {
+    const a = app({ responder: (url, init, documents) => {
+      if (ignoreProgress && init.method === 'PATCH') {
+        documents.get('doc-a').location = 'archive';
+        return { id: 'doc-a' };
+      }
+    } });
+    await a.record();
+    const move = baseLocation => a.call('watch-list-move', { videoUrl: A, id: 'doc-a', location: 'archive', baseLocation, markWatched: true });
+    assert.equal((await move('shortlist')).code, 'location_conflict');
+    assert.equal(a.requests.filter(request => request.method === 'PATCH').length, 0);
+    const result = await move('later');
+    assert.equal(result.ok, !ignoreProgress);
+    assert.equal(result.code, ignoreProgress ? 'progress_not_applied' : undefined);
+    const [patch] = a.requests.filter(request => request.method === 'PATCH');
+    assert.equal(patch.url, 'https://readwise.io/api/v3/update/doc-a/');
+    assert.deepEqual(JSON.parse(patch.body), { location: 'archive', reading_progress: 1 });
+    const [archived] = (await a.store.page({ filter: 'archive' })).items;
+    assert.equal(archived.readingProgress, ignoreProgress ? null : 1);
+    assert.equal(a.documents.get('doc-a').notes, 'Private saved note');
+    assert.equal(a.requests.filter(request => request.method === 'PATCH').length, 1);
+    if (!ignoreProgress) {
+      assert.equal((await move('archive')).ok, true);
+      assert.equal(a.requests.filter(request => request.method === 'PATCH').length, 1);
+    }
+  }
+});
+
 test('Mark as watched PATCHes only reading_progress=1, verifies 100%, persists it and leaves notes/location intact', async () => {
   const a = app(); await a.record();
   const result = await a.call('watch-list-mark-watched', { videoUrl: A, id: 'doc-a' });

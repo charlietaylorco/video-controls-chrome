@@ -33,19 +33,21 @@ function fixture() {
 test('custom menu exposes checked location, one roving focus target and distinct destructive action', () => {
   const f = fixture(); f.menu.open(f.target);
   assert.equal(f.root.hidden, false); assert.equal(f.trigger.getAttribute('aria-expanded'), 'true'); assert.equal(f.document.activeElement, f.buttons[0]);
-  assert.equal(f.buttons[0].getAttribute('aria-checked'), 'true'); assert.equal(f.buttons[3].getAttribute('role'), 'menuitem');
+  assert.equal(f.buttons[0].getAttribute('aria-checked'), 'true'); assert.equal(f.buttons.at(-1).getAttribute('role'), 'menuitem');
+  assert.equal(f.buttons.at(-1).getAttribute('aria-label'), 'Trash…');
   assert.equal(f.buttons.filter(button => button.tabIndex === 0).length, 1); assert.equal(f.chosen.length, 0);
 });
 test('arrow wrap, Home/End, typeahead and Escape preserve predictable menu focus', () => {
-  const f = fixture(); f.menu.open(f.target); f.key('ArrowUp'); assert.equal(f.document.activeElement, f.buttons[3]);
-  f.key('Home'); assert.equal(f.document.activeElement, f.buttons[0]); f.key('End'); assert.equal(f.document.activeElement, f.buttons[3]);
+  const f = fixture(); f.menu.open(f.target); f.key('ArrowUp'); assert.equal(f.document.activeElement, f.buttons.at(-1));
+  f.key('ArrowUp'); assert.equal(f.document.activeElement.getAttribute('aria-label'), 'Archive and watched');
+  f.key('Home'); assert.equal(f.document.activeElement, f.buttons[0]); f.key('End'); assert.equal(f.document.activeElement, f.buttons.at(-1));
   f.key('s'); assert.equal(f.document.activeElement, f.buttons[1]); f.key('Escape');
   assert.equal(f.root.hidden, true); assert.equal(f.document.activeElement, f.trigger); assert.equal(f.trigger.getAttribute('aria-expanded'), 'false');
 });
 test('selection uses the captured identity and stale document snapshots cannot invoke a move or Trash', () => {
   const f = fixture(); f.menu.open(f.target); f.buttons[2].emit('click');
   assert.equal(f.chosen.length, 1); assert.equal(f.chosen[0].value, 'archive'); assert.equal(f.chosen[0].snapshot.id, 'doc-a'); assert.equal(f.root.hidden, true);
-  f.menu.open(f.target); f.invalidate(); f.buttons[3].emit('click'); assert.equal(f.chosen.length, 1); assert.equal(f.root.hidden, true);
+  f.menu.open(f.target); f.invalidate(); f.buttons.at(-1).emit('click'); assert.equal(f.chosen.length, 1); assert.equal(f.root.hidden, true);
 });
 test('outside pointer/focus dismissal never steals focus while interactions inside stay open', () => {
   const f = fixture(); f.menu.open(f.target); f.document.emit('pointerdown', { target: f.buttons[1] }); assert.equal(f.root.hidden, false);

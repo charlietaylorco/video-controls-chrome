@@ -37,6 +37,7 @@
     watch_storage_error: 'Local Recent saves storage is unavailable or full. Reader may already have changed; check Reader before retrying. Free storage and reopen this page.',
     progress_not_applied: 'Reader has not reported 100% progress. Refresh to check before trying again.',
     progress_uncertain: 'Watched status could not be confirmed. Refresh to check Reader before trying again.',
+    archive_watched_uncertain: 'Archive and watched could not be confirmed. Refresh to check Reader before trying again.',
     network_error: 'Reader could not be reached. Cached videos are still available.', location_conflict: 'Reader’s location changed. Review its current location before moving again.',
     location_not_applied: 'Reader kept a different location. That destination may not be enabled in your Library.',
     location_uncertain: 'The move could not be confirmed. Refresh before moving again.', location_cache_error: 'Reader changed, but the local list could not be updated. Refresh to check.',
@@ -53,6 +54,7 @@
   const menuCurrent = target => loaded && !refreshing && !pending.size && !deletion && items.some(item => item.videoUrl === target.videoUrl && item.readerId === target.id && item.location === target.location && item.status === 'saved');
   const locationMenu = globalThis.MVSWatchLocationMenu.create({ isCurrent: menuCurrent, choose: (target, value, event) => {
     if (value === 'trash') void prepareDelete(target.videoUrl, target.trigger, event.metaKey === true);
+    else if (value === 'archive-watched') void mutate(target.videoUrl, 'archive', target.trigger, true);
     else void mutate(target.videoUrl, value, target.trigger);
   } });
   const restoreActionFocus = origin => {
@@ -232,15 +234,17 @@
     if (!reply.ok) rememberError(url, messageFor(reply));
     await load(); announce(reply.ok ? 'Marked as watched in Reader.' : messageFor(reply), !reply.ok); restoreActionFocus(origin);
   };
-  const mutate = async (url, destination, origin) => {
+  const mutate = async (url, destination, origin, markWatched = false) => {
     const item = items.find(row => row.videoUrl === url); if (!item || pending.has(url)) return;
     const request = refreshRequest;
     pending.add(url); errors.delete(url); render();
-    const reply = await send({ type: 'watch-list-move', videoUrl: url, id: item.readerId, location: destination, baseLocation: item.location });
+    const reply = await send({ type: 'watch-list-move', videoUrl: url, id: item.readerId, location: destination, baseLocation: item.location,
+      ...(markWatched ? { markWatched: true } : {}) });
     pending.delete(url);
     if (request !== refreshRequest) { render(); return; }
     if (!reply.ok) rememberError(url, messageFor(reply));
-    await load(); announce(reply.ok ? `Moved to ${C.locationLabel(destination)}.` : messageFor(reply), !reply.ok); restoreActionFocus(origin);
+    const success = markWatched ? 'Archived and marked as watched in Reader.' : `Moved to ${C.locationLabel(destination)}.`;
+    await load(); announce(reply.ok ? success : messageFor(reply), !reply.ok); restoreActionFocus(origin);
   };
   const prepareDelete = async (url, origin, skipConfirmation = false) => {
     const item = items.find(row => row.videoUrl === url);

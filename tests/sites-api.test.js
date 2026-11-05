@@ -282,6 +282,35 @@ test('upstream redirects are rejected without following them or claiming a save'
  assert.ok(f.network.every(call=>!call.url.includes('other.example')));
 });
 
+test('hosted Archive and watched sends one PATCH and requires both fields in readback', async () => {
+  for (const ignoreLocation of [false, true]) {
+    let doc = readerDoc({ reading_progress: 0.25 });
+    const f = fixture({ fetch: async (url, init) => {
+      if (init.method === 'PATCH') {
+        const fields = JSON.parse(init.body);
+        doc = { ...doc, ...fields, ...(ignoreLocation ? { location: doc.location } : {}) };
+        return json({ id: 'reader1' });
+      }
+      return json({ results: [doc] });
+    } });
+    const message = { type: 'watch-list-move', videoUrl, id: 'reader1', location: 'archive', baseLocation: 'later', markWatched: true };
+    const { body } = await f.call(message);
+    assert.equal(body.ok, !ignoreLocation);
+    assert.equal(body.code, ignoreLocation ? 'location_not_applied' : undefined);
+    assert.equal(f.network.length, 3);
+    assert.equal(f.network[1].init.method, 'PATCH');
+    assert.equal(f.network[1].url, 'https://readwise.io/api/v3/update/reader1/');
+    assert.deepEqual(JSON.parse(f.network[1].init.body), { location: 'archive', reading_progress: 1 });
+    const verified = f.calls.find(call => call.name === 'rs_verify').params.p_args.doc;
+    assert.equal(verified.location, ignoreLocation ? 'later' : 'archive');
+    assert.equal(verified.readingProgress, 1);
+    if (!ignoreLocation) {
+      assert.equal((await f.call({ ...message, baseLocation: 'archive' })).body.ok, true);
+      assert.equal(f.network.filter(call => call.init.method === 'PATCH').length, 1);
+    }
+  }
+});
+
 test('hosted Mark as watched sends only progress and verifies readback without exposing Reader notes', async () => {
   let progress = 0.25;
   const f = fixture({ fetch: async (url, init) => {

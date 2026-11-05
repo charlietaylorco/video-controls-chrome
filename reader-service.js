@@ -256,9 +256,10 @@
       catch (e) { throw error('progress_uncertain', { retryAt: e.retryAt, rateLimitSource: e.rateLimitSource }); }
       return { ok: actual.readingProgress === 1, code: actual.readingProgress === 1 ? undefined : 'progress_not_applied', document: actual };
     };
-    const moveLocation = async message => {
+    const moveLocation = async (message, markWatched = false) => {
       const url = C.canonical(message.pageUrl);
-      if (!url || !C.validId(message.id) || !Object.hasOwn(C.locations, message.location) || typeof message.baseLocation !== 'string')
+      if (!url || !C.validId(message.id) || !Object.hasOwn(C.locations, message.location) || typeof message.baseLocation !== 'string' ||
+        (markWatched && message.location !== 'archive'))
         throw error('invalid_location');
       const checkMapping = async () => {
         await storageQueue;
@@ -266,20 +267,25 @@
         if (mapped && mapped !== message.id) throw error('document_changed');
       };
       await checkMapping();
+      if (markWatched) await capacity({ list: 2, update: 1 });
       const doc = await byId(url, message.id);
       if (doc.location !== message.baseLocation) return { ok: false, code: 'location_conflict', document: doc };
-      if (doc.location === message.location) return { ok: true, document: doc };
+      if (doc.location === message.location && (!markWatched || doc.readingProgress === 1)) return { ok: true, document: doc };
       await checkMapping();
-      try { await api(`update/${encodeURIComponent(doc.id)}/`, { method: 'PATCH', body: JSON.stringify({ location: message.location }) }); }
-      catch (e) { if (e.code === 'save_uncertain') throw error('location_uncertain'); throw e; }
+      const body = { location: message.location, ...(markWatched ? { reading_progress: 1 } : {}) };
+      const uncertain = markWatched ? 'archive_watched_uncertain' : 'location_uncertain';
+      try { await api(`update/${encodeURIComponent(doc.id)}/`, { method: 'PATCH', body: JSON.stringify(body) }); }
+      catch (e) { if (e.code === 'save_uncertain') throw error(uncertain); throw e; }
       // UPDATE returns only id/url; account configuration can redirect a move.
       // Read back the actual location instead of optimistically claiming success.
       let actual;
       try { actual = await byId(url, doc.id); }
-      catch { throw error('location_uncertain'); }
+      catch (e) { throw error(uncertain, { retryAt: e.retryAt, rateLimitSource: e.rateLimitSource }); }
       try { await write({ readerDocumentUpdates: { id: actual.id, videoUrl: url, location: actual.location, updatedAt: actual.updatedAt, at: now() } }); }
       catch { throw error('location_cache_error'); }
-      return { ok: actual.location === message.location, code: actual.location === message.location ? undefined : 'location_not_applied', document: actual };
+      const code = actual.location !== message.location ? 'location_not_applied'
+        : markWatched && actual.readingProgress !== 1 ? 'progress_not_applied' : undefined;
+      return { ok: !code, code, document: actual };
     };
     const getCard = async (message) => {
       const url = C.canonical(message.targetUrl);
@@ -336,7 +342,7 @@
           return { ok: true, document: await byId(url, message.id) };
         }
         if (message.type === 'reader-watch-mark-watched') return markWatched(message);
-        if (message.type === 'reader-watch-move') return moveLocation(message);
+        if (message.type === 'reader-watch-move') return moveLocation(message, message.markWatched === true);
         if (message.type === 'reader-watch-delete') return deleteDocument(message, { requireDelete: true });
         if (message.type === 'reader-card-get') return getCard(message);
         if (message.type === 'reader-card-delete') return deleteCard(message);
