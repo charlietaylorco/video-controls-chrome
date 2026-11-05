@@ -163,12 +163,12 @@ export function createApi({ db, env = {}, fetch: request = globalThis.fetch, now
         const data = await result.json(); if (data?.result !== true) throw fail('save_uncertain');
         return send({ ok: true, saved: true });
       }
-      if (['watch-list-refresh', 'watch-list-move', 'watch-list-prepare-delete'].includes(message.type)) {
+      if (['watch-list-refresh', 'watch-list-move', 'watch-list-mark-watched', 'watch-list-prepare-delete'].includes(message.type)) {
         if (!env.READER_TOKEN?.trim()) throw fail('missing_token');
         const row = await retained(user.id, message);
-        const moving = message.type === 'watch-list-move';
+        const moving = message.type === 'watch-list-move', watching = message.type === 'watch-list-mark-watched';
         if (moving && (!['later', 'shortlist', 'archive'].includes(message.location) || typeof message.baseLocation !== 'string')) throw fail('invalid_request');
-        await budget(user.id, moving ? { list: 2, update: 1 } : { list: 1 });
+        await budget(user.id, moving || watching ? { list: 2, update: 1 } : { list: 1 });
         let doc = await readDocument(user.id, row.videoUrl, row.readerId, true);
         if (!doc) { await run('mark', { videoUrl: row.videoUrl, id: row.readerId, status: 'missing', now: now() }); throw fail('not_found'); }
         if (message.type === 'watch-list-prepare-delete') {
@@ -183,8 +183,16 @@ export function createApi({ db, env = {}, fetch: request = globalThis.fetch, now
           try { doc = await readDocument(user.id, row.videoUrl, row.readerId); }
           catch (cause) { throw fail('save_uncertain', { retryAt: cause.retryAt, rateLimitSource: cause.rateLimitSource }); }
         }
+        if (watching && doc.readingProgress !== 1) {
+          await retained(user.id, message);
+          try { await reader(user.id, `update/${encodeURIComponent(doc.id)}/`, 'PATCH', { reading_progress: 1 }); }
+          catch (cause) { if (cause.code === 'save_uncertain') throw fail('progress_uncertain'); throw cause; }
+          try { doc = await readDocument(user.id, row.videoUrl, row.readerId); }
+          catch (cause) { throw fail('progress_uncertain', { retryAt: cause.retryAt, rateLimitSource: cause.rateLimitSource }); }
+        }
         const item = await run('verify', { doc, now: now() });
         if (!item || item.readerId !== doc.id || item.status !== 'saved') throw fail('document_changed');
+        if (watching && doc.readingProgress !== 1) throw fail('progress_not_applied');
         if (moving && doc.location !== message.location) throw fail('location_not_applied');
         return send({ ok: true, item, ...(moving ? { location: doc.location } : {}) });
       }

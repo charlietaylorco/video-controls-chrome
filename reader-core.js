@@ -50,6 +50,7 @@
       author: typeof doc.author === 'string' ? doc.author : '',
       summary: typeof doc.summary === 'string' ? doc.summary : '',
       notes: typeof doc.notes === 'string' ? doc.notes : '',
+      readingProgress: typeof doc.reading_progress === 'number' && Number.isFinite(doc.reading_progress) && doc.reading_progress >= 0 && doc.reading_progress <= 1 ? doc.reading_progress : null,
       location: typeof doc.location === 'string' ? doc.location : '',
       tags: doc.tags && typeof doc.tags === 'object' ? tags.filter(tag => typeof tag === 'string').slice(0, 100) : null,
       updatedAt: typeof doc.updated_at === 'string' ? doc.updated_at : '' };

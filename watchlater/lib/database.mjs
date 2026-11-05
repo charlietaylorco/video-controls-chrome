@@ -173,6 +173,7 @@ export function createDatabase(db, { now = Date.now } = {}) {
           if (!old || previous.readerId !== doc.id || previous.status === 'deleted') return { result: null };
           const { revision, ...value } = previous;
           Object.assign(value, { readerId: doc.id, title: doc.title || previous.title, author: doc.author || previous.author, location: doc.location, tags: Array.isArray(doc.tags) ? doc.tags : previous.tags,
+            readingProgress: doc.readingProgress ?? null,
             summary: doc.summary, summaryTruncated: doc.summaryTruncated, summaryCheckedAt: args.now, checkedAt: args.now, status: 'saved' });
           return { next: { value, cloudUpdatedAt: args.now } };
         });

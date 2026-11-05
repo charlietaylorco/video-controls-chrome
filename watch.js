@@ -35,6 +35,8 @@
     delete_unverified: 'The extension did not verify deletion. Refresh before trying again.',
     delete_cache_error: 'Reader confirmed deletion, but local indicators could not be updated. Refresh to check.',
     watch_storage_error: 'Local Recent saves storage is unavailable or full. Reader may already have changed; check Reader before retrying. Free storage and reopen this page.',
+    progress_not_applied: 'Reader has not reported 100% progress. Refresh to check before trying again.',
+    progress_uncertain: 'Watched status could not be confirmed. Refresh to check Reader before trying again.',
     network_error: 'Reader could not be reached. Cached videos are still available.', location_conflict: 'Reader’s location changed. Review its current location before moving again.',
     location_not_applied: 'Reader kept a different location. That destination may not be enabled in your Library.',
     location_uncertain: 'The move could not be confirmed. Refresh before moving again.', location_cache_error: 'Reader changed, but the local list could not be updated. Refresh to check.',
@@ -101,6 +103,8 @@
     const note = node('p', '', footerDetails, 'row-status'); note.setAttribute('role', 'status');
     const footerMeta = node('div', '', footerDetails, 'footer-meta'), date = node('time', '', footerMeta);
     const footerActions = node('div', '', footer, 'footer-actions');
+    const watched = node('button', 'Mark as watched', footerActions, 'card-watched'); watched.type = 'button';
+    watched.addEventListener('click', () => void markWatched(item.videoUrl, watched));
     const trash = node('button', '', footerActions, 'card-trash'); trash.type = 'button'; trash.title = 'Delete from Reader';
     icon(trash, 'M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7');
     trash.addEventListener('click', event => void prepareDelete(item.videoUrl, trash, event.metaKey === true));
@@ -114,7 +118,7 @@
     });
     refresh.addEventListener('click', () => void refreshCard(item.videoUrl, refresh));
     const extras = globalThis.MVSWatchExtras?.attach({ card, mediaBox, copy, item, announce, reload: reloadLocal });
-    return { card, link, channel, tagList, date, duration, summary, move, readerLink, refresh, trash, note, thumbnailLink, thumbnail, actions, extras };
+    return { card, link, channel, tagList, date, duration, summary, move, readerLink, refresh, watched, trash, note, thumbnailLink, thumbnail, actions, extras };
   };
   const render = () => {
     const order = items.map(item => item.videoUrl);
@@ -164,6 +168,10 @@
       row.summary.textContent = text + (item.summaryTruncated ? '\n\nCached excerpt. Open Reader for the full summary.' : '');
       row.summary.dataset.empty = String(!item.summary);
       row.move.disabled = pending.size > 0 || refreshing || Boolean(deletion) || !item.readerId || item.status !== 'saved' || !loaded;
+      row.watched.textContent = item.readingProgress === 1 ? 'Watched' : 'Mark as watched';
+      row.watched.disabled = row.move.disabled || item.readingProgress === 1;
+      row.watched.dataset.watched = String(item.readingProgress === 1);
+      row.watched.setAttribute('aria-label', item.readingProgress === 1 ? `${item.title || 'Video'} watched` : `Mark ${item.title || 'video'} as watched`);
       row.trash.disabled = row.move.disabled; row.trash.setAttribute('aria-label', `Trash ${item.title || 'video'} from Reader`);
       row.refresh.disabled = pending.size > 0 || refreshing || Boolean(deletion) || !item.readerId || item.status === 'deleted' || !loaded;
       row.move.setAttribute('aria-label', `Saved location for ${item.title || 'video'}`);
@@ -211,6 +219,18 @@
     if (request !== refreshRequest || !items.some(row => row.videoUrl === url && row.readerId === id)) { render(); return; }
     if (!reply.ok) rememberError(url, messageFor(reply));
     await load(); announce(reply.ok ? 'Card updated from Reader.' : messageFor(reply), !reply.ok); restoreActionFocus(origin);
+  };
+  const markWatched = async (url, origin) => {
+    const item = items.find(row => row.videoUrl === url);
+    if (!item?.readerId || item.status !== 'saved' || item.readingProgress === 1 || !loaded || refreshing || pending.size || deletion) return;
+    locationMenu.close();
+    const request = refreshRequest, id = item.readerId;
+    pending.add(url); errors.delete(url); render();
+    const reply = await send({ type: 'watch-list-mark-watched', videoUrl: url, id });
+    pending.delete(url);
+    if (request !== refreshRequest || !items.some(row => row.videoUrl === url && row.readerId === id)) { render(); return; }
+    if (!reply.ok) rememberError(url, messageFor(reply));
+    await load(); announce(reply.ok ? 'Marked as watched in Reader.' : messageFor(reply), !reply.ok); restoreActionFocus(origin);
   };
   const mutate = async (url, destination, origin) => {
     const item = items.find(row => row.videoUrl === url); if (!item || pending.has(url)) return;

@@ -69,7 +69,9 @@ h1{font-size:27px;letter-spacing:-.035em;line-height:1.2;margin:0;font-weight:65
 .summary-text{font-size:14px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere;margin:19px 0 12px;min-height:76px}
 .summary-text[data-empty=true]{color:var(--muted);font-size:13px}
 .card-footer{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;min-width:0}
-.footer-actions{display:flex;gap:4px;flex-shrink:0}
+.footer-actions{display:flex;align-items:center;gap:4px;flex-shrink:0}
+.card-watched{padding:5px 7px;border:0;background:transparent;color:var(--muted);font-size:11px}
+.card-watched[data-watched=true]{color:var(--accent);opacity:1}
 .footer-actions .card-trash{color:var(--error);width:28px;height:28px;padding:0}
 .footer-actions .card-trash svg{width:14px;height:14px}
 .yt-lists-link{margin-left:auto;color:var(--muted);font-size:12px;text-decoration:none;padding:6px 0}

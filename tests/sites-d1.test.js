@@ -178,3 +178,12 @@ test('Sites API requires validated private owner context and uses URL-safe 256-b
   const ping = await api.handle({ type: 'cloud-ping' }, { ...owner, device: true, deviceToken: paired.token }); assert.equal(ping.scope, 'owner');
   const stored = f.sqlite.prepare('SELECT token_hash FROM rs_devices').get(); assert.match(stored.token_hash, /^[a-f0-9]{64}$/); assert(!JSON.stringify(stored).includes(paired.token));
 });
+
+test('watched progress survives real D1 verification, page reads and export without modifying notes/location', async t => {
+  const f = fixture(t); await f.rpc('import', { items: [f.source(1, { readingProgress: 0.2 })] });
+  const before = await f.rpc('item', { videoUrl: url(1) }); assert.equal(before.readingProgress, 0.2);
+  await f.rpc('verify', { doc: { id: 'reader1', videoUrl: url(1), location: 'later', readingProgress: 1, summary: 'Summary' }, now: base });
+  const after = await f.rpc('item', { videoUrl: url(1) }); assert.equal(after.readingProgress, 1);
+  assert.equal(after.notes, before.notes); assert.equal(after.description, before.description); assert.equal(after.location, before.location);
+  for (const options of [{ filter: 'all' }, { export: true }]) assert.equal((await f.rpc('page', options)).items[0].readingProgress, 1);
+});

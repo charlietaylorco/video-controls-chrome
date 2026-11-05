@@ -99,6 +99,7 @@
           durationSeconds: keepLive ? null : seconds || C.durationSeconds(previous?.durationSeconds),
           durationIsLive: keepLive,
           tags: previous?.readerId === id && previous.status === 'saved' ? previous.tags : null,
+          readingProgress: previous?.readerId === id && previous.status === 'saved' ? previous.readingProgress ?? null : null,
           location: previous?.readerId === id && previous.status === 'saved' ? previous.location : '',
           checkedAt: previous?.readerId === id && previous.status === 'saved' ? previous.checkedAt : 0, status: 'saved', provenance: 'extension' };
       });
@@ -108,6 +109,7 @@
       const at = now(), summary = W.text(doc.summary, W.SUMMARY_LIMIT);
       return update(videoUrl, previous => !previous || previous.status === 'deleted' || previous.readerId && previous.readerId !== doc.id && previous.status !== 'missing' ? null : {
         ...previous, readerId: doc.id, title: W.text(doc.title, 500) || previous.title, author: W.text(doc.author, 300) || previous.author,
+        readingProgress: doc.readingProgress ?? null,
         tags: Array.isArray(doc.tags) ? W.tags(doc.tags) : previous.readerId === doc.id && previous.status === 'saved' ? previous.tags : null, location: W.text(doc.location, 100), status: 'saved', checkedAt: at,
       }, { videoUrl, id: doc.id, summary, truncated: typeof doc.summary === 'string' && doc.summary.length > summary.length, checkedAt: at });
     };
