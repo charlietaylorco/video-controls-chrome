@@ -424,6 +424,31 @@ test('Recent saves renders pending and reloads the local summary on readiness wi
   assert.equal(f.messages.filter(message => message.type === 'watch-list-refresh').length, 0);
 });
 
+test('Archive and watched is a separate menu action and sends one update for the selected card', async () => {
+  const f = fixture(); await f.flush(); let release;
+  f.responder = (message, fallback) => message.type === 'watch-list-move' ? new Promise(resolve => { release = resolve; }) : fallback(message);
+  const trigger = f.findClass('location-trigger')[0];
+  trigger.click();
+  const options = f.findClass('menu-item');
+  const archive = options.find(button => button.attrs['aria-label'] === 'Archive');
+  const combined = options[options.indexOf(archive) + 1];
+  assert.equal(archive.attrs.role, 'menuitemradio');
+  assert.equal(combined.attrs['aria-label'], 'Archive and watched');
+  assert.equal(combined.attrs.role, 'menuitem');
+  assert.equal(combined.attrs['aria-checked'], undefined);
+  combined.click(); combined.click(); await f.flush();
+  const writes = f.messages.filter(message => message.type === 'watch-list-move');
+  assert.deepEqual(writes.map(message => ({ ...message })), [{
+    type: 'watch-list-move', videoUrl: f.defaultItems[0].videoUrl, id: 'doc-0', location: 'archive', baseLocation: 'later', markWatched: true,
+  }]);
+  assert.equal(trigger.disabled, true);
+  Object.assign(f.defaultItems[0], { location: 'archive', readingProgress: 1 });
+  release({ ok: true }); await f.flush();
+  assert.equal(trigger.textContent, 'Archive');
+  assert.equal(f.findClass('card-watched')[0].textContent, 'Watched');
+  assert.equal(f.ids.get('toast').querySelector('p').textContent, 'Archived and marked as watched in Reader.');
+});
+
 test('Mark as watched binds the exact card, locks duplicate clicks and displays only verified progress', async () => {
   const f = fixture(); await f.flush(); let release;
   f.responder = (message, fallback) => message.type === 'watch-list-mark-watched' ? new Promise(resolve => { release = resolve; }) : fallback(message);

@@ -52,9 +52,11 @@
           return { ok: result.ok, code: result.code, retryAt: result.retryAt, rateLimitSource: result.rateLimitSource };
         }
         if (message.type === 'watch-list-move') {
+          const markWatched = message.markWatched === true;
+          if (markWatched && !C.validId(message.id)) throw error('invalid_request');
           const row = await target(message);
           const result = await reader.handle({ type: 'reader-watch-move', pageUrl: row.videoUrl, id: row.readerId,
-            location: message.location, baseLocation: message.baseLocation }, context);
+            location: message.location, baseLocation: message.baseLocation, markWatched }, context);
           if (result.document && !await store.verify(row.videoUrl, result.document)) throw error('document_changed');
           return { ok: result.ok, code: result.code, retryAt: result.retryAt, rateLimitSource: result.rateLimitSource };
         }
