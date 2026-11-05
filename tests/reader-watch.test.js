@@ -557,3 +557,61 @@ test('durable summary schedule fills actual IndexedDB/Watch bridge cache without
   assert.equal(page.items[0].summary, 'Reader summary'); assert.equal(page.items[0].summaryJob.status, 'ready'); assert.equal(a.requests.length, 2);
   assert.ok(a.notifications.length >= 2); assert.ok(!JSON.stringify(page).includes('Private saved note'));
 });
+
+test('Mark as watched PATCHes only reading_progress=1, verifies 100%, persists it and leaves notes/location intact', async () => {
+  const a = app(); await a.record();
+  const result = await a.call('watch-list-mark-watched', { videoUrl: A, id: 'doc-a' });
+  assert.equal(result.ok, true); assert.equal(a.requests.length, 3);
+  const patch = a.requests[1]; assert.equal(patch.method, 'PATCH');
+  assert.equal(patch.url, 'https://readwise.io/api/v3/update/doc-a/');
+  assert.deepEqual(JSON.parse(patch.body), { reading_progress: 1 });
+  assert.equal(a.documents.get('doc-a').notes, 'Private saved note'); assert.equal(a.documents.get('doc-a').location, 'later');
+  assert.equal((await a.store.get(A)).readingProgress, 1);
+  assert.equal((await a.store.page({ filter: 'all' })).items[0].readingProgress, 1);
+  assert(!JSON.stringify(result).includes('Private saved note'));
+  assert.equal((await a.call('watch-list-mark-watched', { videoUrl: A, id: 'doc-a' })).ok, true);
+  assert.equal(a.requests.filter(r => r.method === 'PATCH').length, 1, 'already complete is a read-only success');
+  a.documents.get('doc-a').reading_progress = 0.25;
+  await a.call('watch-list-refresh', { videoUrl: A, id: 'doc-a' });
+  assert.equal((await a.store.get(A)).readingProgress, 0.25);
+  await a.record(A, 'replacement'); assert.equal((await a.store.get(A)).readingProgress, null);
+});
+
+test('watched source/ID, replacement, sender and credential guards prevent stale writes', async () => {
+  for (const kind of ['source', 'missing', 'replacement', 'sender', 'auth', 'unlinked']) {
+    let a, current = true;
+    a = app({ responder: (url, init, docs) => {
+      if (kind === 'replacement') a.data.readerDocuments = { [A]: { id: 'replacement', at: 1 } };
+      if (kind === 'sender') current = false;
+      if (kind === 'auth') a.data.readerToken = 'changed';
+    } });
+    await a.record(A, kind === 'unlinked' ? null : 'doc-a');
+    if (kind === 'source') a.documents.get('doc-a').source_url = B;
+    if (kind === 'missing') a.documents.delete('doc-a');
+    const reply = await a.call('watch-list-mark-watched', { videoUrl: A, id: 'doc-a' }, { ...scope, isCurrent: () => current });
+    assert.equal(reply.ok, false, kind); assert(!a.requests.some(r => r.method === 'PATCH'), kind);
+  }
+});
+
+test('watched failures and ignored updates never report success or retry', async () => {
+  for (const kind of ['ignored', 'offline', 'readback', 'auth', 'rate']) {
+    let reads = 0;
+    const a = app({ responder: (url, init) => {
+      if (init.method === 'PATCH') {
+        if (kind === 'offline') return Error('offline');
+        if (kind === 'auth') return { status: 401 };
+        if (kind === 'rate') return { status: 429 };
+        return { id: 'doc-a' }; // Reader ignored the update
+      }
+      if (++reads === 2 && kind === 'readback') return Error('offline');
+    } });
+    await a.record();
+    const reply = await a.call('watch-list-mark-watched', { videoUrl: A, id: 'doc-a' });
+    assert.equal(reply.ok, false, kind); assert.notEqual((await a.store.get(A)).readingProgress, 1, kind);
+    assert.equal(a.requests.filter(r => r.method === 'PATCH').length, 1, kind);
+    assert.equal(reply.code, { ignored: 'progress_not_applied', offline: 'progress_uncertain', readback: 'progress_uncertain', auth: 'unauthorized', rate: 'rate_limited' }[kind]);
+  }
+  const limited = app({ stored: { readerPanelBudget: { list: Array(17).fill(100000) } } }); await limited.record();
+  assert.equal((await limited.call('watch-list-mark-watched', { videoUrl: A, id: 'doc-a' })).code, 'rate_limited');
+  assert.equal(limited.requests.length, 0, 'capacity is checked before beginning a write flow');
+});

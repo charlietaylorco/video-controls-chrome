@@ -281,3 +281,39 @@ test('upstream redirects are rejected without following them or claiming a save'
  assert.equal(f.network.length,4);
  assert.ok(f.network.every(call=>!call.url.includes('other.example')));
 });
+
+test('hosted Mark as watched sends only progress and verifies readback without exposing Reader notes', async () => {
+  let progress = 0.25;
+  const f = fixture({ fetch: async (url, init) => {
+    if (init.method === 'PATCH') { progress = JSON.parse(init.body).reading_progress; return json({ id: 'reader1' }); }
+    return json({ results: [readerDoc({ reading_progress: progress })] });
+  } });
+  const message = { type: 'watch-list-mark-watched', videoUrl, id: 'reader1' };
+  const result = await f.call(message); assert.equal(result.body.ok, true);
+  const patch = f.network.find(r => r.init.method === 'PATCH'); assert.deepEqual(JSON.parse(patch.init.body), { reading_progress: 1 });
+  assert.equal(patch.url, 'https://readwise.io/api/v3/update/reader1/');
+  assert.equal(f.network.length, 3); assert.equal(f.calls.find(r => r.name === 'rs_verify').params.p_args.doc.readingProgress, 1);
+  assert(!JSON.stringify(result.body).includes('Reader note'));
+  assert.equal((await f.call(message)).body.ok, true); assert.equal(f.network.filter(r => r.init.method === 'PATCH').length, 1);
+  const forbidden = await f.call(message, { headers: { authorization: `Bearer ${'a'.repeat(43)}` } }); assert.equal(forbidden.body.code, 'forbidden');
+});
+
+test('hosted watched errors, source mismatch and replacement identity never become success', async () => {
+  for (const kind of ['ignored', 'offline', 'readback', 'source', 'replacement', 'auth', 'rate']) {
+    let reads = 0;
+    const f = fixture({ rpc: async name => kind === 'replacement' && name === 'rs_verify' ? null : undefined,
+      fetch: async (url, init) => {
+        if (init.method === 'PATCH') {
+          if (kind === 'offline') throw Error('offline');
+          return json({}, kind === 'auth' ? 401 : kind === 'rate' ? 429 : 200);
+        }
+        if (++reads === 2 && kind === 'readback') throw Error('offline');
+        return json({ results: [readerDoc({ reading_progress: kind === 'replacement' && reads === 2 ? 1 : 0.25, ...(kind === 'source' ? { source_url: 'https://www.youtube.com/watch?v=other' } : {}) })] });
+      }
+    });
+    const result = await f.call({ type: 'watch-list-mark-watched', videoUrl, id: 'reader1' });
+    assert.equal(result.body.ok, false, kind);
+    assert.equal(result.body.code, { ignored: 'progress_not_applied', offline: 'progress_uncertain', readback: 'progress_uncertain', source: 'identity_changed', replacement: 'document_changed', auth: 'reader_unauthorized', rate: 'rate_limited' }[kind]);
+    assert.equal(f.network.filter(r => r.init.method === 'PATCH').length, kind === 'source' ? 0 : 1, kind);
+  }
+});

@@ -235,6 +235,27 @@
       return requireDelete ? { ok: true, id, targetUrl: url, deleted: true, deleteStatus: 204, verifiedAbsent: true }
         : { ok: true, id, alreadyDeleted };
     };
+    const markWatched = async message => {
+      const url = C.canonical(message.pageUrl);
+      if (!url || !C.validId(message.id)) throw error('invalid_request');
+      const checkMapping = async () => {
+        await storageQueue;
+        const mapped = (await read({ [KEY]: {} }))[KEY]?.[url]?.id;
+        if (mapped && mapped !== message.id) throw error('document_changed');
+      };
+      await checkMapping();
+      // Reserve enough local capacity for preflight, PATCH and verified readback.
+      await capacity({ list: 2, update: 1 });
+      const doc = await byId(url, message.id);
+      if (doc.readingProgress === 1) return { ok: true, document: doc };
+      await checkMapping();
+      try { await api(`update/${encodeURIComponent(doc.id)}/`, { method: 'PATCH', body: JSON.stringify({ reading_progress: 1 }) }); }
+      catch (e) { if (e.code === 'save_uncertain') throw error('progress_uncertain'); throw e; }
+      let actual;
+      try { actual = await byId(url, doc.id); }
+      catch (e) { throw error('progress_uncertain', { retryAt: e.retryAt, rateLimitSource: e.rateLimitSource }); }
+      return { ok: actual.readingProgress === 1, code: actual.readingProgress === 1 ? undefined : 'progress_not_applied', document: actual };
+    };
     const moveLocation = async message => {
       const url = C.canonical(message.pageUrl);
       if (!url || !C.validId(message.id) || !Object.hasOwn(C.locations, message.location) || typeof message.baseLocation !== 'string')
@@ -314,6 +335,7 @@
           if (message.type === 'reader-watch-prepare-delete') await capacity({ list: 3, delete: 1 });
           return { ok: true, document: await byId(url, message.id) };
         }
+        if (message.type === 'reader-watch-mark-watched') return markWatched(message);
         if (message.type === 'reader-watch-move') return moveLocation(message);
         if (message.type === 'reader-watch-delete') return deleteDocument(message, { requireDelete: true });
         if (message.type === 'reader-card-get') return getCard(message);

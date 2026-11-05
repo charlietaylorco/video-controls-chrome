@@ -45,6 +45,12 @@
           } finally { if (isCurrent()) pages.delete(key); }
         }
         if (message.type === 'watch-list-refresh') return await refresh(message, context);
+        if (message.type === 'watch-list-mark-watched') {
+          const row = await target(message);
+          const result = await reader.handle({ type: 'reader-watch-mark-watched', pageUrl: row.videoUrl, id: row.readerId }, context);
+          if (result.document && !await store.verify(row.videoUrl, result.document)) throw error('document_changed');
+          return { ok: result.ok, code: result.code, retryAt: result.retryAt, rateLimitSource: result.rateLimitSource };
+        }
         if (message.type === 'watch-list-move') {
           const row = await target(message);
           const result = await reader.handle({ type: 'reader-watch-move', pageUrl: row.videoUrl, id: row.readerId,

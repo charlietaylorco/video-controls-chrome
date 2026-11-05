@@ -17,6 +17,7 @@ const text = (value, limit) => typeof value === 'string' ? value.slice(0, limit)
 const normalize = value => text(value, 64000).normalize('NFKC').toLowerCase().trim().replace(/\s+/g, ' ');
 const timestamp = value => Number.isSafeInteger(value) && value > 0 && value <= 8640000000000000;
 const validCursor = value => value == null || Array.isArray(value) && value.length === 2 && timestamp(value[0]) && canonical(value[1]) === value[1];
+const readingProgress = value => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1 ? value : null;
 const tags = value => Array.isArray(value) ? value.filter(x => typeof x === 'string' && x.trim()).slice(0, 100).map(x => x.slice(0, 200)) : [];
 
 function importedItem(value, now) {
@@ -28,6 +29,7 @@ function importedItem(value, now) {
   return {
     videoUrl: value.videoUrl, readerId: value.readerId || null, savedAt: value.savedAt,
     firstSavedAt: timestamp(value.firstSavedAt) ? Math.min(value.firstSavedAt, value.savedAt) : value.savedAt,
+    readingProgress: readingProgress(value.readingProgress),
     title: text(value.title, 500), author: text(value.author, 300), location: text(value.location, 100), tags: tags(value.tags),
     status: value.status || 'saved', checkedAt, updatedAt, provenance: text(value.provenance, 100) || 'extension',
     summary: typeof value.summary === 'string' ? value.summary.slice(0, 64000) : null,
@@ -44,6 +46,7 @@ function cleanDocument(doc, videoUrl, id) {
   const rawTags = Array.isArray(doc.tags) ? doc.tags : Object.entries(doc.tags || {}).map(([key, tag]) => typeof tag?.name === 'string' ? tag.name : key);
   return {
     id, videoUrl, title: text(doc.title, 500), author: text(doc.author, 300), location: text(doc.location, 100),
+    readingProgress: readingProgress(doc.reading_progress),
     summary: text(doc.summary, 64000), summaryTruncated: typeof doc.summary === 'string' && doc.summary.length > 64000,
     tags: doc.tags && typeof doc.tags === 'object' ? tags(rawTags) : null, readerTitle: typeof doc.title === 'string' ? doc.title : '',
     readerNotes: typeof doc.notes === 'string' ? doc.notes : '', updatedAt: text(doc.updated_at, 100)

@@ -84,8 +84,8 @@ test('destination actions sit beside Open in Reader and isolate nested-icon clic
   const refresh = f.findClass('card-refresh')[0], footer = f.findClass('footer-actions')[0];
   assert.equal(destinations.children[0], refresh); assert.equal(destinations.children[1], reader);
   assert.deepEqual(destinations.children[2].children.map(button => button.dataset.action), ['raindrop', 'downie']);
-  assert.equal(footer.children.length, 1); assert.equal(footer.children[0], f.findClass('card-trash')[0]);
-  assert.equal(footer.children[0].title, 'Delete from Reader'); assert.match(footer.children[0].attrs['aria-label'], /Trash Design practice from Reader/);
+  assert.equal(footer.children.length, 2); assert.equal(footer.children[0], f.findClass('card-watched')[0]); assert.equal(footer.children[1], f.findClass('card-trash')[0]);
+  assert.equal(footer.children[1].title, 'Delete from Reader'); assert.match(footer.children[1].attrs['aria-label'], /Trash Design practice from Reader/);
   assert.equal(f.findClass('card-refresh').length, f.findClass('video').length);
   assert.ok(!media.contains(buttons[0]), 'thumbnail stays unobstructed'); assert.equal(media.children.length, 1);
   assert.equal(reader.href, 'https://read.readwise.io/read/doc-0');
@@ -422,4 +422,30 @@ test('Recent saves renders pending and reloads the local summary on readiness wi
   f.change({ readerSummaryJobs: { newValue: {} } }); await f.run(100);
   assert.equal(f.findClass('summary-text')[0].textContent, 'Arrived automatically');
   assert.equal(f.messages.filter(message => message.type === 'watch-list-refresh').length, 0);
+});
+
+test('Mark as watched binds the exact card, locks duplicate clicks and displays only verified progress', async () => {
+  const f = fixture(); await f.flush(); let release;
+  f.responder = (message, fallback) => message.type === 'watch-list-mark-watched' ? new Promise(resolve => { release = resolve; }) : fallback(message);
+  const button = f.findClass('card-watched')[0]; assert.equal(button.textContent, 'Mark as watched');
+  button.focus(); button.click(); button.click(); await f.flush();
+  const writes = f.messages.filter(m => m.type === 'watch-list-mark-watched'); assert.equal(writes.length, 1);
+  assert.equal(writes[0].id, 'doc-0'); assert.equal(writes[0].videoUrl, f.defaultItems[0].videoUrl);
+  assert.equal(button.disabled, true); assert.equal(f.ids.get('search').disabled, true);
+  f.defaultItems[0].readingProgress = 1; release({ ok: true }); await f.flush();
+  assert.equal(button.textContent, 'Watched'); assert.equal(button.disabled, true);
+  assert.equal(f.ids.get('toast').querySelector('p').textContent, 'Marked as watched in Reader.');
+  assert.equal(f.ids.get('search').disabled, false);
+});
+
+test('failed watched update stays actionable with visible error; unlinked/missing cards cannot send it', async () => {
+  const f = fixture(); await f.flush();
+  f.responder = (message, fallback) => message.type === 'watch-list-mark-watched' ? { ok: false, code: 'progress_uncertain' } : fallback(message);
+  const button = f.findClass('card-watched')[0]; button.click(); await f.flush();
+  assert.equal(button.textContent, 'Mark as watched'); assert.equal(button.disabled, false);
+  assert.match(f.ids.get('error-toast').querySelector('p').textContent, /Refresh to check Reader/);
+  assert.match(f.findClass('row-status')[0].textContent, /could not be confirmed/);
+  for (const item of f.defaultItems) { item.status = 'missing'; item.readerId = null; }
+  f.change({ readerWatchChanged: { newValue: 1 } }); await f.run(100);
+  const count = f.messages.length; f.findClass('card-watched')[0].click(); await f.flush(); assert.equal(f.messages.length, count);
 });
