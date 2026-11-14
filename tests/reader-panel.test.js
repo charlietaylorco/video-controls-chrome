@@ -483,6 +483,39 @@ test('moving while editing changes only location and keeps the selected Note tab
   f.runTimers(3000); assert.equal(f.byClass('footer').children[1].textContent, 'Unsaved draft');
 });
 
+test('Archive and watched sends one combined update and confirms both changes without losing the draft', async () => {
+  const f = fixture({ transport: true }); await f.open(); f.button('Note').click(); f.edit('Keep this draft');
+  f.httpResponder = (url, init, normal) => {
+    if (init.method !== 'PATCH') return normal();
+    assert.equal(new URL(url).pathname, '/api/v3/update/doc-a/');
+    const { location, reading_progress } = JSON.parse(init.body);
+    Object.assign(f.docs.get('doc-a'), { location, reading_progress });
+    return { id: 'doc-a' };
+  };
+  f.byClass('location').fire('keydown', { key: 'ArrowDown' });
+  for (let step = 0; step < 3; step++) f.key('ArrowDown');
+  assert.equal(f.active, f.button('Archive and watched'));
+  f.key('Enter'); await tick();
+  assert.deepEqual(f.requests.filter(request => request.method === 'PATCH').map(request => JSON.parse(request.body)),
+    [{ location: 'archive', reading_progress: 1 }]);
+  assert.equal(f.byClass('location-label').textContent, 'Archive');
+  assert.match(f.byClass('footer').children[1].textContent, /Archived and marked as watched/);
+  assert.equal(f.value, 'Keep this draft');
+  assert.equal(f.docs.get('doc-a').notes, 'Original A');
+});
+
+test('Archive and watched shows a partial failure when Reader only applies the archive', async () => {
+  const f = fixture({ transport: true }); await f.open();
+  f.httpResponder = (_url, init, normal) => {
+    if (init.method !== 'PATCH') return normal();
+    f.docs.get('doc-a').location = 'archive';
+    return { id: 'doc-a' };
+  };
+  f.move('Archive and watched'); await tick();
+  assert.equal(f.byClass('location-label').textContent, 'Archive');
+  assert.match(f.byClass('status').textContent, /did not mark it as watched/);
+});
+
 test('a move readback with a remote note conflict preserves local edits and exposes the conflict', async () => {
   const f = fixture(); await f.open(); f.edit('Local draft');
   f.responder = (message, normal) => message.type === 'reader-panel-move'

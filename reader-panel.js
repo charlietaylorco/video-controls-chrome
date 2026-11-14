@@ -81,6 +81,7 @@
     invalid_delete: 'Deletion was not sent. Reopen the confirmation for this document.',
     invalid_location: 'Choose Later, Shortlist or Archive from the location menu.',
     location_uncertain: 'The location change could not be confirmed. Refresh to check Reader before trying again. Your note draft is kept.',
+    archive_watched_uncertain: 'Archive and watched could not be confirmed. Refresh to check Reader before trying again. Your note draft is kept.',
     location_cache_error: 'Reader was updated, but other panels could not be notified. Refresh to confirm its location.',
     not_found: 'This Reader document was deleted or no longer matches this video. Your draft is kept. Refresh to find it again.',
     invalid_sender: 'This tab is still changing videos. Try Refresh in a moment. Your draft is kept.',
@@ -180,7 +181,7 @@
       .draft-dot{width:5px;height:5px;border-radius:50%;background:#c5912e}.body{pointer-events:auto;margin-top:4px;max-height:min(680px,calc(100dvh - 40px));overflow:auto;overscroll-behavior:contain;border:1px solid var(--reader-border);border-radius:12px 0 12px 12px;background:var(--reader-bg);box-shadow:0 10px 36px var(--reader-shadow)}
       .header{cursor:grab;touch-action:none;user-select:none;display:grid;grid-template-columns:auto auto minmax(0,1fr) auto;gap:6px;align-items:center;padding:6px 6px 0;position:sticky;top:0;background:var(--reader-bg);z-index:1;border-bottom:1px solid var(--reader-border)}.header[data-dragging="true"]{cursor:grabbing}.tabs{grid-column:1;display:flex;gap:8px;white-space:nowrap}.tab{display:flex;align-items:center;gap:4px;height:32px;padding:0 2px;background:transparent;border:0;border-bottom:2px solid transparent;font-size:12px;color:var(--reader-muted)}.tab[aria-selected="true"]{color:var(--reader-text);border-bottom-color:currentColor;font-weight:600}
       .actions{grid-column:4;display:flex;gap:2px;align-items:center}.icon{display:grid;place-items:center;width:28px;height:28px;flex-shrink:0;padding:0;border:0;border-radius:6px;background:transparent;text-decoration:none}.icon[aria-disabled="true"]{opacity:.4;pointer-events:none}
-      .location{grid-column:2;display:flex;align-items:center;gap:2px;width:86px;height:25px;padding:0 5px;background:transparent;border:0;border-radius:6px;font-size:11px;color:var(--reader-muted)}.location-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.location svg{width:12px;height:12px;margin-left:auto}.location[aria-expanded="true"]{background:var(--reader-hover);color:var(--reader-text)}.popup-menu{pointer-events:auto;position:fixed;z-index:5;width:180px;max-height:calc(100dvh - 16px);overflow:auto;padding:4px;background:var(--reader-bg);border:1px solid var(--reader-border);border-radius:9px;box-shadow:0 5px 20px var(--reader-shadow)}.menu-item{display:flex;align-items:center;gap:7px;width:100%;min-height:32px;padding:5px 9px;border:0;border-radius:5px;background:transparent;text-decoration:none;text-align:left;font-size:12px}.menu-item[aria-checked="true"]{font-weight:600}.menu-item[aria-disabled="true"]{opacity:.4;pointer-events:none}.location-menu{width:148px}.location-menu .menu-item{min-height:29px;padding:4px 8px}.location-menu .menu-item::after{content:"";width:12px;margin-left:auto}.location-menu .menu-item[aria-checked="true"]::after{content:"✓"}.menu-separator{height:1px;margin:4px;background:var(--reader-border)}.peek{pointer-events:auto;position:absolute;top:40px;right:0;width:100%;height:min(260px,calc(100dvh - 48px));overflow:auto;overscroll-behavior:contain;padding:12px;border:1px solid var(--reader-border);border-radius:12px 0 12px 12px;background:var(--reader-bg);box-shadow:0 8px 28px var(--reader-shadow)}.peek-label{font-size:11px;color:var(--reader-muted);margin-bottom:7px}.peek-summary{white-space:pre-wrap;overflow-wrap:anywhere;user-select:text}
+      .location{grid-column:2;display:flex;align-items:center;gap:2px;width:86px;height:25px;padding:0 5px;background:transparent;border:0;border-radius:6px;font-size:11px;color:var(--reader-muted)}.location-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.location svg{width:12px;height:12px;margin-left:auto}.location[aria-expanded="true"]{background:var(--reader-hover);color:var(--reader-text)}.popup-menu{pointer-events:auto;position:fixed;z-index:5;width:180px;max-height:calc(100dvh - 16px);overflow:auto;padding:4px;background:var(--reader-bg);border:1px solid var(--reader-border);border-radius:9px;box-shadow:0 5px 20px var(--reader-shadow)}.menu-item{display:flex;align-items:center;gap:7px;width:100%;min-height:32px;padding:5px 9px;border:0;border-radius:5px;background:transparent;text-decoration:none;text-align:left;font-size:12px}.menu-item[aria-checked="true"]{font-weight:600}.menu-item[aria-disabled="true"]{opacity:.4;pointer-events:none}.location-menu{width:172px}.location-menu .menu-item{min-height:29px;padding:4px 8px}.location-menu .menu-item::after{content:"";width:12px;margin-left:auto}.location-menu .menu-item[aria-checked="true"]::after{content:"✓"}.menu-separator{height:1px;margin:4px;background:var(--reader-border)}.peek{pointer-events:auto;position:absolute;top:40px;right:0;width:100%;height:min(260px,calc(100dvh - 48px));overflow:auto;overscroll-behavior:contain;padding:12px;border:1px solid var(--reader-border);border-radius:12px 0 12px 12px;background:var(--reader-bg);box-shadow:0 8px 28px var(--reader-shadow)}.peek-label{font-size:11px;color:var(--reader-muted);margin-bottom:7px}.peek-summary{white-space:pre-wrap;overflow-wrap:anywhere;user-select:text}
       .tag-toggle{grid-column:3;display:flex;align-items:center;gap:4px;justify-self:start;min-width:0;max-width:100%;height:25px;padding:0 6px;border:0;border-radius:6px;font-size:11px;background:var(--reader-chip)}.tag-toggle svg{width:12px;height:12px}.tag-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tag-count{flex-shrink:0;font-size:10px;color:var(--reader-muted)}.tag-total{display:none}.tags{display:flex;gap:5px;flex-wrap:wrap;max-height:130px;overflow:auto;margin:0 0 10px}.tag{font-size:11px;padding:2px 8px;border-radius:6px;background:var(--reader-chip);overflow-wrap:anywhere;max-width:100%}
       button:hover,a:hover{background:var(--reader-hover)}.toggle:hover,.toggle:active{background:var(--reader-hover);color:var(--reader-text)}button:disabled{opacity:.5;cursor:default}button:focus-visible,a:focus-visible,textarea:focus-visible{outline:2px solid var(--reader-focus);outline-offset:-2px}
       .content{padding:12px;position:relative}.content[data-empty="true"]{min-height:160px}.content[data-empty="true"] .status{max-height:100px}.content[data-empty="true"] > .small{position:absolute;bottom:12px;left:12px}.summary{white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;line-height:1.75}.editor{height:160px;min-height:160px;max-height:320px;resize:vertical;overflow:hidden;border:1px solid var(--reader-border);border-radius:9px}.editor iframe{display:block;width:100%;height:100%;border:0}.note-view{position:relative}
@@ -218,6 +219,8 @@
       const item = element('button', label, locationMenu, { class: 'menu-item', type: 'button', role: 'menuitemradio', 'data-location': value, tabindex: '-1' });
       item.addEventListener('click', () => selectLocation(value)); return item;
     });
+    const archiveWatched = element('button', 'Archive and watched', locationMenu, { class: 'menu-item', type: 'button', role: 'menuitem', tabindex: '-1' });
+    archiveWatched.addEventListener('click', () => selectLocation('archive-watched')); locationItems.push(archiveWatched);
     element('div', '', locationMenu, { class: 'menu-separator', role: 'separator' });
     const trash = element('button', 'Trash', locationMenu, { class: 'menu-item destructive', type: 'button', role: 'menuitem', 'aria-label': 'Delete from Reader', tabindex: '-1' }); locationItems.push(trash);
     const moreMenu = element('div', '', root, { class: 'popup-menu', role: 'menu', id: 'reader-more-menu', 'aria-label': 'More Reader actions' }); moreMenu.hidden = true;
@@ -474,21 +477,26 @@
     const url = activeUrl, s = current();
     if (!s?.doc || s.busy || s.doc.id !== selected.id || selected.url !== url) return;
     if (value === 'trash') { requestDeletion(skipConfirmation); return; }
-    if (!Object.hasOwn(C.locations, value) || s.locationUncertain) return;
+    const markWatched = value === 'archive-watched';
+    const destination = markWatched ? 'archive' : value;
+    if (!Object.hasOwn(C.locations, destination) || s.locationUncertain) return;
     peek?.invalidate(url);
     clearFeedback(s); s.action = 'location'; s.statusKind = 'info'; s.status = 'Checking Reader before moving…';
     const id = s.doc.id, request = ++s.request;
     s.busy = true; render();
-    const response = await send({ type: 'reader-panel-move', pageUrl: url, id, location: value, baseLocation: selected.baseLocation });
+    const response = await send({ type: 'reader-panel-move', pageUrl: url, id, location: destination, baseLocation: selected.baseLocation,
+      ...(markWatched ? { markWatched: true } : {}) });
     sameVideo(); if (s.request !== request) return;
     s.busy = false;
     if (response.document?.id === id && response.document.videoUrl === url && s.doc?.id === id) {
       C.receive(s, response.document); s.fetchedAt = Date.now(); s.locationUncertain = false;
     }
-    if (response.ok && response.document?.id === id && response.document.videoUrl === url && response.document.location === value && s.doc?.id === id) {
+    if (response.ok && response.document?.id === id && response.document.videoUrl === url && response.document.location === destination &&
+      (!markWatched || response.document.readingProgress === 1) && s.doc?.id === id) {
       if (s.conflict) { s.status = 'Location updated. Reader also has a different note; review the conflict.'; s.statusKind = 'warning'; }
       else {
-        s.moveFeedback = `Now in ${C.locationLabel(s.doc.location)}`; s.status = s.moveFeedback; s.statusKind = 'info';
+        s.moveFeedback = markWatched ? 'Archived and marked as watched.' : `Now in ${C.locationLabel(s.doc.location)}`;
+        s.status = s.moveFeedback; s.statusKind = 'info';
         const feedback = s.moveFeedback;
         s.moveTimer = setTimeout(() => {
           if (s.request !== request || s.doc?.id !== id || s.moveFeedback !== feedback) return;
@@ -500,9 +508,12 @@
       s.status = 'Reader’s location changed. Review its current location before choosing again.'; s.statusKind = 'warning';
     } else if (response.code === 'location_not_applied') {
       s.status = `Reader kept ${C.locationLabel(s.doc?.location)}. That destination may not be enabled in your Library.`; s.statusKind = 'error';
+    } else if (response.code === 'progress_not_applied') {
+      s.status = 'Reader archived the video but did not mark it as watched.'; s.statusKind = 'error';
     } else {
-      s.locationUncertain = response.ok || ['location_uncertain', 'location_cache_error'].includes(response.code);
-      s.status = messageFor(response.ok ? { code: 'location_uncertain' } : response); s.statusKind = 'error';
+      const uncertain = markWatched ? 'archive_watched_uncertain' : 'location_uncertain';
+      s.locationUncertain = response.ok || [uncertain, 'location_cache_error'].includes(response.code);
+      s.status = messageFor(response.ok ? { code: uncertain } : response); s.statusKind = 'error';
     }
     if (url === activeUrl) { render(); if (s.summaryRefresh && open) { s.summaryRefresh = false; void load(); } }
   };
