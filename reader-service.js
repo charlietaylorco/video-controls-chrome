@@ -334,7 +334,6 @@
         if (message.type === 'reader-panel-get') return get(message);
         if (message.type === 'reader-panel-save-note') return saveNote(message);
         if (message.type === 'reader-panel-delete') return deleteDocument(message);
-        if (message.type === 'reader-panel-move') return moveLocation(message);
         if (['reader-watch-get', 'reader-watch-prepare-delete'].includes(message.type)) {
           const url = C.canonical(message.pageUrl);
           if (!url || !C.validId(message.id)) throw error('invalid_request');
@@ -342,7 +341,7 @@
           return { ok: true, document: await byId(url, message.id) };
         }
         if (message.type === 'reader-watch-mark-watched') return markWatched(message);
-        if (message.type === 'reader-watch-move') return moveLocation(message, message.markWatched === true);
+        if (['reader-panel-move', 'reader-watch-move'].includes(message.type)) return moveLocation(message, message.markWatched === true);
         if (message.type === 'reader-watch-delete') return deleteDocument(message, { requireDelete: true });
         if (message.type === 'reader-card-get') return getCard(message);
         if (message.type === 'reader-card-delete') return deleteCard(message);
